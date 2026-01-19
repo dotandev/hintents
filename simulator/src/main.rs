@@ -111,8 +111,7 @@ fn main() {
         soroban_env_host::xdr::TransactionEnvelope::TxV0(tx_v0) => &tx_v0.tx.operations,
         soroban_env_host::xdr::TransactionEnvelope::TxFeeBump(bump) => {
              match &bump.tx.inner_tx {
-                 soroban_env_host::xdr::TransactionEnvelope::Tx(tx_v1) => &tx_v1.tx.operations,
-                 soroban_env_host::xdr::TransactionEnvelope::TxV0(tx_v0) => &tx_v0.tx.operations,
+                 soroban_env_host::xdr::FeeBumpTransactionInnerTx::Tx(tx_v1) => &tx_v1.tx.operations,
             }
         }
     };
@@ -155,7 +154,7 @@ fn main() {
     // Actually `host.get_events()` returns `Result<Vec<HostEvent>, ...>`.
     
     let events = match host.get_events() {
-        Ok(evs) => evs.iter().map(|e| format!("{:?}", e)).collect::<Vec<String>>(),
+        Ok(evs) => evs.0.iter().map(|e| format!("{:?}", e)).collect::<Vec<String>>(),
         Err(e) => vec![format!("Failed to retrieve events: {:?}", e)],
     };
 
