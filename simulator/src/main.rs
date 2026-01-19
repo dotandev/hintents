@@ -111,8 +111,8 @@ fn main() {
         soroban_env_host::xdr::TransactionEnvelope::TxV0(tx_v0) => &tx_v0.tx.operations,
         soroban_env_host::xdr::TransactionEnvelope::TxFeeBump(bump) => {
              match &bump.tx.inner_tx {
-                 soroban_env_host::xdr::TxEnvelope::Tx(tx_v1) => &tx_v1.tx.operations,
-                 soroban_env_host::xdr::TxEnvelope::TxV0(tx_v0) => &tx_v0.tx.operations,
+                 soroban_env_host::xdr::InnerTransaction::Tx(tx_v1) => &tx_v1.tx.operations,
+                 soroban_env_host::xdr::InnerTransaction::TxV0(tx_v0) => &tx_v0.tx.operations,
             }
         }
     };
