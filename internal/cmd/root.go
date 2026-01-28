@@ -4,22 +4,22 @@
 package cmd
 
 import (
+	"github.com/dotandev/hintents/internal/localization"
 	"github.com/spf13/cobra"
 )
 
-// rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "erst",
 	Short: "Erst - Soroban Error Decoder & Debugger",
 	Long: `Erst is a specialized developer tool for the Stellar network,
 designed to solve the "black box" debugging experience on Soroban.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return localization.LoadTranslations()
+	},
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
 func Execute() error {
 	return rootCmd.Execute()
 }
 
-func init() {
-	// Root command initialization
-}
+func init() {}
