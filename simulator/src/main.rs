@@ -1,3 +1,6 @@
+
+mod storage;
+
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use soroban_env_host::xdr::ReadXdr;
@@ -206,3 +209,19 @@ fn send_error(msg: String) {
     };
     println!("{}", serde_json::to_string(&res).unwrap());
 }
+let decoded_before = storage::decode_input_entries(&request.ledger_entries);
+
+let before_snapshot = Some(capture_storage_snapshot(&decoded_before));
+
+let after_snapshot =
+    storage::snapshot_result_storage(&decoded_before, &_result_meta);
+
+
+report := analytics.CompareStorage(beforeSnapshot, afterSnapshot)
+
+fee := analytics.CalculateStorageFee(
+	report.DeltaBytes,
+	storageFeeModel,
+)
+
+analytics.PrintStorageReport(report, fee)
