@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 package rpc
 
 import (
@@ -273,10 +276,10 @@ func TestMockServer_MultipleEndpoints(t *testing.T) {
 	}
 
 	routes := map[string]MockRoute{
-		"/transactions/abc123":    SuccessRoute(txResp),
-		"/accounts/gtest":         SuccessRoute(accountResp),
-		"/transactions/limited":   RateLimitRoute(),
-		"/transactions/error":     ServerErrorRoute(),
+		"/transactions/abc123":  SuccessRoute(txResp),
+		"/accounts/gtest":       SuccessRoute(accountResp),
+		"/transactions/limited": RateLimitRoute(),
+		"/transactions/error":   ServerErrorRoute(),
 	}
 
 	server := NewMockServer(routes)

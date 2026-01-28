@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 package rpc
 
 import (
@@ -141,13 +144,13 @@ type MockTransactionResponse struct {
 
 // AccountResponse represents a mock account response from Horizon
 type MockAccountResponse struct {
-	ID          string `json:"id"`
-	AccountID   string `json:"account_id"`
-	Balance     string `json:"balance"`
-	Sequence    string `json:"sequence"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
-	SubentryCount int64 `json:"subentry_count"`
+	ID            string `json:"id"`
+	AccountID     string `json:"account_id"`
+	Balance       string `json:"balance"`
+	Sequence      string `json:"sequence"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+	SubentryCount int64  `json:"subentry_count"`
 }
 
 // Helper function to create a standard error route
