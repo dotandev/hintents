@@ -6,7 +6,9 @@ import (
 	"net/http"
 
 	"github.com/dotandev/hintents/internal/logger"
+	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/stellar/go/clients/horizonclient"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Network types for Stellar
@@ -83,13 +85,28 @@ type TransactionResponse struct {
 
 // GetTransaction fetches the transaction details and full XDR data
 func (c *Client) GetTransaction(ctx context.Context, hash string) (*TransactionResponse, error) {
+	tracer := telemetry.GetTracer()
+	_, span := tracer.Start(ctx, "rpc_get_transaction")
+	span.SetAttributes(
+		attribute.String("transaction.hash", hash),
+		attribute.String("network", string(c.Network)),
+	)
+	defer span.End()
+
 	logger.Logger.Debug("Fetching transaction details", "hash", hash)
 
 	tx, err := c.Horizon.TransactionDetail(hash)
 	if err != nil {
+		span.RecordError(err)
 		logger.Logger.Error("Failed to fetch transaction", "hash", hash, "error", err)
 		return nil, fmt.Errorf("failed to fetch transaction: %w", err)
 	}
+
+	span.SetAttributes(
+		attribute.Int("envelope.size_bytes", len(tx.EnvelopeXdr)),
+		attribute.Int("result.size_bytes", len(tx.ResultXdr)),
+		attribute.Int("result_meta.size_bytes", len(tx.ResultMetaXdr)),
+	)
 
 	logger.Logger.Info("Transaction fetched successfully", "hash", hash, "envelope_size", len(tx.EnvelopeXdr))
 
