@@ -1,15 +1,24 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os"
 
 	"github.com/dotandev/hintents/internal/rpc"
+	"github.com/dotandev/hintents/internal/simulator"
+	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 var (
-	networkFlag string
-	rpcURLFlag  string
+	networkFlag     string
+	rpcURLFlag      string
+	tracingEnabled  bool
+	otlpExporterURL string
+	generateTrace   bool
+	traceOutputFile string
 )
 
 var debugCmd = &cobra.Command{
@@ -31,7 +40,32 @@ Example:
 		}
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		txHash := args[0]
+
+		// Initialize OpenTelemetry if enabled
+		var cleanup func()
+		if tracingEnabled {
+			var err error
+			cleanup, err = telemetry.Init(ctx, telemetry.Config{
+				Enabled:     true,
+				ExporterURL: otlpExporterURL,
+				ServiceName: "erst",
+			})
+			if err != nil {
+				return fmt.Errorf("failed to initialize telemetry: %w", err)
+			}
+			defer cleanup()
+		}
+
+		// Start root span for transaction debugging
+		tracer := telemetry.GetTracer()
+		ctx, span := tracer.Start(ctx, "debug_transaction")
+		span.SetAttributes(
+			attribute.String("transaction.hash", txHash),
+			attribute.String("network", networkFlag),
+		)
+		defer span.End()
 
 		var client *rpc.Client
 		if rpcURLFlag != "" {
@@ -46,13 +80,37 @@ Example:
 			fmt.Printf("RPC URL: %s\n", rpcURLFlag)
 		}
 
-		// Fetch transaction details
-		resp, err := client.GetTransaction(cmd.Context(), txHash)
+		// Fetch transaction details with tracing
+		ctx, fetchSpan := tracer.Start(ctx, "fetch_transaction")
+		resp, err := client.GetTransaction(ctx, txHash)
+		fetchSpan.End()
+
 		if err != nil {
+			span.RecordError(err)
 			return fmt.Errorf("failed to fetch transaction: %w", err)
 		}
 
+		span.SetAttributes(
+			attribute.Int("envelope.size_bytes", len(resp.EnvelopeXdr)),
+		)
+
 		fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(resp.EnvelopeXdr))
+
+		// Generate trace if requested
+		if generateTrace {
+			fmt.Println("Generating execution trace...")
+			err := generateExecutionTrace(ctx, txHash, resp)
+			if err != nil {
+				fmt.Printf("Warning: Failed to generate trace: %v\n", err)
+			} else {
+				filename := traceOutputFile
+				if filename == "" {
+					filename = fmt.Sprintf("trace_%s.json", txHash[:8])
+				}
+				fmt.Printf("Execution trace saved to: %s\n", filename)
+			}
+		}
+
 		return nil
 	},
 }
@@ -60,6 +118,49 @@ Example:
 func init() {
 	debugCmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
 	debugCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
+	debugCmd.Flags().BoolVar(&tracingEnabled, "tracing", false, "Enable OpenTelemetry tracing")
+	debugCmd.Flags().StringVar(&otlpExporterURL, "otlp-url", "http://localhost:4318", "OTLP exporter URL")
+	debugCmd.Flags().BoolVar(&generateTrace, "generate-trace", false, "Generate execution trace file")
+	debugCmd.Flags().StringVar(&traceOutputFile, "trace-output", "", "Output file for execution trace (default: trace_<txhash>.json)")
 
 	rootCmd.AddCommand(debugCmd)
+}
+
+// generateExecutionTrace creates a mock execution trace for demonstration
+func generateExecutionTrace(ctx context.Context, txHash string, resp *rpc.TransactionResponse) error {
+	// Create a mock simulation request
+	simReq := &simulator.SimulationRequest{
+		EnvelopeXdr:   resp.EnvelopeXdr,
+		ResultMetaXdr: resp.ResultMetaXdr,
+	}
+
+	// Create simulator runner
+	runner, err := simulator.NewRunner()
+	if err != nil {
+		return fmt.Errorf("failed to create simulator: %w", err)
+	}
+
+	// Run simulation with trace generation
+	_, executionTrace, err := runner.RunWithTrace(ctx, simReq, txHash)
+	if err != nil {
+		return fmt.Errorf("simulation failed: %w", err)
+	}
+
+	// Save trace to file
+	filename := traceOutputFile
+	if filename == "" {
+		filename = fmt.Sprintf("trace_%s.json", txHash[:8])
+	}
+
+	traceData, err := executionTrace.ToJSON()
+	if err != nil {
+		return fmt.Errorf("failed to serialize trace: %w", err)
+	}
+
+	err = os.WriteFile(filename, traceData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write trace file: %w", err)
+	}
+
+	return nil
 }

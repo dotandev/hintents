@@ -1,0 +1,194 @@
+{
+  "transaction_hash": "sample-tx-hash-12345",
+  "start_time": "2026-01-28T18:10:48.227376775Z",
+  "end_time": "0001-01-01T00:00:00Z",
+  "states": [
+    {
+      "step": 0,
+      "timestamp": "2026-01-28T18:10:48.227380258Z",
+      "operation": "contract_init",
+      "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2",
+      "function": "initialize",
+      "arguments": [
+        "admin",
+        1000000
+      ],
+      "host_state": {
+        "admin": "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "balance": 0
+      }
+    },
+    {
+      "step": 1,
+      "timestamp": "2026-01-28T18:10:48.227395287Z",
+      "operation": "contract_call",
+      "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2",
+      "function": "mint",
+      "arguments": [
+        "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        500000
+      ],
+      "return_value": true,
+      "host_state": {
+        "balance": 500000,
+        "total_supply": 500000
+      },
+      "memory": {
+        "recipient": "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "temp_amount": 500000
+      }
+    },
+    {
+      "step": 2,
+      "timestamp": "2026-01-28T18:10:48.227395859Z",
+      "operation": "contract_call",
+      "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2",
+      "function": "transfer",
+      "arguments": [
+        "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML",
+        100000
+      ],
+      "host_state": {
+        "balance": 400000,
+        "total_supply": 500000
+      },
+      "memory": {
+        "amount": 100000,
+        "from_balance": 500000,
+        "to_balance": 100000
+      }
+    },
+    {
+      "step": 3,
+      "timestamp": "2026-01-28T18:10:48.227396307Z",
+      "operation": "balance_check",
+      "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2",
+      "function": "get_balance",
+      "arguments": [
+        "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37"
+      ],
+      "return_value": 400000,
+      "memory": {
+        "query_account": "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "result": 400000
+      }
+    },
+    {
+      "step": 4,
+      "timestamp": "2026-01-28T18:10:48.2273993Z",
+      "operation": "contract_call",
+      "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2",
+      "function": "transfer",
+      "arguments": [
+        "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "GC3C4AKRBQLHOJ45U4XG35ESVWRDECWO5XLDGYADO6DPR3L7KIDVUMML",
+        500000
+      ],
+      "error": "insufficient balance: attempted 500000, available 400000",
+      "host_state": {
+        "balance": 400000,
+        "error_code": "INSUFFICIENT_BALANCE"
+      },
+      "memory": {
+        "attempted_amount": 500000,
+        "available_balance": 400000,
+        "error_triggered": true
+      }
+    },
+    {
+      "step": 5,
+      "timestamp": "2026-01-28T18:10:48.227399653Z",
+      "operation": "error_handling",
+      "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2",
+      "function": "handle_error",
+      "arguments": [
+        "INSUFFICIENT_BALANCE"
+      ],
+      "return_value": "error_logged",
+      "host_state": {
+        "error_count": 1,
+        "last_error": "INSUFFICIENT_BALANCE"
+      }
+    },
+    {
+      "step": 6,
+      "timestamp": "2026-01-28T18:10:48.227399741Z",
+      "operation": "transaction_complete",
+      "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2",
+      "return_value": "failed",
+      "host_state": {
+        "final_balance": 400000,
+        "gas_used": 15000,
+        "status": "failed"
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "step": 0,
+      "timestamp": "2026-01-28T18:10:48.227380258Z",
+      "host_state": {
+        "admin": "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "balance": 0
+      },
+      "memory": {},
+      "call_stack": [
+        "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2::initialize"
+      ]
+    },
+    {
+      "step": 3,
+      "timestamp": "2026-01-28T18:10:48.227396307Z",
+      "host_state": {
+        "admin": "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "balance": 400000,
+        "total_supply": 500000
+      },
+      "memory": {
+        "amount": 100000,
+        "from_balance": 500000,
+        "query_account": "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "recipient": "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "result": 400000,
+        "temp_amount": 500000,
+        "to_balance": 100000
+      },
+      "call_stack": [
+        "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2::initialize"
+      ]
+    },
+    {
+      "step": 6,
+      "timestamp": "2026-01-28T18:10:48.227399741Z",
+      "host_state": {
+        "admin": "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "balance": 400000,
+        "error_code": "INSUFFICIENT_BALANCE",
+        "error_count": 1,
+        "final_balance": 400000,
+        "gas_used": 15000,
+        "last_error": "INSUFFICIENT_BALANCE",
+        "status": "failed",
+        "total_supply": 500000
+      },
+      "memory": {
+        "amount": 100000,
+        "attempted_amount": 500000,
+        "available_balance": 400000,
+        "error_triggered": true,
+        "from_balance": 500000,
+        "query_account": "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "recipient": "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+        "result": 400000,
+        "temp_amount": 500000,
+        "to_balance": 100000
+      },
+      "call_stack": [
+        "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2::initialize"
+      ]
+    }
+  ],
+  "current_step": 0,
+  "snapshot_interval": 3
+}
