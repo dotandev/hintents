@@ -2,6 +2,7 @@ package simulator
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 
 	"github.com/dotandev/hintents/internal/logger"
+	"github.com/dotandev/hintents/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Runner handles the execution of the Rust simulator binary
@@ -48,16 +51,25 @@ func NewRunner() (*Runner, error) {
 }
 
 // Run executes the simulation with the given request
-func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
+func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
+	tracer := telemetry.GetTracer()
+	ctx, span := tracer.Start(ctx, "simulate_transaction")
+	span.SetAttributes(attribute.String("simulator.binary_path", r.BinaryPath))
+	defer span.End()
+
 	logger.Logger.Debug("Starting simulation", "binary", r.BinaryPath)
 
 	// Serialize Request
+	ctx, marshalSpan := tracer.Start(ctx, "marshal_request")
 	inputBytes, err := json.Marshal(req)
+	marshalSpan.End()
 	if err != nil {
+		span.RecordError(err)
 		logger.Logger.Error("Failed to marshal simulation request", "error", err)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	span.SetAttributes(attribute.Int("request.size_bytes", len(inputBytes)))
 	logger.Logger.Debug("Simulation request marshaled", "input_size", len(inputBytes))
 
 	// Prepare Command
@@ -68,25 +80,41 @@ func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
 	cmd.Stderr = &stderr
 
 	// Execute
+	ctx, execSpan := tracer.Start(ctx, "execute_simulator")
 	logger.Logger.Info("Executing simulator binary")
 	if err := cmd.Run(); err != nil {
+		execSpan.RecordError(err)
+		execSpan.End()
+		span.RecordError(err)
 		logger.Logger.Error("Simulator execution failed", "error", err, "stderr", stderr.String())
 		return nil, fmt.Errorf("simulator execution failed: %w, stderr: %s", err, stderr.String())
 	}
+	execSpan.End()
 
+	span.SetAttributes(
+		attribute.Int("response.stdout_size", stdout.Len()),
+		attribute.Int("response.stderr_size", stderr.Len()),
+	)
 	logger.Logger.Debug("Simulator execution completed", "stdout_size", stdout.Len(), "stderr_size", stderr.Len())
 
 	// Deserialize Response
+	_, unmarshalSpan := tracer.Start(ctx, "unmarshal_response")
 	var resp SimulationResponse
 	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
+		unmarshalSpan.RecordError(err)
+		unmarshalSpan.End()
+		span.RecordError(err)
 		logger.Logger.Error("Failed to unmarshal simulation response", "error", err, "output", stdout.String())
 		return nil, fmt.Errorf("failed to unmarshal response: %w, output: %s", err, stdout.String())
 	}
+	unmarshalSpan.End()
 
+	span.SetAttributes(attribute.String("simulation.status", resp.Status))
 	logger.Logger.Info("Simulation response received", "status", resp.Status)
 
 	// Check logic error from simulator
 	if resp.Status == "error" {
+		span.SetAttributes(attribute.String("simulation.error", resp.Error))
 		logger.Logger.Error("Simulation logic error", "error", resp.Error)
 		return nil, fmt.Errorf("simulation error: %s", resp.Error)
 	}
