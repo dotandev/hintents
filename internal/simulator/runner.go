@@ -11,10 +11,18 @@ import (
 	"github.com/dotandev/hintents/internal/logger"
 )
 
+// RunnerInterface defines the contract for simulator execution
+type RunnerInterface interface {
+	Run(req *SimulationRequest) (*SimulationResponse, error)
+}
+
 // Runner handles the execution of the Rust simulator binary
 type Runner struct {
 	BinaryPath string
 }
+
+// Compile-time check to ensure Runner implements RunnerInterface
+var _ RunnerInterface = (*Runner)(nil)
 
 // NewRunner creates a new simulator runner.
 // It checks for the binary in common locations.
