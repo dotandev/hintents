@@ -8,8 +8,10 @@ type SimulationRequest struct {
 	ResultMetaXdr string `json:"result_meta_xdr"`
 	// Snapshot of Ledger Entries (Key XDR -> Entry XDR) necessary for replay
 	LedgerEntries map[string]string `json:"ledger_entries,omitempty"`
-	// XDR encoded LedgerHeader (optional, for context)
-	// LedgerHeaderXdr string `json:"ledger_header_xdr,omitempty"`
+	// Override timestamp
+	Timestamp int64 `json:"timestamp,omitempty"`
+	// Override ledger sequence
+	LedgerSequence uint32 `json:"ledger_sequence,omitempty"`
 }
 
 // SimulationResponse is the JSON object returned by the Rust binary via Stdout

@@ -10,6 +10,8 @@ struct SimulationRequest {
     result_meta_xdr: String,
     // Key XDR -> Entry XDR
     ledger_entries: Option<HashMap<String, String>>,
+    timestamp: Option<i64>,
+    ledger_sequence: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,6 +87,19 @@ fn main() {
     let host = soroban_env_host::Host::default();
     host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug)
         .unwrap();
+
+    // Override Ledger Info if provided
+    if request.timestamp.is_some() || request.ledger_sequence.is_some() {
+        host.with_mut_ledger_info(|ledger_info| {
+            if let Some(ts) = request.timestamp {
+                ledger_info.timestamp = ts as u64;
+            }
+            if let Some(seq) = request.ledger_sequence {
+                ledger_info.sequence_number = seq;
+            }
+        })
+        .unwrap();
+    }
 
     let mut loaded_entries_count = 0;
 
@@ -205,4 +220,17 @@ fn send_error(msg: String) {
         logs: vec![],
     };
     println!("{}", serde_json::to_string(&res).unwrap());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_time_travel_deserialization() {
+        let json = r#"{"envelope_xdr": "AAAA", "result_meta_xdr": "BBBB", "timestamp": 1738077842, "ledger_sequence": 1234}"#;
+        let req: SimulationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.timestamp, Some(1738077842));
+        assert_eq!(req.ledger_sequence, Some(1234));
+    }
 }

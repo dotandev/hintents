@@ -4,6 +4,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Global flag variables
+var (
+	TimestampFlag int64
+	WindowFlag    int64
+)
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "erst",
@@ -19,4 +25,17 @@ func Execute() error {
 
 func init() {
 	// Root command initialization
+	rootCmd.PersistentFlags().Int64Var(
+		&TimestampFlag,
+		"timestamp",
+		0,
+		"Override the ledger header timestamp (Unix epoch)",
+	)
+
+	rootCmd.PersistentFlags().Int64Var(
+		&WindowFlag,
+		"window",
+		0,
+		"Run range simulation across a time window (seconds)",
+	)
 }
