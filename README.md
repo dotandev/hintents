@@ -28,6 +28,7 @@ Fetches a transaction envelope from the Stellar Public network and prints its XD
 
 - **[Architecture Overview](docs/architecture.md)**: Deep dive into how the Go CLI communicates with the Rust simulator, including data flow, IPC mechanisms, and design decisions.
 - **[Project Proposal](docs/proposal.md)**: Detailed project proposal and roadmap.
+- **[Environment Variables](docs/environment-variables.md)**: Complete reference for all configuration options and environment variables.
 
 ## Technical Analysis
 
