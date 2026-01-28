@@ -13,11 +13,26 @@ concurrency:
 
 jobs:
   # ============================================
+  # License Header Check
+  # ============================================
+  license-headers:
+    name: License Headers Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check license headers in Go and Rust files
+        run: ./scripts/check-license-headers.sh
+
+  # ============================================
   # Go CLI - Lint, Build & Test
   # ============================================
   go:
     name: Go CI
     runs-on: ubuntu-latest
+    needs: license-headers
 
     steps:
       - name: Checkout code
@@ -63,6 +78,7 @@ jobs:
   rust:
     name: Rust CI
     runs-on: ubuntu-latest
+    needs: license-headers
     defaults:
       run:
         working-directory: simulator

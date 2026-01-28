@@ -1,0 +1,100 @@
+=== RUN   TestLedgerKeyHashing_Deterministic
+=== RUN   TestLedgerKeyHashing_Deterministic/Account_key_produces_consistent_hash
+=== RUN   TestLedgerKeyHashing_Deterministic/Trustline_key_produces_consistent_hash
+=== RUN   TestLedgerKeyHashing_Deterministic/Offer_key_produces_consistent_hash
+=== RUN   TestLedgerKeyHashing_Deterministic/Data_key_produces_consistent_hash
+=== RUN   TestLedgerKeyHashing_Deterministic/ClaimableBalance_key_produces_consistent_hash
+=== RUN   TestLedgerKeyHashing_Deterministic/LiquidityPool_key_produces_consistent_hash
+=== RUN   TestLedgerKeyHashing_Deterministic/ContractData_key_produces_consistent_hash
+=== RUN   TestLedgerKeyHashing_Deterministic/ContractCode_key_produces_consistent_hash
+=== RUN   TestLedgerKeyHashing_Deterministic/ConfigSetting_key_produces_consistent_hash
+=== RUN   TestLedgerKeyHashing_Deterministic/TTL_key_produces_consistent_hash
+--- PASS: TestLedgerKeyHashing_Deterministic (0.00s)
+    --- PASS: TestLedgerKeyHashing_Deterministic/Account_key_produces_consistent_hash (0.00s)
+    --- PASS: TestLedgerKeyHashing_Deterministic/Trustline_key_produces_consistent_hash (0.00s)
+    --- PASS: TestLedgerKeyHashing_Deterministic/Offer_key_produces_consistent_hash (0.00s)
+    --- PASS: TestLedgerKeyHashing_Deterministic/Data_key_produces_consistent_hash (0.00s)
+    --- PASS: TestLedgerKeyHashing_Deterministic/ClaimableBalance_key_produces_consistent_hash (0.00s)
+    --- PASS: TestLedgerKeyHashing_Deterministic/LiquidityPool_key_produces_consistent_hash (0.00s)
+    --- PASS: TestLedgerKeyHashing_Deterministic/ContractData_key_produces_consistent_hash (0.00s)
+    --- PASS: TestLedgerKeyHashing_Deterministic/ContractCode_key_produces_consistent_hash (0.00s)
+    --- PASS: TestLedgerKeyHashing_Deterministic/ConfigSetting_key_produces_consistent_hash (0.00s)
+    --- PASS: TestLedgerKeyHashing_Deterministic/TTL_key_produces_consistent_hash (0.00s)
+=== RUN   TestLedgerKeyHashing_HashFormat
+--- PASS: TestLedgerKeyHashing_HashFormat (0.00s)
+=== RUN   TestLedgerKeyHashing_CollisionResistance
+=== RUN   TestLedgerKeyHashing_CollisionResistance/Different_accounts_produce_different_hashes
+=== RUN   TestLedgerKeyHashing_CollisionResistance/Different_trustline_assets_produce_different_hashes
+=== RUN   TestLedgerKeyHashing_CollisionResistance/Sequential_offer_IDs_produce_different_hashes
+=== RUN   TestLedgerKeyHashing_CollisionResistance/Different_data_names_produce_different_hashes
+=== RUN   TestLedgerKeyHashing_CollisionResistance/Different_contract_data_keys_produce_different_hashes
+=== RUN   TestLedgerKeyHashing_CollisionResistance/Different_key_types_produce_different_hashes
+=== RUN   TestLedgerKeyHashing_CollisionResistance/Persistent_vs_Temporary_contract_data_produce_different_hashes
+--- PASS: TestLedgerKeyHashing_CollisionResistance (0.00s)
+    --- PASS: TestLedgerKeyHashing_CollisionResistance/Different_accounts_produce_different_hashes (0.00s)
+    --- PASS: TestLedgerKeyHashing_CollisionResistance/Different_trustline_assets_produce_different_hashes (0.00s)
+    --- PASS: TestLedgerKeyHashing_CollisionResistance/Sequential_offer_IDs_produce_different_hashes (0.00s)
+    --- PASS: TestLedgerKeyHashing_CollisionResistance/Different_data_names_produce_different_hashes (0.00s)
+    --- PASS: TestLedgerKeyHashing_CollisionResistance/Different_contract_data_keys_produce_different_hashes (0.00s)
+    --- PASS: TestLedgerKeyHashing_CollisionResistance/Different_key_types_produce_different_hashes (0.00s)
+    --- PASS: TestLedgerKeyHashing_CollisionResistance/Persistent_vs_Temporary_contract_data_produce_different_hashes (0.00s)
+=== RUN   TestLedgerKeyHashing_EdgeCases
+=== RUN   TestLedgerKeyHashing_EdgeCases/Empty_data_name
+=== RUN   TestLedgerKeyHashing_EdgeCases/Maximum_length_data_name
+=== RUN   TestLedgerKeyHashing_EdgeCases/All_zeros_hash_value
+=== RUN   TestLedgerKeyHashing_EdgeCases/All_ones_hash_value
+=== RUN   TestLedgerKeyHashing_EdgeCases/Minimum_offer_ID
+=== RUN   TestLedgerKeyHashing_EdgeCases/Maximum_offer_ID
+=== RUN   TestLedgerKeyHashing_EdgeCases/Different_config_setting_IDs
+--- PASS: TestLedgerKeyHashing_EdgeCases (0.00s)
+    --- PASS: TestLedgerKeyHashing_EdgeCases/Empty_data_name (0.00s)
+    --- PASS: TestLedgerKeyHashing_EdgeCases/Maximum_length_data_name (0.00s)
+    --- PASS: TestLedgerKeyHashing_EdgeCases/All_zeros_hash_value (0.00s)
+    --- PASS: TestLedgerKeyHashing_EdgeCases/All_ones_hash_value (0.00s)
+    --- PASS: TestLedgerKeyHashing_EdgeCases/Minimum_offer_ID (0.00s)
+    --- PASS: TestLedgerKeyHashing_EdgeCases/Maximum_offer_ID (0.00s)
+    --- PASS: TestLedgerKeyHashing_EdgeCases/Different_config_setting_IDs (0.00s)
+=== RUN   TestLedgerKeyHashing_CrossPlatformConsistency
+=== RUN   TestLedgerKeyHashing_CrossPlatformConsistency/Reference_account_key
+    cache_test.go:658: Reference hash for Reference account key: 8b283a7411fb24e3540781a645517a01832265d055ba7d0ff3de20b6455c526b
+=== RUN   TestLedgerKeyHashing_CrossPlatformConsistency/Reference_trustline_key_with_USDC
+    cache_test.go:658: Reference hash for Reference trustline key with USDC: 9a1e801b0c33aa25fd3a13d40f2ee71ac62bafc88c2d95e520e962115d7f0515
+=== RUN   TestLedgerKeyHashing_CrossPlatformConsistency/Reference_contract_data_key
+    cache_test.go:658: Reference hash for Reference contract data key: 5440938817031b18a8f20ccf1cd25a15f20cccf9c9bf9488c2bce2c4652b6499
+--- PASS: TestLedgerKeyHashing_CrossPlatformConsistency (0.00s)
+    --- PASS: TestLedgerKeyHashing_CrossPlatformConsistency/Reference_account_key (0.00s)
+    --- PASS: TestLedgerKeyHashing_CrossPlatformConsistency/Reference_trustline_key_with_USDC (0.00s)
+    --- PASS: TestLedgerKeyHashing_CrossPlatformConsistency/Reference_contract_data_key (0.00s)
+=== RUN   TestLedgerKeyHashing_RealisticData
+=== RUN   TestLedgerKeyHashing_RealisticData/Real_Stellar_mainnet_account
+    cache_test.go:686: Real account hash: edb7bae206e73f84408788a7f9ed2cc86ec31de10fc78ca2d5728651eac359dd
+=== RUN   TestLedgerKeyHashing_RealisticData/USDC_trustline_on_mainnet
+    cache_test.go:705: USDC trustline hash: d4e1082c85b24e7f4de76d32e6ccdfa3eb9ba47f12bf88cdd24605bb1718feff
+=== RUN   TestLedgerKeyHashing_RealisticData/Native_XLM_asset_code_variations
+    cache_test.go:724: Native XLM trustline hash: eb601d78ccff48a9468d80684161fb9eb7a2ec631f71fcdb8897d21253d5cf31
+=== RUN   TestLedgerKeyHashing_RealisticData/Short_asset_code_(3_chars)
+=== RUN   TestLedgerKeyHashing_RealisticData/Long_asset_code_(12_chars)
+=== RUN   TestLedgerKeyHashing_RealisticData/Realistic_contract_ID_from_Soroban
+    cache_test.go:788: Soroban contract data hash: f301082bca7864ba3648ee5477540f2c90df797073576c33921608b4074bf5b4
+=== RUN   TestLedgerKeyHashing_RealisticData/Multiple_data_entries_on_same_account
+--- PASS: TestLedgerKeyHashing_RealisticData (0.00s)
+    --- PASS: TestLedgerKeyHashing_RealisticData/Real_Stellar_mainnet_account (0.00s)
+    --- PASS: TestLedgerKeyHashing_RealisticData/USDC_trustline_on_mainnet (0.00s)
+    --- PASS: TestLedgerKeyHashing_RealisticData/Native_XLM_asset_code_variations (0.00s)
+    --- PASS: TestLedgerKeyHashing_RealisticData/Short_asset_code_(3_chars) (0.00s)
+    --- PASS: TestLedgerKeyHashing_RealisticData/Long_asset_code_(12_chars) (0.00s)
+    --- PASS: TestLedgerKeyHashing_RealisticData/Realistic_contract_ID_from_Soroban (0.00s)
+    --- PASS: TestLedgerKeyHashing_RealisticData/Multiple_data_entries_on_same_account (0.00s)
+=== RUN   TestGetTransaction
+=== RUN   TestGetTransaction/success
+{"time":"2026-01-28T13:40:34.042238837+01:00","level":"INFO","source":{"function":"github.com/dotandev/hintents/internal/rpc.(*Client).GetTransaction","file":"/home/george/Documents/react/onlyDust/hintents/internal/rpc/client.go","line":94},"msg":"Transaction fetched successfully","hash":"abc123","envelope_size":12}
+=== RUN   TestGetTransaction/error
+{"time":"2026-01-28T13:40:34.042430766+01:00","level":"ERROR","source":{"function":"github.com/dotandev/hintents/internal/rpc.(*Client).GetTransaction","file":"/home/george/Documents/react/onlyDust/hintents/internal/rpc/client.go","line":90},"msg":"Failed to fetch transaction","hash":"fail","error":"not found"}
+--- PASS: TestGetTransaction (0.00s)
+    --- PASS: TestGetTransaction/success (0.00s)
+    --- PASS: TestGetTransaction/error (0.00s)
+=== RUN   TestGetTransaction_Timeout
+{"time":"2026-01-28T13:40:34.052815452+01:00","level":"ERROR","source":{"function":"github.com/dotandev/hintents/internal/rpc.(*Client).GetTransaction","file":"/home/george/Documents/react/onlyDust/hintents/internal/rpc/client.go","line":90},"msg":"Failed to fetch transaction","hash":"timeout","error":"context deadline exceeded"}
+--- PASS: TestGetTransaction_Timeout (0.01s)
+PASS
+ok  	github.com/dotandev/hintents/internal/rpc	0.023s

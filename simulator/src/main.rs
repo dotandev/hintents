@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use soroban_env_host::xdr::ReadXdr;

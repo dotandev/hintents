@@ -1,4 +1,5 @@
 .PHONY: build test lint lint-unused test-unused validate-ci clean
+.PHONY: build test lint validate-errors clean
 
 # Build the main binary
 build:
@@ -23,6 +24,9 @@ test-unused:
 # Validate CI/CD configuration
 validate-ci:
 	./scripts/validate-ci.sh
+# Validate error standardization
+validate-errors:
+	./scripts/validate-errors.sh
 
 # Clean build artifacts
 clean:

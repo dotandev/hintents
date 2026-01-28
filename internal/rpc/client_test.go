@@ -1,11 +1,14 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 package rpc
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/stellar/go/clients/horizonclient"
 	hProtocol "github.com/stellar/go/protocols/horizon"
 	effects "github.com/stellar/go/protocols/horizon/effects"
@@ -214,6 +217,33 @@ func newTestClient(mock horizonclient.ClientInterface) *testClient {
 }
 
 func TestGetTransaction(t *testing.T) {
+       tests := []struct {
+	       name      string
+	       hash      string
+	       mockFunc  func(hash string) (hProtocol.Transaction, error)
+	       expectErr bool
+       }{
+	       {
+		       name: "success",
+		       hash: "abc123",
+		       mockFunc: func(hash string) (hProtocol.Transaction, error) {
+			       return hProtocol.Transaction{
+				       EnvelopeXdr:   "envelope-xdr",
+				       ResultXdr:     "result-xdr",
+				       ResultMetaXdr: "meta-xdr",
+			       }, nil
+		       },
+		       expectErr: false,
+	       },
+	       {
+		       name: "error",
+		       hash: "fail",
+		       mockFunc: func(hash string) (hProtocol.Transaction, error) {
+			       return hProtocol.Transaction{}, errors.ErrTransactionNotFound
+		       },
+		       expectErr: true,
+	       },
+       }
 	tests := []struct {
 		name      string
 		hash      string
