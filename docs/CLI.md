@@ -45,7 +45,15 @@ erst debug --network testnet <tx-hash>
   -h, --help             help for debug
   -n, --network string   Stellar network to use (testnet, mainnet, futurenet) (default "mainnet")
       --rpc-url string   Custom Horizon RPC URL to use
+      --rpc-token string RPC authentication token (can also use ERST_RPC_TOKEN env var)
 ```
+
+### Environment Variables
+
+- `ERST_RPC_TOKEN`: RPC authentication token for providers that require API keys (e.g., NowNodes, BlockDaemon)
+
+> [!NOTE]
+> **Security**: The token value is never logged in debug output to prevent accidental exposure.
 
 ### Arguments
 
@@ -87,6 +95,7 @@ erst generate-test --name my_regression_test <tx-hash>
       --name string      Custom test name (defaults to transaction hash)
   -o, --output string    Output directory (defaults to current directory)
       --rpc-url string   Custom Horizon RPC URL to use
+      --rpc-token string RPC authentication token (can also use ERST_RPC_TOKEN env var)
 ```
 
 ### Arguments

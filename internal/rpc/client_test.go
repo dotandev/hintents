@@ -6,6 +6,8 @@ package rpc
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -283,4 +285,114 @@ func TestGetTransaction_Timeout(t *testing.T) {
 	testCtx = ctx
 	_, err := c.GetTransaction(ctx, "timeout")
 	assert.Error(t, err)
+}
+
+// TestAuthTransport verifies that the authTransport adds the Authorization header
+func TestAuthTransport(t *testing.T) {
+	token := "test-token-12345"
+	
+	// Create a test server that verifies the header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		expectedHeader := "Bearer " + token
+		
+		if authHeader != expectedHeader {
+			t.Errorf("Expected Authorization header %q, got %q", expectedHeader, authHeader)
+		}
+		
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// Create client with auth transport
+	transport := &authTransport{
+		token:     token,
+		transport: http.DefaultTransport,
+	}
+	
+	client := &http.Client{
+		Transport: transport,
+	}
+
+	// Make request
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestAuthTransportWithoutToken verifies that no header is added when token is empty
+func TestAuthTransportWithoutToken(t *testing.T) {
+	// Create a test server that verifies no auth header is present
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		
+		if authHeader != "" {
+			t.Errorf("Expected no Authorization header, got %q", authHeader)
+		}
+		
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// Create client with empty token
+	transport := &authTransport{
+		token:     "",
+		transport: http.DefaultTransport,
+	}
+	
+	client := &http.Client{
+		Transport: transport,
+	}
+
+	// Make request
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestNewClientWithToken verifies client initialization with token
+func TestNewClientWithToken(t *testing.T) {
+	token := "test-token"
+	client := NewClient(Testnet, token)
+	
+	if client == nil {
+		t.Fatal("Expected client to be created")
+	}
+	
+	if client.Network != Testnet {
+		t.Errorf("Expected network %s, got %s", Testnet, client.Network)
+	}
+	
+	if client.token != token {
+		t.Errorf("Expected token %q, got %q", token, client.token)
+	}
+}
+
+// TestNewClientWithoutToken verifies client initialization without token
+func TestNewClientWithoutToken(t *testing.T) {
+	client := NewClient(Mainnet, "")
+	
+	if client == nil {
+		t.Fatal("Expected client to be created")
+	}
+	
+	if client.Network != Mainnet {
+		t.Errorf("Expected network %s, got %s", Mainnet, client.Network)
+	}
+	
+	if client.token != "" {
+		t.Errorf("Expected empty token, got %q", client.token)
+	}
 }

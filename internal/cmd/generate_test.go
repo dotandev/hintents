@@ -9,9 +9,12 @@ import (
 )
 
 var (
-	genTestLang   string
-	genTestOutput string
-	genTestName   string
+	genTestLang      string
+	genTestOutput    string
+	genTestName      string
+	genTestRPCToken  string
+	genTestNetwork   string
+	genTestRPCURL    string
 )
 
 var generateTestCmd = &cobra.Command{
@@ -32,10 +35,10 @@ Example:
 
 		// Create RPC client
 		var client *rpc.Client
-		if rpcURLFlag != "" {
-			client = rpc.NewClientWithURL(rpcURLFlag, rpc.Network(networkFlag))
+		if genTestRPCURL != "" {
+			client = rpc.NewClientWithURL(genTestRPCURL, rpc.Network(genTestNetwork), genTestRPCToken)
 		} else {
-			client = rpc.NewClient(rpc.Network(networkFlag))
+			client = rpc.NewClient(rpc.Network(genTestNetwork), genTestRPCToken)
 		}
 
 		// Get current working directory as default output
@@ -61,8 +64,9 @@ func init() {
 	generateTestCmd.Flags().StringVarP(&genTestLang, "lang", "l", "both", "Target language (go, rust, or both)")
 	generateTestCmd.Flags().StringVarP(&genTestOutput, "output", "o", "", "Output directory (defaults to current directory)")
 	generateTestCmd.Flags().StringVarP(&genTestName, "name", "", "", "Custom test name (defaults to transaction hash)")
-	generateTestCmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
-	generateTestCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
+	generateTestCmd.Flags().StringVarP(&genTestNetwork, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
+	generateTestCmd.Flags().StringVar(&genTestRPCURL, "rpc-url", "", "Custom Horizon RPC URL to use")
+	generateTestCmd.Flags().StringVar(&genTestRPCToken, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
 
 	rootCmd.AddCommand(generateTestCmd)
 }
