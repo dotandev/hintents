@@ -181,6 +181,25 @@ fn main() {
         Err(e) => vec![format!("Failed to retrieve events: {:?}", e)],
     };
 
+    let mut flamegraph_svg = None;
+
+    if request.profile.unwrap_or(false) {
+        let budget = host.budget_cloned();
+        let cpu_insns = budget.get_cpu_insns_consumed().unwrap_or(0);
+        let mem_bytes = budget.get_mem_bytes_consumed().unwrap_or(0);
+
+        // For now, just a simple folded stack with total values
+        let folded_data = format!("Total;CPU {} \nTotal;Memory {} \n", cpu_insns, mem_bytes);
+        
+        let mut result = Vec::new();
+        let mut options = inferno::flamegraph::Options::default();
+        if let Err(e) = inferno::flamegraph::from_reader(&mut options, folded_data.as_bytes(), &mut result) {
+            eprintln!("Failed to generate flamegraph: {}", e);
+        } else {
+            flamegraph_svg = Some(String::from_utf8_lossy(&result).to_string());
+        }
+    }
+
     // Mock Success Response
     let response = SimulationResponse {
         status: "success".to_string(),
@@ -194,6 +213,7 @@ fn main() {
             logs.extend(invocation_logs);
             logs
         },
+        flamegraph: flamegraph_svg,
     };
 
     println!("{}", serde_json::to_string(&response).unwrap());
