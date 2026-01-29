@@ -31,24 +31,54 @@ func GetCurrentSession() *session.SessionData {
 
 var sessionCmd = &cobra.Command{
 	Use:   "session",
-	Short: "Manage debug sessions",
-	Long:  `Save and resume debug sessions to preserve state across CLI invocations.`,
+	Short: "Manage debugging sessions",
+	Long: `Save, resume, and manage debugging sessions to preserve state across CLI invocations.
+
+Sessions store complete transaction data, simulation results, and analysis context,
+allowing you to:
+  • Resume debugging work later
+  • Share debugging context with team members
+  • Build a history of investigated transactions
+  • Analyze patterns across multiple sessions
+
+Available subcommands:
+  save    - Save current session to disk
+  resume  - Restore a saved session
+  list    - View all saved sessions
+  delete  - Remove a saved session`,
+	Example: `  # Save current debug session
+  erst session save
+
+  # List all sessions
+  erst session list
+
+  # Resume a specific session
+  erst session resume <session-id>
+
+  # Delete a session
+  erst session delete <session-id>`,
 }
 
 var sessionSaveCmd = &cobra.Command{
-	Use:   "save [--id <session-id>]",
-	Short: "Save the current debug session",
-	Long: `Save the current debug session state. If no session is active, you must run
-'erst debug <tx-hash>' first to create a session.
+	Use:   "save",
+	Short: "Save the current debugging session",
+	Long: `Save the current debug session state to disk for later resumption.
 
-The session ID can be auto-generated or specified with --id.`,
+You must run 'erst debug <tx-hash>' first to create an active session.
+The session ID can be auto-generated or specified with --id flag.`,
+	Example: `  # Save with auto-generated ID
+  erst session save
+
+  # Save with custom ID
+  erst session save --id my-debug-session`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
 		// Check if we have an active session
 		data := GetCurrentSession()
 		if data == nil {
-			return fmt.Errorf("no active session to save. Run 'erst debug <tx-hash>' first")
+			return fmt.Errorf("Error: no active session to save. Run 'erst debug <tx-hash>' first")
 		}
 
 		// Generate or use provided ID
@@ -76,7 +106,7 @@ The session ID can be auto-generated or specified with --id.`,
 
 		// Save session
 		if err := store.Save(ctx, data); err != nil {
-			return fmt.Errorf("failed to save session: %w", err)
+			return fmt.Errorf("Error: failed to save session: %w", err)
 		}
 
 		fmt.Printf("Session saved: %s\n", data.ID)
@@ -90,9 +120,17 @@ The session ID can be auto-generated or specified with --id.`,
 
 var sessionResumeCmd = &cobra.Command{
 	Use:   "resume <session-id>",
-	Short: "Resume a saved debug session",
-	Long: `Resume a previously saved debug session. This restores all transaction data,
-simulation results, and context from the saved session.`,
+	Short: "Restore a saved debugging session",
+	Long: `Resume a previously saved debug session by ID. This restores all transaction data,
+simulation results, and analysis context from the saved session.
+
+Use 'erst session list' to see available sessions.`,
+	Example: `  # Resume a session
+  erst session resume abc123
+
+  # List available sessions first
+  erst session list
+  erst session resume <session-id>`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -101,24 +139,24 @@ simulation results, and context from the saved session.`,
 		// Open session store
 		store, err := session.NewStore()
 		if err != nil {
-			return fmt.Errorf("failed to open session store: %w", err)
+			return fmt.Errorf("Error: failed to open session store: %w", err)
 		}
 		defer store.Close()
 
 		// Run cleanup
 		if err := store.Cleanup(ctx, session.DefaultTTL, session.DefaultMaxSessions); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: cleanup failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: session cleanup failed: %v\n", err)
 		}
 
 		// Load session
 		data, err := store.Load(ctx, sessionID)
 		if err != nil {
-			return fmt.Errorf("failed to load session: %w", err)
+			return fmt.Errorf("Error: session '%s' not found or failed to load: %w", sessionID, err)
 		}
 
 		// Check schema version compatibility
 		if data.SchemaVersion > session.SchemaVersion {
-			return fmt.Errorf("session was created with a newer version of erst (schema %d > %d). Please upgrade erst", data.SchemaVersion, session.SchemaVersion)
+			return fmt.Errorf("Error: session was created with a newer version of erst (schema v%d > v%d). Please upgrade erst", data.SchemaVersion, session.SchemaVersion)
 		}
 
 		// Update status and make it current
@@ -162,27 +200,32 @@ simulation results, and context from the saved session.`,
 
 var sessionListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List saved sessions",
-	Long:  `List all saved debug sessions, ordered by most recently accessed.`,
+	Short: "List all saved debugging sessions",
+	Long: `List all saved debug sessions, ordered by most recently accessed.
+
+Displays session ID, network, last access time, and transaction hash.`,
+	Example: `  # List all sessions
+  erst session list`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
 		// Open session store
 		store, err := session.NewStore()
 		if err != nil {
-			return fmt.Errorf("failed to open session store: %w", err)
+			return fmt.Errorf("Error: failed to open session store: %w", err)
 		}
 		defer store.Close()
 
 		// Run cleanup
 		if err := store.Cleanup(ctx, session.DefaultTTL, session.DefaultMaxSessions); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: cleanup failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: session cleanup failed: %v\n", err)
 		}
 
 		// List sessions
 		sessions, err := store.List(ctx, 50)
 		if err != nil {
-			return fmt.Errorf("failed to list sessions: %w", err)
+			return fmt.Errorf("Error: failed to list sessions: %w", err)
 		}
 
 		if len(sessions) == 0 {
@@ -209,9 +252,13 @@ var sessionListCmd = &cobra.Command{
 
 var sessionDeleteCmd = &cobra.Command{
 	Use:   "delete <session-id>",
-	Short: "Delete a saved session",
-	Long:  `Delete a saved debug session by ID.`,
-	Args:  cobra.ExactArgs(1),
+	Short: "Remove a saved debugging session",
+	Long: `Delete a saved debug session by ID. This action cannot be undone.
+
+Use 'erst session list' to see available sessions.`,
+	Example: `  # Delete a specific session
+  erst session delete abc123`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		sessionID := args[0]
@@ -219,13 +266,13 @@ var sessionDeleteCmd = &cobra.Command{
 		// Open session store
 		store, err := session.NewStore()
 		if err != nil {
-			return fmt.Errorf("failed to open session store: %w", err)
+			return fmt.Errorf("Error: failed to open session store: %w", err)
 		}
 		defer store.Close()
 
 		// Delete session
 		if err := store.Delete(ctx, sessionID); err != nil {
-			return fmt.Errorf("failed to delete session: %w", err)
+			return fmt.Errorf("Error: failed to delete session '%s': %w", sessionID, err)
 		}
 
 		fmt.Printf("Session deleted: %s\n", sessionID)

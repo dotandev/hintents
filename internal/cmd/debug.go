@@ -24,18 +24,37 @@ var (
 var debugCmd = &cobra.Command{
 	Use:   "debug <transaction-hash>",
 	Short: "Debug a failed Soroban transaction",
-	Long: `Fetch a transaction envelope from the Stellar network and prepare it for simulation.
+	Long: `Fetch and simulate a Soroban transaction to debug failures and analyze execution.
 
-Example:
+This command retrieves the transaction envelope from the Stellar network, runs it
+through the local simulator, and displays detailed execution traces including:
+  • Transaction status and error messages
+  • Contract events and diagnostic logs
+  • Token flows (XLM and Soroban assets)
+  • Execution metadata and state changes
+
+The simulation results are stored in a session that can be saved for later analysis.`,
+	Example: `  # Debug a transaction on mainnet
   erst debug 5c0a1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab
-  erst debug --network testnet <tx-hash>`,
+
+  # Debug on testnet
+  erst debug --network testnet abc123...def789
+
+  # Use custom RPC endpoint
+  erst debug --rpc-url https://custom-horizon.example.com abc123...def789
+
+  # Debug and save the session
+  erst debug abc123...def789 && erst session save`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if len(args[0]) != 64 {
+			return fmt.Errorf("Error: invalid transaction hash format (expected 64 hex characters, got %d)", len(args[0]))
+		}
 		switch rpc.Network(networkFlag) {
 		case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
 			return nil
 		default:
-			return errors.WrapInvalidNetwork(networkFlag)
+			return fmt.Errorf("Error: %w", errors.WrapInvalidNetwork(networkFlag))
 		}
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -69,7 +88,7 @@ Example:
 		// Fetch transaction details
 		txResp, err := client.GetTransaction(ctx, txHash)
 		if err != nil {
-			return fmt.Errorf("failed to fetch transaction: %w", err)
+			return fmt.Errorf("Error: failed to fetch transaction from network: %w", err)
 		}
 
 		fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(txResp.EnvelopeXdr))
@@ -77,7 +96,7 @@ Example:
 		// Run simulation
 		runner, err := simulator.NewRunner()
 		if err != nil {
-			return fmt.Errorf("failed to initialize simulator: %w", err)
+			return fmt.Errorf("Error: failed to initialize simulator (ensure simulator binary is available): %w", err)
 		}
 
 		// Build simulation request
@@ -90,7 +109,7 @@ Example:
 		fmt.Printf("Running simulation...\n")
 		simResp, err := runner.Run(simReq)
 		if err != nil {
-			return fmt.Errorf("simulation failed: %w", err)
+			return fmt.Errorf("Error: simulation failed: %w", err)
 		}
 
 		// Display simulation results
@@ -125,11 +144,11 @@ Example:
 		// Serialize simulation request/response for session storage
 		simReqJSON, err := json.Marshal(simReq)
 		if err != nil {
-			return fmt.Errorf("failed to marshal simulation request: %w", err)
+			return fmt.Errorf("Error: failed to serialize simulation data: %w", err)
 		}
 		simRespJSON, err := json.Marshal(simResp)
 		if err != nil {
-			return fmt.Errorf("failed to marshal simulation response: %w", err)
+			return fmt.Errorf("Error: failed to serialize simulation results: %w", err)
 		}
 
 		// Create session data

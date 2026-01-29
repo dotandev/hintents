@@ -17,8 +17,9 @@ var (
 // versionCmd represents the version command
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Print the version number of erst",
+	Short: "Display version information",
 	Long:  `Display the current version of the erst CLI tool.`,
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("erst version %s\n", Version)
 	},

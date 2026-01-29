@@ -19,13 +19,33 @@ var (
 
 var searchCmd = &cobra.Command{
 	Use:   "search",
-	Short: "Search past debugging sessions",
-	Long: `Search through the history of debugging sessions using regex patterns 
-for errors or events, or by specific transaction hash.`,
+	Short: "Search through saved debugging sessions",
+	Long: `Search through the history of debugging sessions to find past transactions,
+errors, or events. Supports regex patterns for flexible matching.
+
+You can search by:
+  • Transaction hash (exact match)
+  • Error message patterns (regex)
+  • Event patterns (regex)
+  • Combine multiple filters
+
+Results are ordered by timestamp (most recent first) and limited by --limit flag.`,
+	Example: `  # Search for specific transaction
+  erst search --tx abc123...def789
+
+  # Find sessions with specific error patterns
+  erst search --error "insufficient balance"
+
+  # Search for contract events
+  erst search --event "transfer|mint"
+
+  # Combine filters and limit results
+  erst search --error "panic" --limit 5`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		store, err := db.InitDB()
 		if err != nil {
-			return fmt.Errorf("failed to initialize database: %w", err)
+			return fmt.Errorf("Error: failed to initialize session database: %w", err)
 		}
 
 		params := db.SearchParams{
@@ -37,7 +57,7 @@ for errors or events, or by specific transaction hash.`,
 
 		sessions, err := store.SearchSessions(params)
 		if err != nil {
-			return fmt.Errorf("search failed: %w", err)
+			return fmt.Errorf("Error: search failed: %w", err)
 		}
 
 		if len(sessions) == 0 {

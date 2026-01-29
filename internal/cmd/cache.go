@@ -27,10 +27,28 @@ func getCacheDir() string {
 
 var cacheCmd = &cobra.Command{
 	Use:   "cache",
-	Short: "Manage Erst cache",
-	Long: `Manage the Erst cache, including viewing cache size and cleaning up old files.
+	Short: "Manage transaction and simulation cache",
+	Long: `Manage the local cache that stores transaction data and simulation results.
+Caching improves performance and enables offline analysis.
 
-The cache is stored in ~/.erst/cache by default.`,
+Cache location: ~/.erst/cache (configurable via ERST_CACHE_DIR)
+
+Available subcommands:
+  status  - View cache size and usage statistics
+  clean   - Remove old files using LRU strategy
+  clear   - Delete all cached data`,
+	Example: `  # Check cache status
+  erst cache status
+
+  # Clean old cache entries
+  erst cache clean
+
+  # Force clean without confirmation
+  erst cache clean --force
+
+  # Clear all cache
+  erst cache clear --force`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	},
@@ -38,20 +56,21 @@ The cache is stored in ~/.erst/cache by default.`,
 
 var cacheStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show cache status",
-	Long:  `Display the current cache size and disk usage.`,
+	Short: "Display cache statistics",
+	Long:  `Display the current cache size, number of cached files, and disk usage statistics.`,
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cacheDir := getCacheDir()
 		manager := cache.NewManager(cacheDir, cache.DefaultConfig())
 
 		size, err := manager.GetCacheSize()
 		if err != nil {
-			return fmt.Errorf("failed to get cache size: %w", err)
+			return fmt.Errorf("Error: failed to calculate cache size: %w", err)
 		}
 
 		files, err := manager.ListCachedFiles()
 		if err != nil {
-			return fmt.Errorf("failed to list cache files: %w", err)
+			return fmt.Errorf("Error: failed to list cache files: %w", err)
 		}
 
 		fmt.Printf("Cache directory: %s\n", cacheDir)
@@ -69,22 +88,28 @@ var cacheStatusCmd = &cobra.Command{
 
 var cacheCleanCmd = &cobra.Command{
 	Use:   "clean",
-	Short: "Clean up old cached files",
+	Short: "Remove old cached files using LRU strategy",
 	Long: `Remove old cached files using LRU (Least Recently Used) strategy.
 
 This command will:
-1. Identify the oldest cached files
-2. Prompt for confirmation before deletion
-3. Delete files until cache size is reduced to 50% of maximum
+  1. Identify the oldest cached files
+  2. Prompt for confirmation before deletion
+  3. Delete files until cache size is reduced to 50% of maximum
 
 Use --force to skip the confirmation prompt.`,
+	Example: `  # Clean cache with confirmation
+  erst cache clean
+
+  # Force clean without prompt
+  erst cache clean --force`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cacheDir := getCacheDir()
 		manager := cache.NewManager(cacheDir, cache.DefaultConfig())
 
 		status, err := manager.Clean(cacheForceFlag)
 		if err != nil {
-			return fmt.Errorf("cache cleanup failed: %w", err)
+			return fmt.Errorf("Error: cache cleanup failed: %w", err)
 		}
 
 		if status.FilesDeleted == 0 && status.OriginalSize > 0 {
@@ -97,10 +122,16 @@ Use --force to skip the confirmation prompt.`,
 
 var cacheClearCmd = &cobra.Command{
 	Use:   "clear",
-	Short: "Clear entire cache",
-	Long: `Remove all cached files.
+	Short: "Delete all cached files",
+	Long: `Remove all cached files from the cache directory.
 
-⚠️  This action cannot be undone. Use --force to skip confirmation.`,
+⚠️  Warning: This action cannot be undone. Use --force to skip confirmation.`,
+	Example: `  # Clear cache with confirmation
+  erst cache clear
+
+  # Force clear without prompt
+  erst cache clear --force`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cacheDir := getCacheDir()
 
@@ -116,7 +147,7 @@ var cacheClearCmd = &cobra.Command{
 			fmt.Print("Are you sure? (yes/no): ")
 			var response string
 			if _, err := fmt.Scanln(&response); err != nil {
-				return fmt.Errorf("failed to read input: %w", err)
+				return fmt.Errorf("Error: failed to read confirmation input: %w", err)
 			}
 			if response != "yes" && response != "y" {
 				fmt.Println("Cache clear cancelled")
@@ -126,7 +157,7 @@ var cacheClearCmd = &cobra.Command{
 
 		err := os.RemoveAll(cacheDir)
 		if err != nil {
-			return fmt.Errorf("failed to clear cache: %w", err)
+			return fmt.Errorf("Error: failed to clear cache directory: %w", err)
 		}
 
 		fmt.Println("Cache cleared successfully")
