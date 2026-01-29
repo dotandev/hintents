@@ -1,0 +1,100 @@
+{
+  "version": "1.0",
+  "network_id": "private-stellar-dev",
+  "metadata": {
+    "network_name": "Private Development Network",
+    "description": "Custom gas model for a private Stellar/Soroban network with reduced costs compared to mainnet",
+    "author": "Network Operators",
+    "created_at": "2025-01-28"
+  },
+  "cpu_costs": [
+    {
+      "name": "wasm_inst",
+      "linear": 75,
+      "const": 5,
+      "description": "Cost per WebAssembly instruction"
+    },
+    {
+      "name": "wasm_memory",
+      "linear": 50,
+      "const": 2,
+      "description": "Cost per byte of WebAssembly memory allocated"
+    },
+    {
+      "name": "wasm_cpu_insn",
+      "linear": 100,
+      "const": 10,
+      "description": "Cost per CPU instruction in WASM execution"
+    }
+  ],
+  "host_costs": [
+    {
+      "name": "host_invoke",
+      "linear": 400,
+      "const": 40,
+      "description": "Cost to invoke a host function from WASM"
+    },
+    {
+      "name": "host_mem_alloc",
+      "linear": 30,
+      "const": 3,
+      "description": "Cost per byte to allocate host memory"
+    },
+    {
+      "name": "host_mem_cpy",
+      "linear": 20,
+      "const": 2,
+      "description": "Cost per byte to copy host memory"
+    },
+    {
+      "name": "host_cmp",
+      "linear": 150,
+      "const": 15,
+      "description": "Cost to compare host values"
+    },
+    {
+      "name": "host_sha256",
+      "linear": 2000,
+      "const": 100,
+      "description": "Cost to compute SHA-256 hash"
+    },
+    {
+      "name": "host_ed25519_verify",
+      "linear": 5000,
+      "const": 500,
+      "description": "Cost to verify Ed25519 signature"
+    },
+    {
+      "name": "host_secp256k1_recover",
+      "linear": 8000,
+      "const": 800,
+      "description": "Cost to recover secp256k1 public key"
+    }
+  ],
+  "ledger_costs": [
+    {
+      "name": "ledger_read",
+      "linear": 250,
+      "const": 25,
+      "description": "Cost to read a ledger entry"
+    },
+    {
+      "name": "ledger_write",
+      "linear": 500,
+      "const": 50,
+      "description": "Cost to write/modify a ledger entry"
+    },
+    {
+      "name": "ledger_rent",
+      "linear": 100,
+      "const": 10,
+      "description": "Cost for ledger rent (state storage)"
+    }
+  ],
+  "resource_limits": {
+    "max_txn_size": 65536,
+    "max_cpu_insns": 100000000,
+    "max_memory": 52428800,
+    "max_ledger_entries": 1000
+  }
+}
