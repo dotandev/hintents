@@ -1,24 +1,42 @@
-# Binaries
+# --- Compiled binaries/libraries ---
 /erst
 /simulator/target/
 node_modules/
+dist/
+bin/
 
-# OS/System
+# --- OS/System Files ---
 .DS_Store
 .env
 .env.example
 .cursorrules
+Thumbs.db
+*.exe
+*.dll
+*.dylib
+*.so
 
-# Logs and Temps
+# --- Logs and Temporary Files ---
 *.log
-*.txt
+*.tmp
+*.bak
+*.swp
 simulator/check_output.txt
 
-# Artifacts/Tools
+# --- Go specific ---
+/vendor/
+coverage.out
+
+# --- Rust specific ---
+**/*.rs.bk
+
+# --- Tools/Artifacts ---
 ishus.py
 .gemini/
+.idea/
+.vscode/
 
-# Docs (User preference)
+# --- Documentation (User specific settings) ---
 # /external/
 # /*.md
 # !README.md
