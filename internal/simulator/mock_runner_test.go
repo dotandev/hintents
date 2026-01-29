@@ -70,8 +70,7 @@ func TestMockRunnerCustomResponse(t *testing.T) {
 }
 
 func TestRunnerInterface(t *testing.T) {
-	var runner Runner
-	runner = NewDefaultMockRunner()
+	runner := NewDefaultMockRunner()
 
 	if runner == nil {
 		t.Error("runner should not be nil")

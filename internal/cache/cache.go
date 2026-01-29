@@ -227,7 +227,9 @@ func (m *Manager) Clean(force bool) (*CleanupStatus, error) {
 	if !force {
 		fmt.Print("\nThis will delete the oldest cached files. Continue? (yes/no): ")
 		var response string
-		fmt.Scanln(&response)
+		if _, err := fmt.Scanln(&response); err != nil {
+			return status, fmt.Errorf("failed to read input: %w", err)
+		}
 		if response != "yes" && response != "y" {
 			fmt.Println("Cache cleanup cancelled")
 			status.FinalSize = originalSize

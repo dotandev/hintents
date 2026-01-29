@@ -115,7 +115,9 @@ var cacheClearCmd = &cobra.Command{
 			fmt.Printf("This will delete ALL cached files in %s\n", cacheDir)
 			fmt.Print("Are you sure? (yes/no): ")
 			var response string
-			fmt.Scanln(&response)
+			if _, err := fmt.Scanln(&response); err != nil {
+				return fmt.Errorf("failed to read input: %w", err)
+			}
 			if response != "yes" && response != "y" {
 				fmt.Println("Cache clear cancelled")
 				return nil

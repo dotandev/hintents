@@ -31,7 +31,9 @@ func TestUpdateCheckerWithMockServer(t *testing.T) {
 			TagName: mockVersion,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(release)
+		if err := json.NewEncoder(w).Encode(release); err != nil {
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		}
 	}))
 	defer server.Close()
 

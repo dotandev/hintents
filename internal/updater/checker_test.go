@@ -5,6 +5,7 @@ package updater
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -268,7 +269,9 @@ func TestGitHubAPIIntegration(t *testing.T) {
 			response := GitHubRelease{
 				TagName: "v1.2.3",
 			}
-			json.NewEncoder(w).Encode(response)
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				http.Error(w, "failed to encode response", http.StatusInternalServerError)
+			}
 		}))
 		defer server.Close()
 
@@ -306,7 +309,9 @@ func TestGitHubAPIIntegration(t *testing.T) {
 
 	t.Run("handle malformed JSON", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("not valid json"))
+			if _, err := w.Write([]byte("not valid json")); err != nil {
+				log.Printf("failed to write response: %v", err)
+			}
 		}))
 		defer server.Close()
 

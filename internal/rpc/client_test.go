@@ -5,10 +5,10 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
 	"github.com/stellar/go/clients/horizonclient"
 	hProtocol "github.com/stellar/go/protocols/horizon"
 	effects "github.com/stellar/go/protocols/horizon/effects"
@@ -239,7 +239,7 @@ func TestGetTransaction(t *testing.T) {
 			name: "error",
 			hash: "fail",
 			mockFunc: func(hash string) (hProtocol.Transaction, error) {
-				return hProtocol.Transaction{}, errors.ErrTransactionNotFound
+				return hProtocol.Transaction{}, errors.New("not found")
 			},
 			expectErr: true,
 		},

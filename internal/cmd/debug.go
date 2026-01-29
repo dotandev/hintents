@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
-	"github.com/dotandev/hintents/internal/db"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/rpc"
+	"github.com/dotandev/hintents/internal/session"
 	"github.com/dotandev/hintents/internal/simulator"
+	"github.com/dotandev/hintents/internal/tokenflow"
 	"github.com/spf13/cobra"
 )
 
@@ -44,13 +46,25 @@ Example:
 		}
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		txHash := args[0]
 
 		var client *rpc.Client
+		var horizonURL string
 		if rpcURLFlag != "" {
 			client = rpc.NewClientWithURL(rpcURLFlag, rpc.Network(networkFlag))
+			horizonURL = rpcURLFlag
 		} else {
 			client = rpc.NewClient(rpc.Network(networkFlag))
+			// Get default Horizon URL for the network
+			switch rpc.Network(networkFlag) {
+			case rpc.Testnet:
+				horizonURL = rpc.TestnetHorizonURL
+			case rpc.Futurenet:
+				horizonURL = rpc.FuturenetHorizonURL
+			default:
+				horizonURL = rpc.MainnetHorizonURL
+			}
 		}
 
 		fmt.Printf("Debugging transaction: %s\n", txHash)
@@ -59,12 +73,12 @@ Example:
 			fmt.Printf("RPC URL: %s\n", rpcURLFlag)
 		}
 
-		resp, err := client.GetTransaction(cmd.Context(), txHash)
+		txResp, err := client.GetTransaction(ctx, txHash)
 		if err != nil {
 			return fmt.Errorf("failed to fetch transaction: %w", err)
 		}
 
-		fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(resp.EnvelopeXdr))
+		fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(txResp.EnvelopeXdr))
 
 		var ledgerEntries map[string]string
 		if overrideStateFlag != "" {
@@ -84,48 +98,102 @@ Example:
 		}
 
 		simReq := &simulator.SimulationRequest{
-			EnvelopeXdr:   resp.EnvelopeXdr,
-			ResultMetaXdr: resp.ResultMetaXdr,
+			EnvelopeXdr:   txResp.EnvelopeXdr,
+			ResultMetaXdr: txResp.ResultMetaXdr,
 			LedgerEntries: ledgerEntries,
 		}
 
+		fmt.Printf("Running simulation...\n")
 		simResp, err := runner.Run(simReq)
 		if err != nil {
 			return fmt.Errorf("simulation failed: %w", err)
 		}
 
-		store, err := db.InitDB()
-		if err != nil {
-			fmt.Printf("Warning: failed to initialize session history DB: %v\n", err)
-		} else {
-			session := &db.Session{
-				TxHash:   txHash,
-				Network:  networkFlag,
-				Status:   simResp.Status,
-				ErrorMsg: simResp.Error,
-				Events:   simResp.Events,
-				Logs:     simResp.Logs,
+		fmt.Printf("\nSimulation Results:\n")
+		fmt.Printf("  Status: %s\n", simResp.Status)
+		if simResp.Error != "" {
+			fmt.Printf("  Error: %s\n", simResp.Error)
+		}
+		if len(simResp.Events) > 0 {
+			fmt.Printf("  Events: %d\n", len(simResp.Events))
+			for i, event := range simResp.Events {
+				if i < 5 {
+					fmt.Printf("    - %s\n", event)
+				}
 			}
-			if err := store.SaveSession(session); err != nil {
-				fmt.Printf("Warning: failed to save session to history: %v\n", err)
-			} else {
-				fmt.Println("Session saved to history.")
+			if len(simResp.Events) > 5 {
+				fmt.Printf("    ... and %d more\n", len(simResp.Events)-5)
+			}
+		}
+		if len(simResp.Logs) > 0 {
+			fmt.Printf("  Logs: %d\n", len(simResp.Logs))
+			for i, log := range simResp.Logs {
+				if i < 5 {
+					fmt.Printf("    - %s\n", log)
+				}
+			}
+			if len(simResp.Logs) > 5 {
+				fmt.Printf("    ... and %d more\n", len(simResp.Logs)-5)
 			}
 		}
 
-		fmt.Printf("Simulation Status: %s\n", simResp.Status)
-		if simResp.Error != "" {
-			fmt.Printf("Error: %s\n", simResp.Error)
+		// Serialize simulation request/response for session storage
+		simReqJSON, err := json.Marshal(simReq)
+		if err != nil {
+			return fmt.Errorf("failed to marshal simulation request: %w", err)
 		}
-		if len(simResp.Events) > 0 {
-			fmt.Println("Diagnostic Events:")
-			for _, e := range simResp.Events {
-				fmt.Printf(" - %s\n", e)
+		simRespJSON, err := json.Marshal(simResp)
+		if err != nil {
+			return fmt.Errorf("failed to marshal simulation response: %w", err)
+		}
+
+		// Create session data
+		sessionData := &session.SessionData{
+			ID:              session.GenerateID(txHash),
+			CreatedAt:       time.Now(),
+			LastAccessAt:    time.Now(),
+			Status:          "active",
+			Network:         networkFlag,
+			HorizonURL:      horizonURL,
+			TxHash:          txHash,
+			EnvelopeXdr:     txResp.EnvelopeXdr,
+			ResultXdr:       txResp.ResultXdr,
+			ResultMetaXdr:   txResp.ResultMetaXdr,
+			SimRequestJSON:  string(simReqJSON),
+			SimResponseJSON: string(simRespJSON),
+			ErstVersion:     getErstVersion(),
+			SchemaVersion:   session.SchemaVersion,
+		}
+
+		// Token flow summary (native XLM + Soroban SAC via diagnostic events in ResultMetaXdr)
+		if report, err := tokenflow.BuildReport(txResp.EnvelopeXdr, txResp.ResultMetaXdr); err != nil {
+			fmt.Printf("\nToken Flow Summary: (failed to parse: %v)\n", err)
+		} else if len(report.Agg) == 0 {
+			fmt.Printf("\nToken Flow Summary: no transfers/mints detected\n")
+		} else {
+			fmt.Printf("\nToken Flow Summary:\n")
+			for _, line := range report.SummaryLines() {
+				fmt.Printf("  %s\n", line)
 			}
+			fmt.Printf("\nToken Flow Chart (Mermaid):\n")
+			fmt.Println(report.MermaidFlowchart())
 		}
+
+		// Store as current session for potential saving
+		SetCurrentSession(sessionData)
+
+		fmt.Printf("\nSession created: %s\n", sessionData.ID)
+		fmt.Printf("Run 'erst session save' to persist this session.\n")
 
 		return nil
 	},
+}
+
+// getErstVersion returns a version string for the current build
+func getErstVersion() string {
+	// In a real build, this would come from build flags or version.go
+	// For now, return a placeholder
+	return "dev"
 }
 
 func init() {
