@@ -3,6 +3,7 @@ module github.com/dotandev/hintents
 go 1.24.0
 
 require (
+	github.com/gorilla/rpc v1.2.1
 	github.com/hashicorp/go-version v1.8.0
 	github.com/spf13/cobra v1.7.0
 	github.com/stellar/go v0.0.0-20251210100531-aab2ea4aca88

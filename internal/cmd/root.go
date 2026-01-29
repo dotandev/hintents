@@ -4,7 +4,21 @@
 package cmd
 
 import (
+	"github.com/dotandev/hintents/internal/localization"
 	"github.com/spf13/cobra"
+)
+
+var rootCmd = &cobra.Command{
+	Use:   "erst",
+	Short: "Erst - Soroban Error Decoder & Debugger",
+	Long: `Erst is a specialized developer tool for the Stellar network,
+designed to solve the "black box" debugging experience on Soroban.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return localization.LoadTranslations()
+	},
+// Global flag variables
+var (
+	ProfileFlag bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -30,11 +44,17 @@ Examples:
 Get started with 'erst debug --help' or visit the documentation.`,
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
 func Execute() error {
 	return rootCmd.Execute()
 }
 
+func init() {}
 func init() {
 	// Root command initialization
+	rootCmd.PersistentFlags().BoolVar(
+		&ProfileFlag,
+		"profile",
+		false,
+		"Enable CPU/Memory profiling and generate a flamegraph SVG",
+	)
 }
