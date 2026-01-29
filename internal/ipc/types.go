@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 // Code generated from JSON Schema using quicktype. DO NOT EDIT.
 // To parse and unparse this JSON data, add this code to your project and do:
 //
@@ -32,11 +35,11 @@ func (r *SimulationResponseSchema) Marshal() ([]byte, error) {
 }
 
 type SimulationRequestSchema struct {
-	Network                                      Network `json:"network"`
-	// Client-generated unique request identifier        
-	RequestID                                    string  `json:"request_id"`
-	Version                                      string  `json:"version"`
-	Xdr                                          string  `json:"xdr"`
+	Network Network `json:"network"`
+	// Client-generated unique request identifier
+	RequestID string `json:"request_id"`
+	Version   string `json:"version"`
+	Xdr       string `json:"xdr"`
 }
 
 type SimulationResponseSchema struct {
@@ -53,8 +56,8 @@ type Error struct {
 }
 
 type Result struct {
-	// Fee charged in stroops       
-	FeeCharged               string `json:"fee_charged"`
+	// Fee charged in stroops
+	FeeCharged string `json:"fee_charged"`
 }
 
 type Network string

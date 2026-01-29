@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 package testgen
 
 // goTestTemplate is the template for generating Go regression tests

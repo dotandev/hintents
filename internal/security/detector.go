@@ -16,18 +16,18 @@ import (
 type Severity string
 
 const (
-	SeverityHigh     Severity = "HIGH"
-	SeverityMedium   Severity = "MEDIUM"
-	SeverityLow      Severity = "LOW"
-	SeverityInfo     Severity = "INFO"
+	SeverityHigh   Severity = "HIGH"
+	SeverityMedium Severity = "MEDIUM"
+	SeverityLow    Severity = "LOW"
+	SeverityInfo   Severity = "INFO"
 )
 
 // FindingType categorizes the security issue
 type FindingType string
 
 const (
-	FindingVerifiedRisk   FindingType = "VERIFIED_RISK"
-	FindingHeuristicWarn  FindingType = "HEURISTIC_WARNING"
+	FindingVerifiedRisk  FindingType = "VERIFIED_RISK"
+	FindingHeuristicWarn FindingType = "HEURISTIC_WARNING"
 )
 
 // Finding represents a security vulnerability or warning
@@ -110,13 +110,13 @@ func (d *Detector) checkContractValueTransfer(op xdr.Operation) {
 	if hostFn == nil {
 		return
 	}
-	
+
 	if hostFn.HostFunction.Type == xdr.HostFunctionTypeHostFunctionTypeInvokeContract {
 		invokeArgs := hostFn.HostFunction.InvokeContract
 		if invokeArgs == nil {
 			return
 		}
-		
+
 		// Look for amount parameters (common in transfer functions)
 		for _, arg := range invokeArgs.Args {
 			if arg.Type == xdr.ScValTypeScvI128 || arg.Type == xdr.ScValTypeScvU128 {
@@ -138,7 +138,7 @@ func (d *Detector) checkContractValueTransfer(op xdr.Operation) {
 // checkReentrancyPatterns detects potential reentrancy vulnerabilities
 func (d *Detector) checkReentrancyPatterns(envelope xdr.TransactionEnvelope, events []string) {
 	ops := extractOperations(envelope)
-	
+
 	// Count contract invocations
 	invocationCount := 0
 	for _, op := range ops {
@@ -173,10 +173,10 @@ func (d *Detector) checkReentrancyPatterns(envelope xdr.TransactionEnvelope, eve
 func (d *Detector) checkIntegerOverflow(events []string, logs []string) {
 	overflowKeywords := []string{"overflow", "underflow"}
 	arithmeticKeywords := []string{"checked_add", "checked_sub", "checked_mul", "checked_div", "arithmetic"}
-	
+
 	for _, log := range logs {
 		logLower := strings.ToLower(log)
-		
+
 		// Check for explicit overflow/underflow mentions
 		for _, keyword := range overflowKeywords {
 			if strings.Contains(logLower, keyword) {
@@ -190,7 +190,7 @@ func (d *Detector) checkIntegerOverflow(events []string, logs []string) {
 				return
 			}
 		}
-		
+
 		// Check for arithmetic operation failures
 		for _, keyword := range arithmeticKeywords {
 			if strings.Contains(logLower, keyword) && (strings.Contains(logLower, "fail") || strings.Contains(logLower, "error")) {
@@ -211,7 +211,7 @@ func (d *Detector) checkIntegerOverflow(events []string, logs []string) {
 func (d *Detector) checkSuspiciousEvents(events []string) {
 	for _, event := range events {
 		eventLower := strings.ToLower(event)
-		
+
 		// Check for authorization failures
 		if strings.Contains(eventLower, "auth") && (strings.Contains(eventLower, "fail") || strings.Contains(eventLower, "invalid")) {
 			d.addFinding(Finding{
