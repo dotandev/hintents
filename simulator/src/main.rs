@@ -8,12 +8,17 @@ use std::collections::HashMap;
 use std::io::{self, Read};
 use std::panic;
 
+mod gas_optimizer;
+use gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor, OptimizationReport};
+
 #[derive(Debug, Deserialize)]
 struct SimulationRequest {
     envelope_xdr: String,
     result_meta_xdr: String,
     // Key XDR -> Entry XDR
     ledger_entries: Option<HashMap<String, String>>,
+    #[serde(default)]
+    enable_optimization_advisor: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -22,6 +27,17 @@ struct SimulationResponse {
     error: Option<String>,
     events: Vec<String>,
     logs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    optimization_report: Option<OptimizationReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    budget_usage: Option<BudgetUsage>,
+}
+
+#[derive(Debug, Serialize)]
+struct BudgetUsage {
+    cpu_instructions: u64,
+    memory_bytes: u64,
+    operations_count: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,6 +64,8 @@ fn main() {
                 error: Some(format!("Invalid JSON: {}", e)),
                 events: vec![],
                 logs: vec![],
+                optimization_report: None,
+                budget_usage: None,
             };
             println!("{}", serde_json::to_string(&res).unwrap());
             return;
@@ -147,6 +165,26 @@ fn main() {
         execute_operations(&host, operations)
     }));
 
+    // Simulate budget usage (in production, this would come from host.budget())
+    let simulated_budget = BudgetUsage {
+        cpu_instructions: 45_000_000, // Example: 45M CPU instructions
+        memory_bytes: 18_000_000,     // Example: 18M bytes
+        operations_count: operations.len(),
+    };
+
+    // Generate optimization report if requested
+    let optimization_report = if request.enable_optimization_advisor {
+        let advisor = GasOptimizationAdvisor::new();
+        let metrics = BudgetMetrics {
+            cpu_instructions: simulated_budget.cpu_instructions,
+            memory_bytes: simulated_budget.memory_bytes,
+            total_operations: simulated_budget.operations_count,
+        };
+        Some(advisor.analyze(&metrics))
+    } else {
+        None
+    };
+
     match invocation_result {
         Ok(Ok(execution_logs)) => {
             // Successful execution
@@ -168,6 +206,8 @@ fn main() {
                 error: None,
                 events,
                 logs: invocation_logs,
+                optimization_report,
+                budget_usage: Some(simulated_budget),
             };
 
             println!("{}", serde_json::to_string(&response).unwrap());
@@ -188,6 +228,8 @@ fn main() {
                 error: Some(serde_json::to_string(&structured_error).unwrap()),
                 events: vec![],
                 logs: invocation_logs,
+                optimization_report,
+                budget_usage: Some(simulated_budget),
             };
 
             println!("{}", serde_json::to_string(&response).unwrap());
@@ -218,6 +260,8 @@ fn main() {
                 error: Some(serde_json::to_string(&structured_error).unwrap()),
                 events: vec![],
                 logs: invocation_logs,
+                optimization_report: None,
+                budget_usage: Some(simulated_budget),
             };
 
             println!("{}", serde_json::to_string(&response).unwrap());
@@ -277,6 +321,8 @@ fn send_error(msg: String) {
         error: Some(msg),
         events: vec![],
         logs: vec![],
+        optimization_report: None,
+        budget_usage: None,
     };
     println!("{}", serde_json::to_string(&res).unwrap());
 }
