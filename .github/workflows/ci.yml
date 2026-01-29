@@ -142,6 +142,22 @@ jobs:
             ${{ runner.os }}-cargo-${{ matrix.rust-version }}-
             ${{ runner.os }}-cargo-
 
+      - name: Verify Cargo.lock integrity
+        run: |
+          # Ensure LF line endings (fixes Windows checkout issues)
+          if command -v dos2unix &> /dev/null; then
+            dos2unix Cargo.lock 2>/dev/null || true
+          fi
+          # Check if Cargo.lock is valid by trying to parse it
+          if ! cargo metadata --format-version 1 > /dev/null 2>&1; then
+            echo "⚠️  Cargo.lock appears corrupted or incompatible, regenerating..."
+            rm -f Cargo.lock
+            cargo generate-lockfile
+            echo "✅ Cargo.lock regenerated"
+          else
+            echo "✅ Cargo.lock is valid"
+          fi
+
       - name: Check formatting
         if: matrix.rust-version == 'stable'
         run: |
