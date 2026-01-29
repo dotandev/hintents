@@ -4,7 +4,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -12,7 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
+	"github.com/dotandev/hintents/internal/errors"
+	"github.com/dotandev/hintents/internal/localization"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/security"
 	"github.com/dotandev/hintents/internal/session"
@@ -20,6 +20,7 @@ import (
 	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/dotandev/hintents/internal/tokenflow"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/stellar/go/xdr"
 	"go.opentelemetry.io/otel/attribute"
@@ -30,10 +31,13 @@ var (
 	rpcURLFlag         string
 	tracingEnabled     bool
 	otlpExporterURL    string
-	snapshotFlag       string
-	compareNetworkFlag string
 	generateTrace      bool
 	traceOutputFile    string
+	snapshotFlag       string
+	compareNetworkFlag string
+	verbose            bool
+	wasmPath           string
+	args               []string
 )
 
 var debugCmd = &cobra.Command{
@@ -43,39 +47,73 @@ var debugCmd = &cobra.Command{
 
 This command retrieves the transaction envelope from the Stellar network, runs it
 through the local simulator, and displays detailed execution traces including:
-  • Transaction status and error messages
-  • Contract events and diagnostic logs
-  • Token flows (XLM and Soroban assets)
-  • Execution metadata and state changes
+  - Transaction status and error messages
+  - Contract events and diagnostic logs
+  - Token flows (XLM and Soroban assets)
+  - Execution metadata and state changes
 
-The simulation results are stored in a session that can be saved for later analysis.`,
+The simulation results are stored in a session that can be saved for later analysis.
+
+Local WASM Replay Mode:
+  Use --wasm flag to test contracts locally without network data.`,
 	Example: `  # Debug a transaction on mainnet
   erst debug 5c0a1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab
 
   # Debug on testnet
   erst debug --network testnet abc123...def789
 
-  # Use custom RPC endpoint
-  erst debug --rpc-url https://custom-horizon.example.com abc123...def789
+  # Debug and compare results between networks
+  erst debug --network mainnet --compare-network testnet abc123...def789
 
-  # Debug and save the session
-  erst debug abc123...def789 && erst session save`,
-	Args: cobra.ExactArgs(1),
+  # Local WASM replay (no network required)
+  erst debug --wasm ./contract.wasm --args "arg1" --args "arg2"`,
+	Args: cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Local WASM replay mode doesn't need transaction hash
+		if wasmPath != "" {
+			return nil
+		}
+
+		if len(args) == 0 {
+			return fmt.Errorf("transaction hash is required when not using --wasm flag")
+		}
+
 		if len(args[0]) != 64 {
 			return fmt.Errorf("error: invalid transaction hash format (expected 64 hex characters, got %d)", len(args[0]))
 		}
+
+		// Validate network flag
+		switch rpc.Network(networkFlag) {
+		case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
+			// valid
+		default:
+			return errors.WrapInvalidNetwork(networkFlag)
+		}
+
+		// Validate compare network flag if present
+		if compareNetworkFlag != "" {
+			switch rpc.Network(compareNetworkFlag) {
+			case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
+				// valid
+			default:
+				return fmt.Errorf("invalid compare-network: %s. Must be one of: testnet, mainnet, futurenet", compareNetworkFlag)
+			}
+		}
 		return nil
 	},
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, cmdArgs []string) error {
+		// Local WASM replay mode
+		if wasmPath != "" {
+			return runLocalWasmReplay()
+		}
+
+		// Network transaction replay mode
 		ctx := cmd.Context()
-		txHash := args[0]
+		txHash := cmdArgs[0]
 
 		// Initialize OpenTelemetry if enabled
-		var cleanup func()
 		if tracingEnabled {
-			var err error
-			cleanup, err = telemetry.Init(ctx, telemetry.Config{
+			cleanup, err := telemetry.Init(ctx, telemetry.Config{
 				Enabled:     true,
 				ExporterURL: otlpExporterURL,
 				ServiceName: "erst",
@@ -86,7 +124,7 @@ The simulation results are stored in a session that can be saved for later analy
 			defer cleanup()
 		}
 
-		// Start root span for transaction debugging
+		// Start root span
 		tracer := telemetry.GetTracer()
 		ctx, span := tracer.Start(ctx, "debug_transaction")
 		span.SetAttributes(
@@ -95,14 +133,12 @@ The simulation results are stored in a session that can be saved for later analy
 		)
 		defer span.End()
 
-		// Setup Primary Client
-		var client *rpc.Client
-		var horizonURL string
+		client := rpc.NewClient(rpc.Network(networkFlag))
+		horizonURL := ""
 		if rpcURLFlag != "" {
 			client = rpc.NewClientWithURL(rpcURLFlag, rpc.Network(networkFlag))
 			horizonURL = rpcURLFlag
 		} else {
-			client = rpc.NewClient(rpc.Network(networkFlag))
 			switch rpc.Network(networkFlag) {
 			case rpc.Testnet:
 				horizonURL = rpc.TestnetHorizonURL
@@ -113,149 +149,99 @@ The simulation results are stored in a session that can be saved for later analy
 			}
 		}
 
-		fmt.Printf("Debugging transaction: %s\n", txHash)
-		fmt.Printf("Primary Network: %s\n", networkFlag)
-		if compareNetworkFlag != "" {
-			fmt.Printf("Comparing against Network: %s\n", compareNetworkFlag)
-		}
-
-		// Fetch transaction details
+		fmt.Printf("Fetching transaction: %s\n", txHash)
 		resp, err := client.GetTransaction(ctx, txHash)
 		if err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("failed to fetch transaction: %w", err)
+			return fmt.Errorf(localization.Get("error.fetch_transaction"), err)
 		}
-
-		span.SetAttributes(
-			attribute.Int("envelope.size_bytes", len(resp.EnvelopeXdr)),
-		)
 
 		fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(resp.EnvelopeXdr))
 
-		// Generate trace if requested
-		if generateTrace {
-			fmt.Println("Generating execution trace...")
-			err := generateExecutionTrace(ctx, txHash, resp)
-			if err != nil {
-				fmt.Printf("Warning: Failed to generate trace: %v\n", err)
-			} else {
-				filename := traceOutputFile
-				if filename == "" {
-					filename = fmt.Sprintf("trace_%s.json", txHash[:8])
-				}
-				fmt.Printf("Execution trace saved to: %s\n", filename)
-			}
-		}
-
-		// Extract Ledger Keys from ResultMeta
+		// Extract ledger keys for replay
 		keys, err := extractLedgerKeys(resp.ResultMetaXdr)
 		if err != nil {
 			return fmt.Errorf("failed to extract ledger keys: %w", err)
 		}
-		logger.Logger.Info("Extracted ledger keys", "count", len(keys))
 
-		// Load snapshot if provided
-		var ledgerEntries map[string]string
-		if snapshotFlag != "" {
-			snap, err := snapshot.Load(snapshotFlag)
-			if err != nil {
-				return fmt.Errorf("failed to load snapshot: %w", err)
-			}
-			ledgerEntries = snap.ToMap()
-			fmt.Printf("Loaded %d ledger entries from snapshot\n", len(ledgerEntries))
-		}
-
-		// Initialize Simulator Runner
 		runner, err := simulator.NewRunner()
 		if err != nil {
-			return fmt.Errorf("failed to initialize simulator runner: %w", err)
+			return fmt.Errorf("failed to initialize simulator: %w", err)
 		}
 
-		// Run Simulations
+		var simResp *simulator.SimulationResponse
+		var ledgerEntries map[string]string
+
 		if compareNetworkFlag == "" {
-			// Single Run
-			primaryEntries, err := client.GetLedgerEntries(ctx, keys)
-			if err != nil {
-				return fmt.Errorf("failed to fetch primary ledger entries: %w", err)
+			// Single Network Run
+			if snapshotFlag != "" {
+				snap, err := snapshot.Load(snapshotFlag)
+				if err != nil {
+					return fmt.Errorf("failed to load snapshot: %w", err)
+				}
+				ledgerEntries = snap.ToMap()
+			} else {
+				ledgerEntries, err = client.GetLedgerEntries(ctx, keys)
+				if err != nil {
+					return fmt.Errorf("failed to fetch ledger entries: %w", err)
+				}
 			}
-			fmt.Printf("Fetched %d ledger entries from %s\n", len(primaryEntries), networkFlag)
 
 			fmt.Printf("Running simulation on %s...\n", networkFlag)
-			primaryReq := &simulator.SimulationRequest{
+			simReq := &simulator.SimulationRequest{
 				EnvelopeXdr:   resp.EnvelopeXdr,
 				ResultMetaXdr: resp.ResultMetaXdr,
-				LedgerEntries: primaryEntries,
+				LedgerEntries: ledgerEntries,
 			}
-			primaryResult, err := runner.Run(ctx, primaryReq)
+			simResp, err = runner.Run(simReq)
 			if err != nil {
-				return fmt.Errorf("simulation failed on primary network: %w", err)
+				return fmt.Errorf("simulation failed: %w", err)
 			}
-			printSimulationResult(networkFlag, primaryResult)
-
-			// Print token flow and security analysis for single network
-			printTokenFlow(resp.EnvelopeXdr, resp.ResultMetaXdr)
-			printSecurityAnalysis(resp.EnvelopeXdr, resp.ResultMetaXdr, primaryResult.Events, primaryResult.Logs)
-
+			printSimulationResult(networkFlag, simResp)
 		} else {
-			// Parallel Execution
+			// Comparison Run
 			var wg sync.WaitGroup
 			var primaryResult, compareResult *simulator.SimulationResponse
 			var primaryErr, compareErr error
 
 			wg.Add(2)
-
-			// Primary Network Routine
 			go func() {
 				defer wg.Done()
-
-				primaryEntries, err := client.GetLedgerEntries(ctx, keys)
+				entries, err := client.GetLedgerEntries(ctx, keys)
 				if err != nil {
-					primaryErr = fmt.Errorf("failed to fetch primary ledger entries: %w", err)
+					primaryErr = err
 					return
 				}
-				fmt.Printf("Fetched %d ledger entries from %s\n", len(primaryEntries), networkFlag)
-
-				fmt.Printf("Running simulation on %s...\n", networkFlag)
-				primaryReq := &simulator.SimulationRequest{
+				primaryResult, primaryErr = runner.Run(&simulator.SimulationRequest{
 					EnvelopeXdr:   resp.EnvelopeXdr,
 					ResultMetaXdr: resp.ResultMetaXdr,
-					LedgerEntries: primaryEntries,
-				}
-				primaryResult, primaryErr = runner.Run(ctx, primaryReq)
+					LedgerEntries: entries,
+				})
 			}()
 
-			// Compare Network Routine
 			go func() {
 				defer wg.Done()
-
 				compareClient := rpc.NewClient(rpc.Network(compareNetworkFlag))
-
-				compareEntries, err := compareClient.GetLedgerEntries(ctx, keys)
+				entries, err := compareClient.GetLedgerEntries(ctx, keys)
 				if err != nil {
-					compareErr = fmt.Errorf("failed to fetch ledger entries from %s: %w", compareNetworkFlag, err)
+					compareErr = err
 					return
 				}
-				fmt.Printf("Fetched %d ledger entries from %s\n", len(compareEntries), compareNetworkFlag)
-
-				fmt.Printf("Running simulation on %s...\n", compareNetworkFlag)
-				compareReq := &simulator.SimulationRequest{
+				compareResult, compareErr = runner.Run(&simulator.SimulationRequest{
 					EnvelopeXdr:   resp.EnvelopeXdr,
 					ResultMetaXdr: resp.ResultMetaXdr,
-					LedgerEntries: compareEntries,
-				}
-				compareResult, compareErr = runner.Run(ctx, compareReq)
+					LedgerEntries: entries,
+				})
 			}()
 
 			wg.Wait()
-
 			if primaryErr != nil {
-				return fmt.Errorf("error on primary network: %w", primaryErr)
+				return fmt.Errorf("primary network error: %w", primaryErr)
 			}
 			if compareErr != nil {
-				return fmt.Errorf("error on compare network: %w", compareErr)
+				return fmt.Errorf("compare network error: %w", compareErr)
 			}
 
-			// Print and Diff
+			simResp = primaryResult // Use primary for further analysis
 			printSimulationResult(networkFlag, primaryResult)
 			printSimulationResult(compareNetworkFlag, compareResult)
 			diffResults(primaryResult, compareResult, networkFlag, compareNetworkFlag)
@@ -265,106 +251,175 @@ The simulation results are stored in a session that can be saved for later analy
 			printSecurityAnalysis(resp.EnvelopeXdr, resp.ResultMetaXdr, primaryResult.Events, primaryResult.Logs)
 		}
 
-		// Create session data
-		simReqJSON, err := json.Marshal(&simulator.SimulationRequest{
+		// Analysis: Security
+		fmt.Printf("\n=== Security Analysis ===\n")
+		secDetector := security.NewDetector()
+		findings := secDetector.Analyze(resp.EnvelopeXdr, resp.ResultMetaXdr, simResp.Events, simResp.Logs)
+		if len(findings) == 0 {
+			fmt.Println("✓ No security issues detected")
+		} else {
+			for i, f := range findings {
+				fmt.Printf("%d. [%s] %s: %s\n", i+1, f.Severity, f.Title, f.Description)
+			}
+		}
+
+		// Analysis: Token Flows
+		if report, err := tokenflow.BuildReport(resp.EnvelopeXdr, resp.ResultMetaXdr); err == nil && len(report.Agg) > 0 {
+			fmt.Printf("\nToken Flow Summary:\n")
+			for _, line := range report.SummaryLines() {
+				fmt.Printf("  %s\n", line)
+			}
+			fmt.Printf("\nToken Flow Chart (Mermaid):\n")
+			fmt.Println(report.MermaidFlowchart())
+		}
+
+		// Session Management
+		sessionData := &session.SessionData{
+			ID:            txHash[:8], // Simplified ID
+			CreatedAt:     time.Now(),
+			Network:       networkFlag,
+			HorizonURL:    horizonURL,
+			TxHash:        txHash,
 			EnvelopeXdr:   resp.EnvelopeXdr,
 			ResultMetaXdr: resp.ResultMetaXdr,
-			LedgerEntries: ledgerEntries,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to serialize simulation data: %w", err)
 		}
-
-		simRespJSON, err := json.Marshal(&simulator.SimulationResponse{})
-		if err != nil {
-			return fmt.Errorf("failed to serialize simulation results: %w", err)
-		}
-
-		sessionData := &session.SessionData{
-			ID:              session.GenerateID(txHash),
-			CreatedAt:       time.Now(),
-			LastAccessAt:    time.Now(),
-			Status:          "active",
-			Network:         networkFlag,
-			HorizonURL:      horizonURL,
-			TxHash:          txHash,
-			EnvelopeXdr:     resp.EnvelopeXdr,
-			ResultXdr:       resp.ResultXdr,
-			ResultMetaXdr:   resp.ResultMetaXdr,
-			SimRequestJSON:  string(simReqJSON),
-			SimResponseJSON: string(simRespJSON),
-			ErstVersion:     getErstVersion(),
-			SchemaVersion:   session.SchemaVersion,
-		}
-
 		SetCurrentSession(sessionData)
-		fmt.Printf("\nSession created: %s\n", sessionData.ID)
-		fmt.Printf("Run 'erst session save' to persist this session.\n")
+		fmt.Printf("\nSession ready. Use 'erst session save' to persist.\n")
 
 		return nil
 	},
 }
 
+func runLocalWasmReplay() error {
+	color.Yellow("⚠️  WARNING: Using Mock State (not mainnet data)")
+	fmt.Println()
+
+	// Verify WASM file exists
+	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
+		return fmt.Errorf("WASM file not found: %s", wasmPath)
+	}
+
+	color.Cyan("🔧 Local WASM Replay Mode")
+	fmt.Printf("WASM File: %s\n", wasmPath)
+	fmt.Printf("Arguments: %v\n", args)
+	fmt.Println()
+
+	// Create simulator runner
+	runner, err := simulator.NewRunner()
+	if err != nil {
+		return fmt.Errorf("failed to initialize simulator: %w", err)
+	}
+
+	// Create simulation request with local WASM
+	req := &simulator.SimulationRequest{
+		EnvelopeXdr:   "",  // Empty for local replay
+		ResultMetaXdr: "",  // Empty for local replay
+		LedgerEntries: nil, // Mock state will be generated
+		WasmPath:      &wasmPath,
+		MockArgs:      &args,
+	}
+
+	// Run simulation
+	color.Green("▶ Executing contract locally...")
+	resp, err := runner.Run(req)
+	if err != nil {
+		color.Red("✗ Execution failed: %v", err)
+		return err
+	}
+
+	// Display results
+	fmt.Println()
+	color.Green("✓ Execution completed successfully")
+	fmt.Println()
+
+	if len(resp.Logs) > 0 {
+		color.Cyan("📋 Logs:")
+		for _, log := range resp.Logs {
+			fmt.Printf("  %s\n", log)
+		}
+		fmt.Println()
+	}
+
+	if len(resp.Events) > 0 {
+		color.Cyan("📡 Events:")
+		for _, event := range resp.Events {
+			fmt.Printf("  %s\n", event)
+		}
+		fmt.Println()
+	}
+
+	if verbose {
+		color.Cyan("🔍 Full Response:")
+		jsonBytes, _ := json.MarshalIndent(resp, "", "  ")
+		fmt.Println(string(jsonBytes))
+	}
+
+	return nil
+}
+
 func extractLedgerKeys(metaXdr string) ([]string, error) {
 	data, err := base64.StdEncoding.DecodeString(metaXdr)
 	if err != nil {
-		return nil, fmt.Errorf("base64 decode failed: %w", err)
+		return nil, err
 	}
 
 	var meta xdr.TransactionResultMeta
 	if err := xdr.SafeUnmarshal(data, &meta); err != nil {
-		return nil, fmt.Errorf("xdr unmarshal failed: %w", err)
+		return nil, err
 	}
 
 	keysMap := make(map[string]struct{})
+	addKey := func(k xdr.LedgerKey) {
+		b, _ := k.MarshalBinary()
+		keysMap[base64.StdEncoding.EncodeToString(b)] = struct{}{}
+	}
 
-	collectChanges := func(l xdr.LedgerEntryChanges) {
-		for _, change := range l {
-			var key xdr.LedgerKey
-			var err error
-			switch change.Type {
+	collectChanges := func(changes xdr.LedgerEntryChanges) {
+		for _, c := range changes {
+			switch c.Type {
 			case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
-				key, err = change.Created.LedgerKey()
+				k, err := c.Created.LedgerKey()
+				if err == nil {
+					addKey(k)
+				}
 			case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
-				key, err = change.Updated.LedgerKey()
+				k, err := c.Updated.LedgerKey()
+				if err == nil {
+					addKey(k)
+				}
 			case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
-				if change.Removed != nil {
-					key = *change.Removed
-				} else {
-					continue
+				if c.Removed != nil {
+					addKey(*c.Removed)
 				}
 			case xdr.LedgerEntryChangeTypeLedgerEntryState:
-				key, err = change.State.LedgerKey()
-			}
-
-			if err == nil {
-				keyBytes, _ := key.MarshalBinary()
-				keyB64 := base64.StdEncoding.EncodeToString(keyBytes)
-				keysMap[keyB64] = struct{}{}
+				k, err := c.State.LedgerKey()
+				if err == nil {
+					addKey(k)
+				}
 			}
 		}
 	}
 
-	// 1. Fee Processing Changes
+	// 1. Fee processing changes
 	collectChanges(meta.FeeProcessing)
 
-	// 2. Transaction Application Changes
+	// 2. Transaction apply processing changes
 	switch meta.TxApplyProcessing.V {
 	case 0:
-		if ops, ok := meta.TxApplyProcessing.GetOperations(); ok {
-			for _, op := range ops {
+		if meta.TxApplyProcessing.Operations != nil {
+			for _, op := range *meta.TxApplyProcessing.Operations {
 				collectChanges(op.Changes)
 			}
 		}
 	case 1:
-		if v1, ok := meta.TxApplyProcessing.GetV1(); ok {
+		if v1 := meta.TxApplyProcessing.V1; v1 != nil {
 			collectChanges(v1.TxChanges)
 			for _, op := range v1.Operations {
 				collectChanges(op.Changes)
 			}
 		}
 	case 2:
-		if v2, ok := meta.TxApplyProcessing.GetV2(); ok {
+		if v2 := meta.TxApplyProcessing.V2; v2 != nil {
 			collectChanges(v2.TxChangesBefore)
 			collectChanges(v2.TxChangesAfter)
 			for _, op := range v2.Operations {
@@ -372,7 +427,7 @@ func extractLedgerKeys(metaXdr string) ([]string, error) {
 			}
 		}
 	case 3:
-		if v3, ok := meta.TxApplyProcessing.GetV3(); ok {
+		if v3 := meta.TxApplyProcessing.V3; v3 != nil {
 			collectChanges(v3.TxChangesBefore)
 			collectChanges(v3.TxChangesAfter)
 			for _, op := range v3.Operations {
@@ -381,11 +436,11 @@ func extractLedgerKeys(metaXdr string) ([]string, error) {
 		}
 	}
 
-	result := make([]string, 0, len(keysMap))
+	res := make([]string, 0, len(keysMap))
 	for k := range keysMap {
-		result = append(result, k)
+		res = append(res, k)
 	}
-	return result, nil
+	return res, nil
 }
 
 func printSimulationResult(network string, res *simulator.SimulationResponse) {
@@ -394,161 +449,30 @@ func printSimulationResult(network string, res *simulator.SimulationResponse) {
 	if res.Error != "" {
 		fmt.Printf("Error: %s\n", res.Error)
 	}
-	fmt.Printf("Events: %d\n", len(res.Events))
-	for i, ev := range res.Events {
-		fmt.Printf("  [%d] %s\n", i, ev)
-	}
+	fmt.Printf("Events: %d, Logs: %d\n", len(res.Events), len(res.Logs))
 }
 
 func diffResults(res1, res2 *simulator.SimulationResponse, net1, net2 string) {
-	fmt.Printf("\n=== Comparison: %s vs %s ===\n", net1, net2)
-
 	if res1.Status != res2.Status {
-		fmt.Printf("Status Mismatch: %s (%s) vs %s (%s)\n", res1.Status, net1, res2.Status, net2)
-	} else {
-		fmt.Printf("Status Match: %s\n", res1.Status)
+		fmt.Printf("\n[DIFF] Status mismatch: %s vs %s\n", res1.Status, res2.Status)
 	}
-
-	// Compare Events
-	fmt.Println("\nEvent Diff:")
-	maxEvents := len(res1.Events)
-	if len(res2.Events) > maxEvents {
-		maxEvents = len(res2.Events)
+	if len(res1.Events) != len(res2.Events) {
+		fmt.Printf("[DIFF] Events count mismatch: %d vs %d\n", len(res1.Events), len(res2.Events))
 	}
-
-	for i := 0; i < maxEvents; i++ {
-		var ev1, ev2 string
-		if i < len(res1.Events) {
-			ev1 = res1.Events[i]
-		} else {
-			ev1 = "<missing>"
-		}
-
-		if i < len(res2.Events) {
-			ev2 = res2.Events[i]
-		} else {
-			ev2 = "<missing>"
-		}
-
-		if ev1 != ev2 {
-			fmt.Printf("  [%d] MISMATCH:\n", i)
-			fmt.Printf("    %s: %s\n", net1, ev1)
-			fmt.Printf("    %s: %s\n", net2, ev2)
-		}
-	}
-}
-
-func printTokenFlow(envelopeXdr, resultMetaXdr string) {
-	fmt.Printf("\n=== Token Flow Summary ===\n")
-	if report, err := tokenflow.BuildReport(envelopeXdr, resultMetaXdr); err != nil {
-		fmt.Printf("(failed to parse: %v)\n", err)
-	} else if len(report.Agg) == 0 {
-		fmt.Printf("no transfers/mints detected\n")
-	} else {
-		for _, line := range report.SummaryLines() {
-			fmt.Printf("  %s\n", line)
-		}
-		fmt.Printf("\nToken Flow Chart (Mermaid):\n")
-		fmt.Println(report.MermaidFlowchart())
-	}
-}
-
-func printSecurityAnalysis(envelopeXdr, resultMetaXdr string, events, logs []string) {
-	fmt.Printf("\n=== Security Analysis ===\n")
-	secDetector := security.NewDetector()
-	findings := secDetector.Analyze(envelopeXdr, resultMetaXdr, events, logs)
-
-	if len(findings) == 0 {
-		fmt.Printf("No security issues detected\n")
-		return
-	}
-
-	verifiedCount := 0
-	heuristicCount := 0
-
-	for _, finding := range findings {
-		if finding.Type == security.FindingVerifiedRisk {
-			verifiedCount++
-		} else {
-			heuristicCount++
-		}
-	}
-
-	if verifiedCount > 0 {
-		fmt.Printf("\nVERIFIED SECURITY RISKS: %d\n", verifiedCount)
-	}
-	if heuristicCount > 0 {
-		fmt.Printf("HEURISTIC WARNINGS: %d\n", heuristicCount)
-	}
-
-	fmt.Printf("\nFindings:\n")
-	for i, finding := range findings {
-		icon := "HEURISTIC"
-		if finding.Type == security.FindingVerifiedRisk {
-			icon = "VERIFIED"
-		}
-
-		fmt.Printf("\n%d. [%s] %s - %s\n", i+1, icon, finding.Severity, finding.Title)
-		fmt.Printf("   %s\n", finding.Description)
-		if finding.Evidence != "" {
-			fmt.Printf("   Evidence: %s\n", finding.Evidence)
-		}
-	}
-}
-
-// getErstVersion returns a version string for the current build
-func getErstVersion() string {
-	return "dev"
 }
 
 func init() {
-	debugCmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
-	debugCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
-	debugCmd.Flags().BoolVar(&tracingEnabled, "tracing", false, "Enable OpenTelemetry tracing")
-	debugCmd.Flags().StringVar(&otlpExporterURL, "otlp-url", "http://localhost:4318", "OTLP exporter URL")
-	debugCmd.Flags().BoolVar(&generateTrace, "generate-trace", false, "Generate execution trace file")
-	debugCmd.Flags().StringVar(&traceOutputFile, "trace-output", "", "Output file for execution trace (default: trace_<txhash>.json)")
-	debugCmd.Flags().StringVar(&snapshotFlag, "snapshot", "", "Load state from JSON snapshot file")
-	debugCmd.Flags().StringVar(&compareNetworkFlag, "compare-network", "", "Network to compare against (testnet, mainnet, futurenet)")
+	debugCmd.Flags().StringVarP(&networkFlag, "network", "n", "mainnet", "Stellar network")
+	debugCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom RPC URL")
+	debugCmd.Flags().BoolVar(&tracingEnabled, "tracing", false, "Enable tracing")
+	debugCmd.Flags().StringVar(&otlpExporterURL, "otlp-url", "http://localhost:4318", "OTLP URL")
+	debugCmd.Flags().BoolVar(&generateTrace, "generate-trace", false, "Generate trace file")
+	debugCmd.Flags().StringVar(&traceOutputFile, "trace-output", "", "Trace output file")
+	debugCmd.Flags().StringVar(&snapshotFlag, "snapshot", "", "Snapshot file")
+	debugCmd.Flags().StringVar(&compareNetworkFlag, "compare-network", "", "Network to compare")
+	debugCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+	debugCmd.Flags().StringVar(&wasmPath, "wasm", "", "Path to local WASM file for local replay (no network required)")
+	debugCmd.Flags().StringSliceVar(&args, "args", []string{}, "Mock arguments for local replay (JSON array of strings)")
 
 	rootCmd.AddCommand(debugCmd)
-}
-
-// generateExecutionTrace creates a mock execution trace for demonstration
-func generateExecutionTrace(ctx context.Context, txHash string, resp *rpc.TransactionResponse) error {
-	// Create a mock simulation request
-	simReq := &simulator.SimulationRequest{
-		EnvelopeXdr:   resp.EnvelopeXdr,
-		ResultMetaXdr: resp.ResultMetaXdr,
-	}
-
-	// Create simulator runner
-	runner, err := simulator.NewRunner()
-	if err != nil {
-		return fmt.Errorf("failed to create simulator: %w", err)
-	}
-
-	// Run simulation with trace generation
-	_, executionTrace, err := runner.RunWithTrace(ctx, simReq, txHash)
-	if err != nil {
-		return fmt.Errorf("simulation failed: %w", err)
-	}
-
-	// Save trace to file
-	filename := traceOutputFile
-	if filename == "" {
-		filename = fmt.Sprintf("trace_%s.json", txHash[:8])
-	}
-
-	traceData, err := executionTrace.ToJSON()
-	if err != nil {
-		return fmt.Errorf("failed to serialize trace: %w", err)
-	}
-
-	err = os.WriteFile(filename, traceData, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write trace file: %w", err)
-	}
-
-	return nil
 }

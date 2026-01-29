@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/dotandev/hintents/internal/authtrace"
 	_ "modernc.org/sqlite"
 
 	"github.com/dotandev/hintents/internal/authtrace"
@@ -22,9 +23,14 @@ type SimulationRequest struct {
 	ResultMetaXdr string `json:"result_meta_xdr"`
 	// Snapshot of Ledger Entries (Key XDR -> Entry XDR) necessary for replay
 	LedgerEntries map[string]string `json:"ledger_entries,omitempty"`
+	// Path to local WASM file for local replay (optional)
+	WasmPath *string `json:"wasm_path,omitempty"`
+	// Mock arguments for local replay (optional, JSON array of strings)
+	MockArgs *[]string `json:"mock_args,omitempty"`
 	// Enable profiling
 	Profile bool `json:"profile,omitempty"`
-	// Auth trace options
+
+	// Advanced options
 	AuthTraceOpts *AuthTraceOptions      `json:"auth_trace_opts,omitempty"`
 	CustomAuthCfg map[string]interface{} `json:"custom_auth_config,omitempty"`
 }

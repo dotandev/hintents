@@ -26,7 +26,7 @@ pub fn load_theme() -> Theme {
         return default;
     };
 
-    let Ok(config) = toml::from_str::<ThemeConfig>(&content) else {
+    let Ok(config) = serde_json::from_str::<ThemeConfig>(&content) else {
         return default;
     };
 

@@ -24,7 +24,7 @@ Currently, when a Soroban transaction fails on mainnet, developers receive a gen
 Fetches a transaction envelope from the Stellar Public network and prints its XDR size (Simulation pending).
 
 ```bash
-./erst debug <transaction-hash>
+./erst debug <transaction-hash> --network testnet
 ```
 
 ## Documentation
