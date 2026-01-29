@@ -4,19 +4,27 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/dotandev/hintents/internal/db"
 	"github.com/dotandev/hintents/internal/errors"
+	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/spf13/cobra"
 )
 
 var (
-	networkFlag string
-	rpcURLFlag  string
+	networkFlag      string
+	rpcURLFlag       string
+	overrideStateFlag string
 )
+
+type OverrideData struct {
+	LedgerEntries map[string]string `json:"ledger_entries"`
+}
 
 var debugCmd = &cobra.Command{
 	Use:   "debug <transaction-hash>",
@@ -51,7 +59,6 @@ Example:
 			fmt.Printf("RPC URL: %s\n", rpcURLFlag)
 		}
 
-		// Fetch transaction details
 		resp, err := client.GetTransaction(cmd.Context(), txHash)
 		if err != nil {
 			return fmt.Errorf("failed to fetch transaction: %w", err)
@@ -59,16 +66,27 @@ Example:
 
 		fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(resp.EnvelopeXdr))
 
-		// Initialize Simulator
+		var ledgerEntries map[string]string
+		if overrideStateFlag != "" {
+			overrideEntries, err := loadOverrideState(overrideStateFlag)
+			if err != nil {
+				return fmt.Errorf("failed to load override state: %w", err)
+			}
+
+			ledgerEntries = overrideEntries
+			logger.Logger.Info("Sandbox mode active", "entries_overridden", len(overrideEntries))
+			fmt.Printf("Sandbox mode active: %d entries overridden\n", len(overrideEntries))
+		}
+
 		runner, err := simulator.NewRunner()
 		if err != nil {
 			return fmt.Errorf("failed to initialize simulator: %w", err)
 		}
 
-		// Run Simulation
 		simReq := &simulator.SimulationRequest{
 			EnvelopeXdr:   resp.EnvelopeXdr,
 			ResultMetaXdr: resp.ResultMetaXdr,
+			LedgerEntries: ledgerEntries,
 		}
 
 		simResp, err := runner.Run(simReq)
@@ -76,7 +94,6 @@ Example:
 			return fmt.Errorf("simulation failed: %w", err)
 		}
 
-		// Save to DB
 		store, err := db.InitDB()
 		if err != nil {
 			fmt.Printf("Warning: failed to initialize session history DB: %v\n", err)
@@ -114,6 +131,25 @@ Example:
 func init() {
 	debugCmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
 	debugCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
+	debugCmd.Flags().StringVar(&overrideStateFlag, "override-state", "", "Path to JSON file with manual ledger entry overrides for sandbox mode")
 
 	rootCmd.AddCommand(debugCmd)
+}
+
+func loadOverrideState(filePath string) (map[string]string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read override file: %w", err)
+	}
+
+	var override OverrideData
+	if err := json.Unmarshal(data, &override); err != nil {
+		return nil, fmt.Errorf("failed to parse override JSON: %w", err)
+	}
+
+	if override.LedgerEntries == nil {
+		return make(map[string]string), nil
+	}
+
+	return override.LedgerEntries, nil
 }
