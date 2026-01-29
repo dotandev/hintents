@@ -13,4 +13,11 @@ func ExampleUsage(runner RunnerInterface, req *SimulationRequest) (*SimulationRe
 	// Commands can now work with any implementation of RunnerInterface
 	// This enables easy testing with mocks and flexible production usage
 	return runner.Run(req)
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
+package simulator
+
+type Runner interface {
+	Run(req *SimulationRequest) (*SimulationResponse, error)
 }

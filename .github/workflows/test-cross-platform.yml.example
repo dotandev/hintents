@@ -1,0 +1,129 @@
+name: Cross-Platform Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go-version: ['1.25']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+    
+    - name: Download dependencies
+      run: go mod download
+    
+    - name: Run tests
+      run: go test ./internal/rpc -v
+    
+    - name: Run cache tests specifically
+      run: go test ./internal/rpc/cache_test.go ./internal/rpc/cache.go -v
+    
+    - name: Run race detector
+      run: go test ./internal/rpc -race
+    
+    - name: Run benchmarks
+      run: go test ./internal/rpc -bench=BenchmarkLedgerKeyHashing -benchmem
+    
+    - name: Generate coverage
+      run: go test ./internal/rpc -coverprofile=coverage.out
+    
+    - name: Upload coverage
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./coverage.out
+        flags: ${{ matrix.os }}
+        name: codecov-${{ matrix.os }}
+
+  verify-hashes:
+    name: Verify Hash Consistency
+    runs-on: ${{ matrix.os }}
+    needs: test
+    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+    
+    - name: Run verification script
+      run: go run verify_hashing.go
+    
+    - name: Run comprehensive verification
+      run: go run verify_hashing_comprehensive.go
+    
+    - name: Save hash output
+      run: |
+        echo "Platform: ${{ matrix.os }}" > hash_output_${{ matrix.os }}.txt
+        go run verify_hashing.go >> hash_output_${{ matrix.os }}.txt
+    
+    - name: Upload hash output
+      uses: actions/upload-artifact@v4
+      with:
+        name: hash-output-${{ matrix.os }}
+        path: hash_output_${{ matrix.os }}.txt
+
+  compare-hashes:
+    name: Compare Hashes Across Platforms
+    runs-on: ubuntu-latest
+    needs: verify-hashes
+    
+    steps:
+    - name: Download all hash outputs
+      uses: actions/download-artifact@v4
+    
+    - name: Compare hashes
+      run: |
+        echo "=== Hash Comparison Across Platforms ==="
+        echo ""
+        echo "Ubuntu:"
+        cat hash-output-ubuntu-latest/hash_output_ubuntu-latest.txt
+        echo ""
+        echo "macOS:"
+        cat hash-output-macos-latest/hash_output_macos-latest.txt
+        echo ""
+        echo "Windows:"
+        cat hash-output-windows-latest/hash_output_windows-latest.txt
+        echo ""
+        
+        # Extract just the hash values
+        UBUNTU_HASH=$(grep "SUCCESS" hash-output-ubuntu-latest/hash_output_ubuntu-latest.txt | cut -d' ' -f3)
+        MACOS_HASH=$(grep "SUCCESS" hash-output-macos-latest/hash_output_macos-latest.txt | cut -d' ' -f3)
+        WINDOWS_HASH=$(grep "SUCCESS" hash-output-windows-latest/hash_output_windows-latest.txt | cut -d' ' -f3)
+        
+        echo "=== Hash Values ==="
+        echo "Ubuntu:  $UBUNTU_HASH"
+        echo "macOS:   $MACOS_HASH"
+        echo "Windows: $WINDOWS_HASH"
+        echo ""
+        
+        # Compare
+        if [ "$UBUNTU_HASH" = "$MACOS_HASH" ] && [ "$UBUNTU_HASH" = "$WINDOWS_HASH" ]; then
+          echo "✅ SUCCESS: All platform hashes are identical!"
+          exit 0
+        else
+          echo "❌ FAILURE: Platform hashes differ!"
+          exit 1
+        fi

@@ -12,6 +12,7 @@ The primary goal of `erst` is to clarify **why** a Stellar smart contract transa
 Currently, when a Soroban transaction fails on mainnet, developers receive a generic XDR error code. `erst` aims to bridge the gap between this opaque network error and the developer's source code.
 
 **Core Features (Planned):**
+
 1.  **Transaction Replay**: Fetch a failed transaction's envelope and ledger state from an RPC provider.
 2.  **Local Simulation**: Re-execute the transaction logically in a local environment.
 3.  **Trace decoding**: Map execution steps and failures back to readable instructions or Rust source lines.
@@ -19,7 +20,9 @@ Currently, when a Soroban transaction fails on mainnet, developers receive a gen
 ## Usage (MVP)
 
 ### Debugging a Transaction
+
 Fetches a transaction envelope from the Stellar Public network and prints its XDR size (Simulation pending).
+
 ```bash
 ./erst debug <transaction-hash>
 ```
@@ -33,10 +36,13 @@ Fetches a transaction envelope from the Stellar Public network and prints its XD
 ## Technical Analysis
 
 ### The Challenge
+
 Stellar's `soroban-env-host` executes WASM. When it traps (crashes), the specific reason is often sanitized or lost in the XDR result to keep the ledger size small.
 
 ### The Solution Architecture
+
 `erst` operates by:
+
 1.  **Fetching Data**: Using the Stellar RPC to get the `TransactionEnvelope` and `LedgerFootprint` (read/write set) for the block where the tx failed.
 2.  **Simulation Environment**: A Rust binary (`erst-sim`) that integrates with `soroban-env-host` to replay transactions.
 3.  **Execution**: Feeding the inputs into the VM and capturing `diagnostic_events`.
@@ -47,12 +53,27 @@ For a detailed explanation of the architecture, see [docs/architecture.md](docs/
 
 We are building this open-source to help the entire Stellar community.
 
+### 🗳️ Vote on Features
+
+Help shape the future of Erst! Vote on feature requests using GitHub Discussions:
+-   Browse and vote on [Feature Requests](https://github.com/dotandev/hintents/discussions)
+-   Add a 👍 reaction to features you'd like to see prioritized
+-   Submit your own ideas for community feedback
+
+See our [CONTRIBUTING.md](CONTRIBUTING.md#feature-requests--voting) for the full feature request process.
+
 ### Prerequisites
--   Go 1.21+
--   Rust (for building the simulator binary)
--   Stellar CLI (for comparing results)
+
+- Go 1.21+
+- Rust (for building the simulator binary)
+- Stellar CLI (for comparing results)
 
 ### Getting Started
+
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="CLI Demo" width="1000">
+</p>
+
 1.  Clone the repo:
     ```bash
     git clone https://github.com/dotandev/hintents.git
@@ -70,6 +91,7 @@ We are building this open-source to help the entire Stellar community.
     ```
 
 ### Development Roadmap
+
 See [docs/proposal.md](docs/proposal.md) for the detailed proposal.
 
 1.  [ ] **Phase 1**: Research RPC endpoints for fetching historical ledger keys.
@@ -78,3 +100,18 @@ See [docs/proposal.md](docs/proposal.md) for the detailed proposal.
 
 ---
 *Erst is an open-source initiative. Contributions, PRs, and Issues are welcome.*
+
+## 🚀 Version 2.0 Highlights
+
+Phase 9 introduces a stability and analytics-focused upgrade, including:
+
+- Improved system reliability and error handling
+- Enhanced analytics and telemetry support
+- UX refinements across CLI and simulator
+- Cross-environment consistency (local, Docker, CI)
+
+This release prepares the project for future scalability and feature expansion.
+=======
+
+_Erst is an open-source initiative. Contributions, PRs, and Issues are welcome._
+

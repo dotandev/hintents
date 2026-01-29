@@ -4,4 +4,6 @@ simulator/target/
 .DS_Store
 .env
 .env.example
+.cursorrules
+
 ishus.py
