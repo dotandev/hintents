@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -109,10 +110,11 @@ func TestCleanLRU(t *testing.T) {
 	config := Config{MaxSizeBytes: maxSize}
 	manager := NewManager(cacheDir, config)
 
-	// Create test files that exceed the limit
-	// Create 3 files of 50 bytes each = 150 bytes total
+	// Create test files that exceed the limit.
+	// Create 3 files of 50 bytes each = 150 bytes total.
 	for i := 1; i <= 3; i++ {
 		path := filepath.Join(cacheDir, fmt.Sprintf("file%d", i))
+		path := filepath.Join(cacheDir, "file"+strconv.Itoa(i))
 		data := make([]byte, 50)
 		err := os.WriteFile(path, data, 0644)
 		require.NoError(t, err)

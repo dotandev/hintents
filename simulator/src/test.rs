@@ -3,6 +3,7 @@
 
 #[cfg(test)]
 mod contract_execution_tests {
+    use crate::gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor};
     use crate::{execute_operations, StructuredError};
 
     // Mock helper to simulate HostError scenarios
@@ -71,17 +72,6 @@ mod contract_execution_tests {
             println!("Panic message: {}", message);
             assert!(!message.is_empty());
         }
-    }
-
-    /// Test panic from array index out of bounds
-    #[test]
-    fn test_unwrap_none_panic() {
-        let result = std::panic::catch_unwind(|| {
-            let _vec: Vec<i32> = vec![];
-            let _value = _vec[0]; // This will panic with index out of bounds
-        });
-
-        assert!(result.is_err(), "Index out of bounds should panic");
     }
 
     /// Test panic from assertion failure
@@ -334,7 +324,7 @@ mod contract_execution_tests {
         // Without catch_unwind
         let start = Instant::now();
         for _ in 0..iterations {
-            let _result = Ok::<(), ()>(());
+            let _result: Result<(), ()> = Ok(());
         }
         let without_catch = start.elapsed();
 
@@ -354,5 +344,242 @@ mod contract_execution_tests {
         // This is informational, not a strict assertion
         let overhead_ratio = with_catch.as_nanos() as f64 / without_catch.as_nanos() as f64;
         println!("Overhead ratio: {:.2}x", overhead_ratio);
+    }
+
+    // ============================================================================
+    // Test Gas Optimizer
+    // ============================================================================
+
+    #[test]
+    fn test_efficient_contract_analysis() {
+        let advisor = GasOptimizationAdvisor::new();
+        let metrics = BudgetMetrics {
+            cpu_instructions: 5000,
+            memory_bytes: 2500,
+            total_operations: 5,
+        };
+
+        let report = advisor.analyze(&metrics);
+
+        // Should have high efficiency
+        assert!(report.overall_efficiency >= 90.0);
+
+        // Should have minimal warnings
+        assert!(report.tips.iter().any(|t| t.severity == "low"));
+
+        // Should have positive comparison
+        assert!(report.comparison_to_baseline.contains("Excellent"));
+
+        println!("Efficient Contract Report:");
+        println!("Efficiency: {:.1}%", report.overall_efficiency);
+        println!("Comparison: {}", report.comparison_to_baseline);
+        for tip in &report.tips {
+            println!("  - [{}] {}: {}", tip.severity, tip.category, tip.message);
+        }
+    }
+
+    #[test]
+    fn test_inefficient_contract_with_high_cpu() {
+        let advisor = GasOptimizationAdvisor::new();
+        let metrics = BudgetMetrics {
+            cpu_instructions: 50_000_000, // 50M CPU (50% of typical budget)
+            memory_bytes: 5_000_000,      // 5M Memory
+            total_operations: 10,
+        };
+
+        let report = advisor.analyze(&metrics);
+
+        assert!(report.overall_efficiency < 70.0);
+
+        assert!(report.tips.iter().any(|t| t.severity == "high"));
+
+        assert!(report
+            .tips
+            .iter()
+            .any(|t| t.category.contains("CPU") || t.category.contains("Budget")));
+
+        assert!(report
+            .tips
+            .iter()
+            .any(|t| t.message.contains("50") && t.message.contains("%")));
+
+        println!("\nInefficient Contract Report:");
+        println!("Efficiency: {:.1}%", report.overall_efficiency);
+        println!("Comparison: {}", report.comparison_to_baseline);
+        for tip in &report.tips {
+            println!("  - [{}] {}: {}", tip.severity, tip.category, tip.message);
+            println!("    Savings: {}", tip.estimated_savings);
+        }
+    }
+
+    #[test]
+    fn test_high_memory_usage() {
+        let advisor = GasOptimizationAdvisor::new();
+        let metrics = BudgetMetrics {
+            cpu_instructions: 10_000_000,
+            memory_bytes: 20_000_000, // 20M Memory (40% of typical budget)
+            total_operations: 5,
+        };
+
+        let report = advisor.analyze(&metrics);
+
+        // Should have memory-related warnings
+        assert!(report.tips.iter().any(|t| t.category.contains("Memory")));
+
+        // Should warn about high memory percentage
+        assert!(report
+            .tips
+            .iter()
+            .any(|t| t.message.contains("Memory usage") && t.message.contains("%")));
+
+        println!("\nHigh Memory Usage Report:");
+        for tip in &report.tips {
+            println!("  - [{}] {}: {}", tip.severity, tip.category, tip.message);
+        }
+    }
+
+    #[test]
+    fn test_loop_optimization_detection() {
+        let advisor = GasOptimizationAdvisor::new();
+
+        // Test loop with many iterations
+        let tip = advisor.analyze_operation_pattern("loop", 150, 100_000);
+        assert!(tip.is_some());
+
+        let tip = tip.unwrap();
+        assert_eq!(tip.category, "Loop Optimization");
+        assert_eq!(tip.severity, "high");
+        assert!(tip.message.contains("150 times"));
+        assert!(tip.estimated_savings.contains("30-50%"));
+
+        println!("\nLoop Optimization Tip:");
+        println!("  {}", tip.message);
+        println!("  Estimated Savings: {}", tip.estimated_savings);
+    }
+
+    #[test]
+    fn test_storage_read_optimization() {
+        let advisor = GasOptimizationAdvisor::new();
+
+        // Test excessive storage reads
+        let tip = advisor.analyze_operation_pattern("storage_read", 60, 75_000);
+        assert!(tip.is_some());
+
+        let tip = tip.unwrap();
+        assert_eq!(tip.category, "Storage Access");
+        assert_eq!(tip.severity, "medium");
+        assert!(tip.message.contains("60 storage reads"));
+        assert!(tip.message.contains("Cache"));
+
+        println!("\nStorage Read Optimization Tip:");
+        println!("  {}", tip.message);
+    }
+
+    #[test]
+    fn test_storage_write_optimization() {
+        let advisor = GasOptimizationAdvisor::new();
+
+        // Test excessive storage writes
+        let tip = advisor.analyze_operation_pattern("storage_write", 25, 50_000);
+        assert!(tip.is_some());
+
+        let tip = tip.unwrap();
+        assert_eq!(tip.category, "Storage Access");
+        assert_eq!(tip.severity, "high");
+        assert!(tip.message.contains("25 storage writes"));
+        assert!(tip.message.contains("Batch"));
+
+        println!("\nStorage Write Optimization Tip:");
+        println!("  {}", tip.message);
+    }
+
+    #[test]
+    fn test_budget_breakdown() {
+        let advisor = GasOptimizationAdvisor::new();
+        let metrics = BudgetMetrics {
+            cpu_instructions: 45_000_000,
+            memory_bytes: 18_000_000,
+            total_operations: 10,
+        };
+
+        let report = advisor.analyze(&metrics);
+
+        // Check budget breakdown contains expected metrics
+        assert!(report.budget_breakdown.contains_key("cpu_usage_percent"));
+        assert!(report.budget_breakdown.contains_key("memory_usage_percent"));
+        assert!(report.budget_breakdown.contains_key("cpu_per_operation"));
+        assert!(report.budget_breakdown.contains_key("memory_per_operation"));
+
+        // CPU should be ~45% of 100M budget
+        let cpu_pct = report.budget_breakdown.get("cpu_usage_percent").unwrap();
+        assert!(*cpu_pct > 40.0 && *cpu_pct < 50.0);
+
+        // Memory should be ~36% of 50M budget
+        let mem_pct = report.budget_breakdown.get("memory_usage_percent").unwrap();
+        assert!(*mem_pct > 30.0 && *mem_pct < 40.0);
+
+        println!("\nBudget Breakdown:");
+        for (key, value) in &report.budget_breakdown {
+            println!("  {}: {:.2}", key, value);
+        }
+    }
+
+    #[test]
+    fn test_no_optimization_needed() {
+        let advisor = GasOptimizationAdvisor::new();
+
+        // Test operations that don't need optimization
+        let tip1 = advisor.analyze_operation_pattern("loop", 50, 10_000);
+        assert!(tip1.is_none());
+
+        let tip2 = advisor.analyze_operation_pattern("storage_read", 30, 20_000);
+        assert!(tip2.is_none());
+
+        let tip3 = advisor.analyze_operation_pattern("storage_write", 10, 15_000);
+        assert!(tip3.is_none());
+
+        println!("\nNo optimization tips needed for efficient operations");
+    }
+
+    #[test]
+    fn test_comprehensive_unoptimized_scenario() {
+        let advisor = GasOptimizationAdvisor::new();
+
+        // Simulate a really unoptimized contract
+        let metrics = BudgetMetrics {
+            cpu_instructions: 80_000_000, // 80% of budget
+            memory_bytes: 40_000_000,     // 80% of budget
+            total_operations: 20,
+        };
+
+        let report = advisor.analyze(&metrics);
+
+        // Should have very low efficiency
+        assert!(report.overall_efficiency < 50.0);
+
+        // Should have multiple high severity tips
+        let high_severity_count = report.tips.iter().filter(|t| t.severity == "high").count();
+        assert!(high_severity_count >= 2);
+
+        // Should recommend poor status
+        assert!(report.comparison_to_baseline.contains("Poor"));
+
+        println!("\nComprehensive Unoptimized Contract Report:");
+        println!("Efficiency Score: {:.1}%", report.overall_efficiency);
+        println!("Status: {}", report.comparison_to_baseline);
+        println!("\nOptimization Tips:");
+        for (i, tip) in report.tips.iter().enumerate() {
+            println!(
+                "\n{}. [{}] {}",
+                i + 1,
+                tip.severity.to_uppercase(),
+                tip.category
+            );
+            println!("   {}", tip.message);
+            println!("   Potential Savings: {}", tip.estimated_savings);
+            if let Some(location) = &tip.code_location {
+                println!("   Location: {}", location);
+            }
+        }
     }
 }

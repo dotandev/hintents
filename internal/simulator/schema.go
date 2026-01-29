@@ -4,6 +4,9 @@
 package simulator
 
 import (
+	"github.com/dotandev/hintents/internal/authtrace"
+)
+
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -14,22 +17,26 @@ import (
 
 // SimulationRequest is the JSON object passed to the Rust binary via Stdin
 type SimulationRequest struct {
-	// XDR encoded TransactionEnvelope
-	EnvelopeXdr string `json:"envelope_xdr"`
-	// XDR encoded TransactionResultMeta (historical data)
-	ResultMetaXdr string `json:"result_meta_xdr"`
-	// Snapshot of Ledger Entries (Key XDR -> Entry XDR) necessary for replay
-	LedgerEntries map[string]string `json:"ledger_entries,omitempty"`
-	// XDR encoded LedgerHeader (optional, for context)
-	// LedgerHeaderXdr string `json:"ledger_header_xdr,omitempty"`
+	EnvelopeXdr   string                 `json:"envelope_xdr"`
+	ResultMetaXdr string                 `json:"result_meta_xdr"`
+	LedgerEntries map[string]string      `json:"ledger_entries,omitempty"`
+	AuthTraceOpts *AuthTraceOptions      `json:"auth_trace_opts,omitempty"`
+	CustomAuthCfg map[string]interface{} `json:"custom_auth_config,omitempty"`
 }
 
-// SimulationResponse is the JSON object returned by the Rust binary via Stdout
+type AuthTraceOptions struct {
+	Enabled              bool `json:"enabled"`
+	TraceCustomContracts bool `json:"trace_custom_contracts"`
+	CaptureSigDetails    bool `json:"capture_sig_details"`
+	MaxEventDepth        int  `json:"max_event_depth,omitempty"`
+}
+
 type SimulationResponse struct {
-	Status string   `json:"status"` // "success" or "error"
-	Error  string   `json:"error,omitempty"`
-	Events []string `json:"events,omitempty"` // Diagnostic events
-	Logs   []string `json:"logs,omitempty"`   // Host debug logs
+	Status    string               `json:"status"`
+	Error     string               `json:"error,omitempty"`
+	Events    []string             `json:"events,omitempty"`
+	Logs      []string             `json:"logs,omitempty"`
+	AuthTrace *authtrace.AuthTrace `json:"auth_trace,omitempty"`
 }
 
 // Session represents a stored simulation result
