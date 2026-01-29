@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
@@ -63,14 +64,12 @@ func (r *ConcreteRunner) Run(req *SimulationRequest) (*SimulationResponse, error
 
 	logger.Logger.Debug("Simulation request marshaled", "input_size", len(inputBytes))
 
-	// Prepare Command
 	cmd := exec.Command(r.BinaryPath)
 	cmd.Stdin = bytes.NewReader(inputBytes)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Execute
 	logger.Logger.Info("Executing simulator binary")
 	if err := cmd.Run(); err != nil {
 		logger.Logger.Error("Simulator execution failed", "error", err, "stderr", stderr.String())
@@ -79,7 +78,6 @@ func (r *ConcreteRunner) Run(req *SimulationRequest) (*SimulationResponse, error
 
 	logger.Logger.Debug("Simulator execution completed", "stdout_size", stdout.Len(), "stderr_size", stderr.Len())
 
-	// Deserialize Response
 	var resp SimulationResponse
 	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
 		logger.Logger.Error("Failed to unmarshal simulation response", "error", err, "output", stdout.String())
@@ -87,6 +85,23 @@ func (r *ConcreteRunner) Run(req *SimulationRequest) (*SimulationResponse, error
 	}
 
 	logger.Logger.Info("Simulation response received", "status", resp.Status)
+
+	if resp.Status == "success" {
+		violations := analyzeSecurityBoundary(resp.Events)
+		resp.SecurityViolations = violations
+
+		if len(violations) > 0 {
+			logger.Logger.Warn("Security violations detected", "count", len(violations))
+			for _, v := range violations {
+				logger.Logger.Warn("Violation",
+					"type", v.Type,
+					"severity", v.Severity,
+					"contract", v.Contract)
+			}
+		} else {
+			logger.Logger.Info("No security violations detected")
+		}
+	}
 
 	// Check logic error from simulator
 	if resp.Status == "error" {
@@ -97,4 +112,84 @@ func (r *ConcreteRunner) Run(req *SimulationRequest) (*SimulationResponse, error
 	logger.Logger.Info("Simulation completed successfully")
 
 	return &resp, nil
+}
+
+type event struct {
+	Type      string `json:"type"`
+	Contract  string `json:"contract,omitempty"`
+	Address   string `json:"address,omitempty"`
+	EventType string `json:"event_type,omitempty"`
+}
+
+type contractState struct {
+	hasAuth     bool
+	authChecked map[string]bool
+}
+
+func analyzeSecurityBoundary(events []string) []SecurityViolation {
+	var violations []SecurityViolation
+	contractStates := make(map[string]*contractState)
+
+	for _, eventStr := range events {
+		var e event
+		if err := json.Unmarshal([]byte(eventStr), &e); err != nil {
+			continue
+		}
+
+		if e.Contract == "" || e.Contract == "unknown" {
+			continue
+		}
+
+		if _, exists := contractStates[e.Contract]; !exists {
+			contractStates[e.Contract] = &contractState{
+				authChecked: make(map[string]bool),
+			}
+		}
+
+		state := contractStates[e.Contract]
+
+		switch e.Type {
+		case "auth":
+			state.authChecked[e.Address] = true
+			state.hasAuth = true
+
+		case "storage_write":
+			if !state.hasAuth {
+				if !isSACPattern(e.Contract) {
+					violations = append(violations, SecurityViolation{
+						Type:        "unauthorized_state_modification",
+						Severity:    "high",
+						Description: "Storage write operation without prior require_auth check",
+						Contract:    e.Contract,
+						Details: map[string]interface{}{
+							"operation": "storage_write",
+						},
+					})
+				}
+			}
+		}
+	}
+
+	return violations
+}
+
+func isSACPattern(contract string) bool {
+	if contract == "" || contract == "unknown" {
+		return false
+	}
+
+	sacPatterns := []string{
+		"stellar_asset",
+		"SAC",
+		"token",
+	}
+
+	contractLower := strings.ToLower(contract)
+	for _, pattern := range sacPatterns {
+		if strings.Contains(contractLower, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+
+	return false
 }

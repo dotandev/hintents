@@ -6,9 +6,11 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/dotandev/hintents/internal/errors"
+	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/session"
 	"github.com/dotandev/hintents/internal/simulator"
@@ -17,9 +19,14 @@ import (
 )
 
 var (
-	networkFlag string
-	rpcURLFlag  string
+	networkFlag      string
+	rpcURLFlag       string
+	overrideStateFlag string
 )
+
+type OverrideData struct {
+	LedgerEntries map[string]string `json:"ledger_entries"`
+}
 
 var debugCmd = &cobra.Command{
 	Use:   "debug <transaction-hash>",
@@ -66,7 +73,6 @@ Example:
 			fmt.Printf("RPC URL: %s\n", rpcURLFlag)
 		}
 
-		// Fetch transaction details
 		txResp, err := client.GetTransaction(ctx, txHash)
 		if err != nil {
 			return fmt.Errorf("failed to fetch transaction: %w", err)
@@ -74,17 +80,27 @@ Example:
 
 		fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(txResp.EnvelopeXdr))
 
-		// Run simulation
+		var ledgerEntries map[string]string
+		if overrideStateFlag != "" {
+			overrideEntries, err := loadOverrideState(overrideStateFlag)
+			if err != nil {
+				return fmt.Errorf("failed to load override state: %w", err)
+			}
+
+			ledgerEntries = overrideEntries
+			logger.Logger.Info("Sandbox mode active", "entries_overridden", len(overrideEntries))
+			fmt.Printf("Sandbox mode active: %d entries overridden\n", len(overrideEntries))
+		}
+
 		runner, err := simulator.NewRunner()
 		if err != nil {
 			return fmt.Errorf("failed to initialize simulator: %w", err)
 		}
 
-		// Build simulation request
 		simReq := &simulator.SimulationRequest{
 			EnvelopeXdr:   txResp.EnvelopeXdr,
 			ResultMetaXdr: txResp.ResultMetaXdr,
-			LedgerEntries: nil, // TODO: fetch ledger entries if needed
+			LedgerEntries: ledgerEntries,
 		}
 
 		fmt.Printf("Running simulation...\n")
@@ -93,7 +109,6 @@ Example:
 			return fmt.Errorf("simulation failed: %w", err)
 		}
 
-		// Display simulation results
 		fmt.Printf("\nSimulation Results:\n")
 		fmt.Printf("  Status: %s\n", simResp.Status)
 		if simResp.Error != "" {
@@ -102,7 +117,7 @@ Example:
 		if len(simResp.Events) > 0 {
 			fmt.Printf("  Events: %d\n", len(simResp.Events))
 			for i, event := range simResp.Events {
-				if i < 5 { // Show first 5 events
+				if i < 5 {
 					fmt.Printf("    - %s\n", event)
 				}
 			}
@@ -113,7 +128,7 @@ Example:
 		if len(simResp.Logs) > 0 {
 			fmt.Printf("  Logs: %d\n", len(simResp.Logs))
 			for i, log := range simResp.Logs {
-				if i < 5 { // Show first 5 logs
+				if i < 5 {
 					fmt.Printf("    - %s\n", log)
 				}
 			}
@@ -184,6 +199,25 @@ func getErstVersion() string {
 func init() {
 	debugCmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
 	debugCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
+	debugCmd.Flags().StringVar(&overrideStateFlag, "override-state", "", "Path to JSON file with manual ledger entry overrides for sandbox mode")
 
 	rootCmd.AddCommand(debugCmd)
+}
+
+func loadOverrideState(filePath string) (map[string]string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read override file: %w", err)
+	}
+
+	var override OverrideData
+	if err := json.Unmarshal(data, &override); err != nil {
+		return nil, fmt.Errorf("failed to parse override JSON: %w", err)
+	}
+
+	if override.LedgerEntries == nil {
+		return make(map[string]string), nil
+	}
+
+	return override.LedgerEntries, nil
 }

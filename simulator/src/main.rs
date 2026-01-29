@@ -3,6 +3,8 @@
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use soroban_env_host::events::Events;
 use soroban_env_host::xdr::ReadXdr;
 use std::collections::HashMap;
 use std::io::{self, Read};
@@ -12,8 +14,15 @@ use std::panic;
 struct SimulationRequest {
     envelope_xdr: String,
     result_meta_xdr: String,
-    // Key XDR -> Entry XDR
     ledger_entries: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct CategorizedEvent {
+    event_type: String,
+    contract_id: Option<String>,
+    topics: Vec<String>,
+    data: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -21,7 +30,92 @@ struct SimulationResponse {
     status: String,
     error: Option<String>,
     events: Vec<String>,
+    categorized_events: Vec<CategorizedEvent>,
     logs: Vec<String>,
+}
+
+fn categorize_event_for_analyzer(
+    event: &soroban_env_host::events::HostEvent,
+) -> Result<String, String> {
+    use soroban_env_host::xdr::{ContractEventBody, ContractEventType, ScVal};
+
+    let contract_id = match &event.event.contract_id {
+        Some(id) => format!("{:?}", id),
+        None => "unknown".to_string(),
+    };
+
+    let event_type_str = match &event.event.type_ {
+        ContractEventType::Contract => "contract",
+        ContractEventType::System => "system",
+        ContractEventType::Diagnostic => "diagnostic",
+    };
+
+    let (topics, _data_val) = match &event.event.body {
+        ContractEventBody::V0(v0) => (&v0.topics, &v0.data),
+    };
+
+    let event_json = if let Some(first_topic) = topics.get(0) {
+        let topic_str = format!("{:?}", first_topic);
+
+        if topic_str.contains("require_auth") {
+            let address = if let ScVal::Address(addr) = first_topic {
+                format!("{:?}", addr)
+            } else {
+                "unknown".to_string()
+            };
+
+            json!({
+                "type": "auth",
+                "contract": contract_id,
+                "address": address,
+                "event_type": event_type_str,
+            })
+            .to_string()
+        } else if topic_str.contains("set")
+            || topic_str.contains("write")
+            || topic_str.contains("storage")
+        {
+            json!({
+                "type": "storage_write",
+                "contract": contract_id,
+                "event_type": event_type_str,
+            })
+            .to_string()
+        } else if topic_str.contains("call") || topic_str.contains("invoke") {
+            if let ScVal::Symbol(sym) = first_topic {
+                json!({
+                    "type": "contract_call",
+                    "contract": contract_id,
+                    "function": sym.to_string(),
+                    "event_type": event_type_str,
+                })
+                .to_string()
+            } else {
+                json!({
+                    "type": "contract_call",
+                    "contract": contract_id,
+                    "event_type": event_type_str,
+                })
+                .to_string()
+            }
+        } else {
+            json!({
+                "type": "other",
+                "contract": contract_id,
+                "event_type": event_type_str,
+            })
+            .to_string()
+        }
+    } else {
+        json!({
+            "type": "other",
+            "contract": contract_id,
+            "event_type": event_type_str,
+        })
+        .to_string()
+    };
+
+    Ok(event_json)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -47,6 +141,7 @@ fn main() {
                 status: "error".to_string(),
                 error: Some(format!("Invalid JSON: {}", e)),
                 events: vec![],
+                categorized_events: vec![],
                 logs: vec![],
             };
             println!("{}", serde_json::to_string(&res).unwrap());
@@ -162,11 +257,18 @@ fn main() {
                 Err(e) => vec![format!("Failed to retrieve events: {:?}", e)],
             };
 
+            // Capture categorized events for analyzer
+            let categorized_events = match host.get_events() {
+                Ok(evs) => categorize_events(&evs),
+                Err(_) => vec![],
+            };
+
             // Success Response
             let response = SimulationResponse {
                 status: "success".to_string(),
                 error: None,
                 events,
+                categorized_events,
                 logs: invocation_logs,
             };
 
@@ -187,6 +289,7 @@ fn main() {
                 status: "error".to_string(),
                 error: Some(serde_json::to_string(&structured_error).unwrap()),
                 events: vec![],
+                categorized_events: vec![],
                 logs: invocation_logs,
             };
 
@@ -217,6 +320,7 @@ fn main() {
                 status: "error".to_string(),
                 error: Some(serde_json::to_string(&structured_error).unwrap()),
                 events: vec![],
+                categorized_events: vec![],
                 logs: invocation_logs,
             };
 
@@ -245,21 +349,6 @@ fn execute_operations(
                     logs.push(format!("About to Invoke Contract: {:?}", address));
                     logs.push(format!("Function: {:?}", func_name));
                     logs.push(format!("Args Count: {}", invoke_args_vec.len()));
-
-                    // In a full implementation, we'd do:
-                    // let res = host.invoke_function(...)?;
-                    // For now, this is a placeholder for actual contract invocation
-
-                    // Example of how to handle HostError propagation:
-                    // match host.invoke_function(...) {
-                    //     Ok(result) => {
-                    //         logs.push(format!("Invocation successful: {:?}", result));
-                    //     }
-                    //     Err(e) => {
-                    //         // Propagate HostError up to be caught by the outer handler
-                    //         return Err(e);
-                    //     }
-                    // }
                 }
                 _ => {
                     logs.push("Skipping non-InvokeContract Host Function".to_string());
@@ -271,11 +360,78 @@ fn execute_operations(
     Ok(logs)
 }
 
+fn categorize_events(events: &Events) -> Vec<CategorizedEvent> {
+    use soroban_env_host::xdr::{ContractEventBody, ContractEventType, ScVal};
+
+    events
+        .0
+        .iter()
+        .filter_map(|event| {
+            // Access body to get topics and data
+            let (topics, data_val) = match &event.event.body {
+                ContractEventBody::V0(v0) => (&v0.topics, &v0.data),
+            };
+
+            if !event.failed_call {
+                let event_type = match &event.event.type_ {
+                    ContractEventType::Contract => {
+                        if let Some(topic) = topics.get(0) {
+                            if let ScVal::Symbol(sym) = topic {
+                                match sym.to_string().as_str() {
+                                    s if s.contains("require_auth") => "require_auth",
+                                    s if s.contains("set") || s.contains("write") => {
+                                        "storage_write"
+                                    }
+                                    _ => "contract",
+                                }
+                            } else {
+                                "contract"
+                            }
+                        } else {
+                            "contract"
+                        }
+                    }
+                    ContractEventType::System => "system",
+                    ContractEventType::Diagnostic => {
+                        if let Some(topic) = topics.get(0) {
+                            if let ScVal::Symbol(sym) = topic {
+                                match sym.to_string().as_str() {
+                                    s if s.contains("fn_call") => "invocation",
+                                    s if s.contains("fn_return") => "return",
+                                    _ => "diagnostic",
+                                }
+                            } else {
+                                "diagnostic"
+                            }
+                        } else {
+                            "diagnostic"
+                        }
+                    }
+                };
+
+                Some(CategorizedEvent {
+                    event_type: event_type.to_string(),
+                    contract_id: event
+                        .event
+                        .contract_id
+                        .as_ref()
+                        .map(|id| format!("{:?}", id)),
+                    topics: topics.iter().map(|t| format!("{:?}", t)).collect(),
+                    data: format!("{:?}", data_val),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn send_error(msg: String) {
     let res = SimulationResponse {
         status: "error".to_string(),
         error: Some(msg),
         events: vec![],
+        categorized_events: vec![],
         logs: vec![],
     };
     println!("{}", serde_json::to_string(&res).unwrap());
