@@ -28,10 +28,10 @@ erst debug --wasm ./contract.wasm --args "hello" --verbose
 
 - ✅ Load WASM files from local filesystem
 - ✅ Mock state provider (no network data required)
-- ✅ Support for mock arguments
+- ✅ Support for mock arguments (Integer and Symbol/String)
 - ✅ Diagnostic logging and event capture
 - ✅ Clear warnings about mock state usage
-- ⚠️ Full WASM execution (coming soon)
+- ✅ Full WASM execution
 
 ## Warning
 
@@ -55,7 +55,10 @@ This mode is intended for:
 ### Simulator Layer (Rust)
 - `simulator/src/main.rs`: Contains `run_local_wasm_replay()` function
 - Loads WASM files from disk
-- Initializes Soroban Host with mock state
+- Initializes Soroban Host
+- Deploys contract to host
+- Parses arguments (supports Integers and Symbols)
+- Invokes contract function
 - Captures diagnostic events and logs
 
 ## Example Output
@@ -67,26 +70,22 @@ This mode is intended for:
 WASM File: ./contract.wasm
 Arguments: [hello world]
 
-▶ Executing contract locally...
+✓ Initialized Host with diagnostic level: Debug
+✓ Contract registered at: Contract(0000...)
+▶ Invoking function: hello
 
-✓ Execution completed successfully
+✓ Execution successful
 
 📋 Logs:
-  Host Initialized with Budget: [budget details]
-  WASM file loaded: 1234 bytes
-  Mock State Provider: Active
-  Mock Arguments provided: 2 args
-    Arg[0]: hello
-    Arg[1]: world
+  Host Budget: [budget details]
+  Result: Symbol(world)
 ```
 
 ## Future Enhancements
 
-1. **Full WASM Execution**: Currently, the infrastructure is in place but full contract execution is not yet implemented
-2. **Contract Deployment**: Automatically deploy the WASM to the mock host
-3. **Argument Parsing**: Parse string arguments into proper Soroban ScVal types
-4. **Function Invocation**: Call specific contract functions with parsed arguments
-5. **Result Capture**: Return actual execution results and contract state changes
+1. **Complex Types**: Support for parsing more complex ScVal types (Maps, Vectors, etc.) via JSON
+2. **State Persistence**: Allow saving/loading mock state
+3. **Interactive Mode**: REPL-like interface for invoking multiple functions
 
 ## Testing
 

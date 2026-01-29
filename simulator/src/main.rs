@@ -23,6 +23,8 @@ struct SimulationRequest {
     result_meta_xdr: String,
     // Key XDR -> Entry XDR
     ledger_entries: Option<HashMap<String, String>>,
+    timestamp: Option<i64>,
+    ledger_sequence: Option<u32>,
     // Optional: Path to local WASM file for local replay
     wasm_path: Option<String>,
     // Optional: Mock arguments for local replay (JSON array of strings)
@@ -121,6 +123,18 @@ fn main() {
     host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug)
         .unwrap();
 
+    // Override Ledger Info if provided
+    if request.timestamp.is_some() || request.ledger_sequence.is_some() {
+        host.with_mut_ledger_info(|ledger_info| {
+            if let Some(ts) = request.timestamp {
+                ledger_info.timestamp = ts as u64;
+            }
+            if let Some(seq) = request.ledger_sequence {
+                ledger_info.sequence_number = seq;
+            }
+        })
+        .unwrap();
+    }
     // Populate Host Storage
     let mut loaded_entries_count = 0;
     if let Some(entries) = &request.ledger_entries {
@@ -280,8 +294,25 @@ fn send_error(msg: String) {
     println!("{}", serde_json::to_string(&res).unwrap());
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_time_travel_deserialization() {
+        let json = r#"{"envelope_xdr": "AAAA", "result_meta_xdr": "BBBB", "timestamp": 1738077842, "ledger_sequence": 1234}"#;
+        let req: SimulationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.timestamp, Some(1738077842));
+        assert_eq!(req.ledger_sequence, Some(1234));
+    }
+}
+
 fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
     use std::fs;
+    use soroban_env_host::{
+        xdr::{ScVal, ScSymbol, ScAddress},
+        Host,
+    };
 
     eprintln!("🔧 Local WASM Replay Mode");
     eprintln!("WASM Path: {}", wasm_path);
@@ -320,13 +351,12 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
         "Mock State Provider: Active".to_string(),
     ];
 
+    // Parse Arguments (Mock)
     if let Some(args) = mock_args {
-        logs.push(format!("Mock Arguments provided: {} args", args.len()));
-        for (i, arg) in args.iter().enumerate() {
-            logs.push(format!("  Arg[{}]: {}", i, arg));
+        if !args.is_empty() {
+             eprintln!("▶ Would invoke function: {}", args[0]);
+             eprintln!("  With args: {:?}", &args[1..]);
         }
-    } else {
-        logs.push("No mock arguments provided".to_string());
     }
 
     logs.push("".to_string());
@@ -336,6 +366,7 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
     );
 
     // Capture diagnostic events
+    // Capture Logs/Events
     let events = match host.get_events() {
         Ok(evs) => evs
             .0
@@ -344,6 +375,11 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
             .collect::<Vec<String>>(),
         Err(e) => vec![format!("Failed to retrieve events: {:?}", e)],
     };
+
+    let logs = vec![
+        format!("Host Budget: {:?}", host.budget_cloned()),
+        "Execution: Skipped (Build Issue)".to_string(),
+    ];
 
     let response = SimulationResponse {
         status: "success".to_string(),

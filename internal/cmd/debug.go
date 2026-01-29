@@ -168,89 +168,119 @@ Local WASM Replay Mode:
 			return fmt.Errorf("failed to initialize simulator: %w", err)
 		}
 
-		var simResp *simulator.SimulationResponse
-		var ledgerEntries map[string]string
+		// Determine timestamps to simulate
+		timestamps := []int64{TimestampFlag}
+		if WindowFlag > 0 && TimestampFlag > 0 {
+			// Simulate 5 steps across the window
+			step := WindowFlag / 4
+			for i := 1; i <= 4; i++ {
+				timestamps = append(timestamps, TimestampFlag+int64(i)*step)
+			}
+		}
 
-		if compareNetworkFlag == "" {
-			// Single Network Run
-			if snapshotFlag != "" {
-				snap, err := snapshot.Load(snapshotFlag)
-				if err != nil {
-					return fmt.Errorf("failed to load snapshot: %w", err)
+		var lastSimResp *simulator.SimulationResponse
+
+		for _, ts := range timestamps {
+			if len(timestamps) > 1 {
+				fmt.Printf("\n--- Simulating at Timestamp: %d ---\n", ts)
+			}
+
+			var simResp *simulator.SimulationResponse
+			var ledgerEntries map[string]string
+
+			if compareNetworkFlag == "" {
+				// Single Network Run
+				if snapshotFlag != "" {
+					snap, err := snapshot.Load(snapshotFlag)
+					if err != nil {
+						return fmt.Errorf("failed to load snapshot: %w", err)
+					}
+					ledgerEntries = snap.ToMap()
+				} else {
+					ledgerEntries, err = client.GetLedgerEntries(ctx, keys)
+					if err != nil {
+						return fmt.Errorf("failed to fetch ledger entries: %w", err)
+					}
 				}
-				ledgerEntries = snap.ToMap()
+
+				fmt.Printf("Running simulation on %s...\n", networkFlag)
+				simReq := &simulator.SimulationRequest{
+					EnvelopeXdr:   resp.EnvelopeXdr,
+					ResultMetaXdr: resp.ResultMetaXdr,
+					LedgerEntries: ledgerEntries,
+					Timestamp:     ts,
+				}
+				simResp, err = runner.Run(simReq)
+				if err != nil {
+					if len(timestamps) > 1 {
+						fmt.Printf("Simulation failed at timestamp %d: %v\n", ts, err)
+						continue
+					}
+					return fmt.Errorf("simulation failed: %w", err)
+				}
+				printSimulationResult(networkFlag, simResp)
 			} else {
-				ledgerEntries, err = client.GetLedgerEntries(ctx, keys)
-				if err != nil {
-					return fmt.Errorf("failed to fetch ledger entries: %w", err)
+				// Comparison Run
+				var wg sync.WaitGroup
+				var primaryResult, compareResult *simulator.SimulationResponse
+				var primaryErr, compareErr error
+
+				wg.Add(2)
+				go func() {
+					defer wg.Done()
+					entries, err := client.GetLedgerEntries(ctx, keys)
+					if err != nil {
+						primaryErr = err
+						return
+					}
+					primaryResult, primaryErr = runner.Run(&simulator.SimulationRequest{
+						EnvelopeXdr:   resp.EnvelopeXdr,
+						ResultMetaXdr: resp.ResultMetaXdr,
+						LedgerEntries: entries,
+						Timestamp:     ts,
+					})
+				}()
+
+				go func() {
+					defer wg.Done()
+					compareClient := rpc.NewClient(rpc.Network(compareNetworkFlag))
+					entries, err := compareClient.GetLedgerEntries(ctx, keys)
+					if err != nil {
+						compareErr = err
+						return
+					}
+					compareResult, compareErr = runner.Run(&simulator.SimulationRequest{
+						EnvelopeXdr:   resp.EnvelopeXdr,
+						ResultMetaXdr: resp.ResultMetaXdr,
+						LedgerEntries: entries,
+						Timestamp:     ts,
+					})
+				}()
+
+				wg.Wait()
+				if primaryErr != nil {
+					return fmt.Errorf("primary network error: %w", primaryErr)
 				}
-			}
-
-			fmt.Printf("Running simulation on %s...\n", networkFlag)
-			simReq := &simulator.SimulationRequest{
-				EnvelopeXdr:   resp.EnvelopeXdr,
-				ResultMetaXdr: resp.ResultMetaXdr,
-				LedgerEntries: ledgerEntries,
-			}
-			simResp, err = runner.Run(simReq)
-			if err != nil {
-				return fmt.Errorf("simulation failed: %w", err)
-			}
-			printSimulationResult(networkFlag, simResp)
-		} else {
-			// Comparison Run
-			var wg sync.WaitGroup
-			var primaryResult, compareResult *simulator.SimulationResponse
-			var primaryErr, compareErr error
-
-			wg.Add(2)
-			go func() {
-				defer wg.Done()
-				entries, err := client.GetLedgerEntries(ctx, keys)
-				if err != nil {
-					primaryErr = err
-					return
+				if compareErr != nil {
+					return fmt.Errorf("compare network error: %w", compareErr)
 				}
-				primaryResult, primaryErr = runner.Run(&simulator.SimulationRequest{
-					EnvelopeXdr:   resp.EnvelopeXdr,
-					ResultMetaXdr: resp.ResultMetaXdr,
-					LedgerEntries: entries,
-				})
-			}()
 
-			go func() {
-				defer wg.Done()
-				compareClient := rpc.NewClient(rpc.Network(compareNetworkFlag))
-				entries, err := compareClient.GetLedgerEntries(ctx, keys)
-				if err != nil {
-					compareErr = err
-					return
-				}
-				compareResult, compareErr = runner.Run(&simulator.SimulationRequest{
-					EnvelopeXdr:   resp.EnvelopeXdr,
-					ResultMetaXdr: resp.ResultMetaXdr,
-					LedgerEntries: entries,
-				})
-			}()
-
-			wg.Wait()
-			if primaryErr != nil {
-				return fmt.Errorf("primary network error: %w", primaryErr)
+				simResp = primaryResult // Use primary for further analysis
+				printSimulationResult(networkFlag, primaryResult)
+				printSimulationResult(compareNetworkFlag, compareResult)
+				diffResults(primaryResult, compareResult, networkFlag, compareNetworkFlag)
 			}
-			if compareErr != nil {
-				return fmt.Errorf("compare network error: %w", compareErr)
-			}
+			lastSimResp = simResp
+		}
 
-			simResp = primaryResult // Use primary for further analysis
-			printSimulationResult(networkFlag, primaryResult)
-			printSimulationResult(compareNetworkFlag, compareResult)
-			diffResults(primaryResult, compareResult, networkFlag, compareNetworkFlag)
+		if lastSimResp == nil {
+			return fmt.Errorf("no simulation results generated")
 		}
 
 		// Analysis: Security
 		fmt.Printf("\n=== Security Analysis ===\n")
 		secDetector := security.NewDetector()
-		findings := secDetector.Analyze(resp.EnvelopeXdr, resp.ResultMetaXdr, simResp.Events, simResp.Logs)
+		findings := secDetector.Analyze(resp.EnvelopeXdr, resp.ResultMetaXdr, lastSimResp.Events, lastSimResp.Logs)
 		if len(findings) == 0 {
 			fmt.Println("✓ No security issues detected")
 		} else {
@@ -281,7 +311,6 @@ Local WASM Replay Mode:
 		}
 		SetCurrentSession(sessionData)
 		fmt.Printf("\nSession ready. Use 'erst session save' to persist.\n")
-
 		return nil
 	},
 }
