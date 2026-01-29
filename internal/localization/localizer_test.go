@@ -74,10 +74,16 @@ func TestLocalizerFallback(t *testing.T) {
 		"key1": "English message",
 	}
 
-	loc.RegisterMessages(English, msgs)
-	loc.RegisterMessages(Spanish, map[string]string{})
+	if err := loc.RegisterMessages(English, msgs); err != nil {
+		t.Fatalf("failed to register English messages: %v", err)
+	}
+	if err := loc.RegisterMessages(Spanish, map[string]string{}); err != nil {
+		t.Fatalf("failed to register Spanish messages: %v", err)
+	}
 
-	loc.SetLanguage(Spanish)
+	if err := loc.SetLanguage(Spanish); err != nil {
+		t.Fatalf("failed to set language to Spanish: %v", err)
+	}
 
 	result := loc.Get("key1")
 	if result != "English message" {
@@ -92,7 +98,9 @@ func TestTranslateWithArgs(t *testing.T) {
 		"error.network": "invalid network: %s",
 	}
 
-	loc.RegisterMessages(English, msgs)
+	if err := loc.RegisterMessages(English, msgs); err != nil {
+		t.Fatalf("failed to register messages: %v", err)
+	}
 
 	result := loc.Translate("error.network", "testnet")
 	if result != "invalid network: testnet" {

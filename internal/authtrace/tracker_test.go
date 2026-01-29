@@ -175,7 +175,9 @@ func TestCustomContractAuthValidatorValidate(t *testing.T) {
 
 	signers := map[string]uint32{"key1": 1}
 	auth := NewMultiSigContractAuth(1, 1, signers)
-	validator.RegisterContract("contract1", auth)
+	if err := validator.RegisterContract("contract1", auth); err != nil {
+		t.Fatalf("failed to register contract: %v", err)
+	}
 
 	params := []interface{}{map[string]interface{}{
 		"signatures": []interface{}{map[string]interface{}{"signer_key": "key1"}},
