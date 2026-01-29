@@ -23,50 +23,6 @@ type Runner struct {
 	BinaryPath string
 }
 
-// RunWithTrace executes the simulator and generates an execution trace
-func (r *Runner) RunWithTrace(ctx context.Context, req *SimulationRequest, txHash string) (*SimulationResponse, *trace.ExecutionTrace, error) {
-	// Create execution trace
-	executionTrace := trace.NewExecutionTrace(txHash, 5) // Snapshot every 5 steps
-
-	// Add initial state
-	executionTrace.AddState(trace.ExecutionState{
-		Operation:  "simulation_start",
-		ContractID: "simulator",
-		HostState: map[string]interface{}{
-			"envelope_size":      len(req.EnvelopeXdr),
-			"has_ledger_entries": req.LedgerEntries != nil,
-		},
-	})
-
-	// Run the simulation
-	resp, err := r.Run(ctx, req)
-	if err != nil {
-		// Add error state
-		executionTrace.AddState(trace.ExecutionState{
-			Operation: "simulation_error",
-			Error:     err.Error(),
-		})
-		return resp, executionTrace, err
-	}
-
-	// Parse events and logs to create trace states
-	r.parseSimulationOutput(resp, executionTrace)
-
-	// Add final state
-	executionTrace.AddState(trace.ExecutionState{
-		Operation: "simulation_complete",
-		HostState: map[string]interface{}{
-			"status":       resp.Status,
-			"events_count": len(resp.Events),
-			"logs_count":   len(resp.Logs),
-		},
-	})
-
-	executionTrace.EndTime = executionTrace.States[len(executionTrace.States)-1].Timestamp
-
-	return resp, executionTrace, nil
-}
-
 // Compile-time check to ensure Runner implements RunnerInterface
 var _ RunnerInterface = (*Runner)(nil)
 
@@ -98,11 +54,12 @@ func NewRunner() (*Runner, error) {
 		return &Runner{BinaryPath: path}, nil
 	}
 
-	return nil, errors.WrapSimulatorNotFound("Please build it or set ERST_SIMULATOR_PATH")
+	return nil, errors.WrapSimulatorNotFound("simulator binary 'erst-sim' not found: Please build it or set ERST_SIMULATOR_PATH")
 }
 
 // Run executes the simulation with the given request
-func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
+func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
+	ctx := context.Background()
 	tracer := telemetry.GetTracer()
 	ctx, span := tracer.Start(ctx, "simulate_transaction")
 	span.SetAttributes(attribute.String("simulator.binary_path", r.BinaryPath))
@@ -111,7 +68,7 @@ func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationRe
 	logger.Logger.Debug("Starting simulation", "binary", r.BinaryPath)
 
 	// Serialize Request
-	ctx, marshalSpan := tracer.Start(ctx, "marshal_request")
+	_, marshalSpan := tracer.Start(ctx, "marshal_request")
 	inputBytes, err := json.Marshal(req)
 	marshalSpan.End()
 	if err != nil {
@@ -131,7 +88,7 @@ func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationRe
 	cmd.Stderr = &stderr
 
 	// Execute
-	ctx, execSpan := tracer.Start(ctx, "execute_simulator")
+	_, execSpan := tracer.Start(ctx, "execute_simulator")
 	logger.Logger.Info("Executing simulator binary")
 	if err := cmd.Run(); err != nil {
 		execSpan.RecordError(err)
@@ -173,6 +130,50 @@ func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationRe
 	logger.Logger.Info("Simulation completed successfully")
 
 	return &resp, nil
+}
+
+// RunWithTrace executes the simulator and generates an execution trace
+func (r *Runner) RunWithTrace(ctx context.Context, req *SimulationRequest, txHash string) (*SimulationResponse, *trace.ExecutionTrace, error) {
+	// Create execution trace
+	executionTrace := trace.NewExecutionTrace(txHash, 5) // Snapshot every 5 steps
+
+	// Add initial state
+	executionTrace.AddState(trace.ExecutionState{
+		Operation:  "simulation_start",
+		ContractID: "simulator",
+		HostState: map[string]interface{}{
+			"envelope_size":      len(req.EnvelopeXdr),
+			"has_ledger_entries": req.LedgerEntries != nil,
+		},
+	})
+
+	// Run the simulation
+	resp, err := r.Run(req)
+	if err != nil {
+		// Add error state
+		executionTrace.AddState(trace.ExecutionState{
+			Operation: "simulation_error",
+			Error:     err.Error(),
+		})
+		return resp, executionTrace, err
+	}
+
+	// Parse events and logs to create trace states
+	r.parseSimulationOutput(resp, executionTrace)
+
+	// Add final state
+	executionTrace.AddState(trace.ExecutionState{
+		Operation: "simulation_complete",
+		HostState: map[string]interface{}{
+			"status":       resp.Status,
+			"events_count": len(resp.Events),
+			"logs_count":   len(resp.Logs),
+		},
+	})
+
+	executionTrace.EndTime = executionTrace.States[len(executionTrace.States)-1].Timestamp
+
+	return resp, executionTrace, nil
 }
 
 // parseSimulationOutput parses the simulation response and creates trace states

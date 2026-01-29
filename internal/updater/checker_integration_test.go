@@ -21,8 +21,8 @@ import (
 //   - Config file:          check_for_updates: <bool> in config.yaml
 //
 // Precedence (highest first):
-//   1. Environment variable
-//   2. Config file
+//  1. Environment variable
+//  2. Config file
 //
 // This test exercises the full path resolution logic (getConfigPath) so we
 // ensure the effective behavior matches the intended precedence.
@@ -33,16 +33,19 @@ func TestConfigPrecedenceIntegration(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Save original env vars so we can restore them.
+	origHome := os.Getenv("HOME")
 	origXDGConfigHome := os.Getenv("XDG_CONFIG_HOME")
 	origAppData := os.Getenv("AppData")
 	origErstNoUpdate := os.Getenv("ERST_NO_UPDATE_CHECK")
 
 	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
 		_ = os.Setenv("XDG_CONFIG_HOME", origXDGConfigHome)
 		_ = os.Setenv("AppData", origAppData)
 		_ = os.Setenv("ERST_NO_UPDATE_CHECK", origErstNoUpdate)
 	})
 
+	require.NoError(t, os.Setenv("HOME", tmpDir))
 	require.NoError(t, os.Setenv("XDG_CONFIG_HOME", tmpDir))
 	require.NoError(t, os.Setenv("AppData", tmpDir))
 

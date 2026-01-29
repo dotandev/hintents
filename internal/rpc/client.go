@@ -47,6 +47,13 @@ type Client struct {
 	SorobanURL string
 }
 
+// TransactionResponse contains the raw XDR fields needed for simulation
+type TransactionResponse struct {
+	EnvelopeXdr   string
+	ResultXdr     string
+	ResultMetaXdr string
+}
+
 // NewClient creates a new RPC client with the specified network
 // If network is empty, defaults to Mainnet
 func NewClient(net Network) *Client {
@@ -97,13 +104,6 @@ func NewClientWithURL(url string, net Network) *Client {
 		Network:    net,
 		SorobanURL: defaultClient.SorobanURL,
 	}
-}
-
-// TransactionResponse contains the raw XDR fields needed for simulation
-type TransactionResponse struct {
-	EnvelopeXdr   string
-	ResultXdr     string
-	ResultMetaXdr string
 }
 
 // GetTransaction fetches the transaction details and full XDR data
@@ -216,10 +216,6 @@ func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[strin
 	for _, entry := range rpcResp.Result.Entries {
 		entries[entry.Key] = entry.Xdr
 	}
-
-	// For keys that were not found, Soroban RPC simply omits them from the result (or returns null? verify behavior).
-	// getLedgerEntries returns entries for keys that exist. Missing keys are just not in the list.
-	// We return what we found.
 
 	logger.Logger.Info("Ledger entries fetched successfully", "found", len(entries), "requested", len(keys))
 

@@ -1,9 +1,45 @@
-docs/proposal2.md
+# --- Compiled binaries/libraries ---
 /erst
-simulator/target/
+/simulator/target/
+node_modules/
+dist/
+bin/
+
+# --- OS/System Files ---
 .DS_Store
 .env
 .env.example
 .cursorrules
+Thumbs.db
+*.exe
+*.dll
+*.dylib
+*.so
 
+# --- Logs and Temporary Files ---
+*.log
+*.tmp
+*.bak
+*.swp
+simulator/check_output.txt
+
+# --- Go specific ---
+/vendor/
+coverage.out
+
+# --- Rust specific ---
+**/*.rs.bk
+
+# --- Tools/Artifacts ---
 ishus.py
+create_phase9.py
+.gemini/
+.idea/
+.vscode/
+
+# --- Documentation (User specific settings) ---
+# /external/
+# /*.md
+# !README.md
+# !CONTRIBUTING.md
+# !CHANGELOG.md

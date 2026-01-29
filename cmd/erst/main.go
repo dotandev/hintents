@@ -4,7 +4,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/dotandev/hintents/internal/cmd"
@@ -24,7 +23,6 @@ func main() {
 	go checker.CheckForUpdates()
 
 	if err := cmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }

@@ -136,7 +136,7 @@ func (g *TestGenerator) GenerateRustTest(data *TestData) error {
 	}
 
 	// Create output file
-	filename := filepath.Join(outputDir, fmt.Sprintf("regression_{}.rs", data.TestName))
+	filename := filepath.Join(outputDir, fmt.Sprintf("regression_%s.rs", data.TestName))
 	file, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("failed to create Rust test file: %w", err)

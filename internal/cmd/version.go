@@ -9,11 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	// Version will be set by the main package
-	Version = "dev"
-)
-
 // versionCmd represents the version command
 var versionCmd = &cobra.Command{
 	Use:   "version",

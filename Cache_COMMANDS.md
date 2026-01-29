@@ -126,13 +126,13 @@ go run verify_hashing_comprehensive.go
 ```
 === Comprehensive Hash Consistency Verification ===
 
-✅ Account Key: SUCCESS
+ Account Key: SUCCESS
    Hash: 8b283a7411fb24e3540781a645517a01832265d055ba7d0ff3de20b6455c526b
-✅ Trustline Key (USDC): SUCCESS
+ Trustline Key (USDC): SUCCESS
    Hash: 9a1e801b0c33aa25fd3a13d40f2ee71ac62bafc88c2d95e520e962115d7f0515
-✅ Offer Key: SUCCESS
+ Offer Key: SUCCESS
    Hash: 7f6843b658c09b807599243329053869de1a53bf629cb6086230526ccd026ab9
-✅ Contract Data Key: SUCCESS
+ Contract Data Key: SUCCESS
    Hash: 5440938817031b18a8f20ccf1cd25a15f20cccf9c9bf9488c2bce2c4652b6499
 
 All tests passed! Hash consistency verified across 4,000 operations.
@@ -194,7 +194,7 @@ go tool cover -func=coverage.out
 ```bash
 go test ./internal/rpc/cache_test.go ./internal/rpc/cache.go && \
 go run verify_hashing.go && \
-echo "✅ All validations passed"
+echo " All validations passed"
 ```
 
 ### Complete validation pipeline
@@ -222,7 +222,7 @@ echo "Generating coverage report..."
 go test ./internal/rpc -coverprofile=coverage.out
 go tool cover -func=coverage.out | grep cache.go
 
-echo "✅ All validations completed successfully!"
+echo " All validations completed successfully!"
 ```
 
 ---
@@ -314,10 +314,10 @@ go tool cover -func=coverage.out | grep "total:" | awk '{print $3}'
 
 All commands should complete successfully with:
 
-- ✅ PASS status
-- ✅ 0 failures
-- ✅ 0 race conditions
-- ✅ Consistent hash outputs
-- ✅ Execution time < 1 second
+-  PASS status
+-  0 failures
+-  0 race conditions
+-  Consistent hash outputs
+-  Execution time < 1 second
 
 If any command fails, refer to the troubleshooting section or review the test output for specific error messages.

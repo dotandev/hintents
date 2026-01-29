@@ -7,7 +7,7 @@ use serde_json::Value;
 /// Validates JSON input against the simulation-request.schema.json
 pub fn validate_request(input: &str) -> Result<Value, String> {
     // include the schema at compile-time
-    let schema_json = include_str!("../../docs/schema/simulation-request.schema.json");
+    let schema_json = include_str!("../../../docs/schema/simulation-request.schema.json");
     let schema: Value = serde_json::from_str(schema_json).unwrap();
     let compiled = JSONSchema::compile(&schema).unwrap();
 
