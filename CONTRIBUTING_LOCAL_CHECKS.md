@@ -61,3 +61,19 @@ go install github.com/client9/misspell/cmd/misspell@latest
 1. **While coding**: Run `make pre-push` frequently (every few commits)
 2. **Before PR**: Run `make ci-local` to catch everything
 3. **Result**: Fewer CI failures, faster feedback, less wasted CI minutes
+
+## Important: Always Test Locally First!
+
+**Before pushing to PR**, always run:
+```bash
+make ci-local
+```
+
+This catches issues like:
+- ❌ Rust version incompatibilities (edition2024 requires Rust 1.82+)
+- ❌ Dependency conflicts
+- ❌ Compilation errors
+- ❌ Test failures
+- ❌ Formatting issues
+
+**Example**: If you see `edition2024` errors in CI, running `make ci-local` locally would have caught it first!

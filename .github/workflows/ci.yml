@@ -113,7 +113,8 @@ jobs:
     needs: license-headers
     strategy:
       matrix:
-        rust-version: [stable, "1.75", "1.76"]
+        # Edition 2024 requires Rust 1.82+, so we test with compatible versions
+        rust-version: [stable, "1.82", "1.83"]
     defaults:
       run:
         working-directory: simulator
