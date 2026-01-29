@@ -1,8 +1,8 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BudgetMetrics {
@@ -79,9 +79,8 @@ impl GasOptimizationAdvisor {
                 ),
                 estimated_savings: format!(
                     "~{}% reduction possible",
-                    ((cpu_per_op - self.baseline_cpu_per_op) as f64
-                        / cpu_per_op as f64
-                        * 100.0) as u32
+                    ((cpu_per_op - self.baseline_cpu_per_op) as f64 / cpu_per_op as f64 * 100.0)
+                        as u32
                 ),
                 code_location: Some("Loop operations".to_string()),
             });
@@ -96,9 +95,8 @@ impl GasOptimizationAdvisor {
                 ),
                 estimated_savings: format!(
                     "~{}% reduction possible",
-                    ((cpu_per_op - self.baseline_cpu_per_op) as f64
-                        / cpu_per_op as f64
-                        * 100.0) as u32
+                    ((cpu_per_op - self.baseline_cpu_per_op) as f64 / cpu_per_op as f64 * 100.0)
+                        as u32
                 ),
                 code_location: None,
             });
@@ -116,8 +114,7 @@ impl GasOptimizationAdvisor {
                 ),
                 estimated_savings: format!(
                     "~{}% reduction possible",
-                    ((memory_per_op - self.baseline_memory_per_op) as f64
-                        / memory_per_op as f64
+                    ((memory_per_op - self.baseline_memory_per_op) as f64 / memory_per_op as f64
                         * 100.0) as u32
                 ),
                 code_location: Some("Data storage operations".to_string()),
@@ -173,7 +170,8 @@ impl GasOptimizationAdvisor {
                 category: "General".to_string(),
                 severity: "low".to_string(),
                 message: "Contract execution is efficient. \
-                          Consider testing with larger datasets to ensure scalability.".to_string(),
+                          Consider testing with larger datasets to ensure scalability."
+                    .to_string(),
                 estimated_savings: "N/A".to_string(),
                 code_location: None,
             });

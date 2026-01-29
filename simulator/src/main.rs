@@ -198,11 +198,9 @@ fn main() {
         let mut options = inferno::flamegraph::Options::default();
         options.title = "Soroban Resource Consumption".to_string();
 
-        if let Err(e) = inferno::flamegraph::from_reader(
-            &mut options,
-            folded_data.as_bytes(),
-            &mut result,
-        ) {
+        if let Err(e) =
+            inferno::flamegraph::from_reader(&mut options, folded_data.as_bytes(), &mut result)
+        {
             eprintln!("Failed to generate flamegraph: {}", e);
         } else {
             flamegraph_svg = Some(String::from_utf8_lossy(&result).to_string());
@@ -294,7 +292,7 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
         Ok(bytes) => {
             eprintln!("âœ“ Loaded WASM file: {} bytes", bytes.len());
             bytes
-        },
+        }
         Err(e) => {
             return send_error(format!("Failed to read WASM file: {}", e));
         }
@@ -302,7 +300,8 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
 
     // Initialize Host with mock state
     let host = soroban_env_host::Host::default();
-    host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug).unwrap();
+    host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug)
+        .unwrap();
 
     eprintln!("âœ“ Initialized Host with diagnostic level: Debug");
 
@@ -337,7 +336,11 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
 
     // Capture diagnostic events
     let events = match host.get_events() {
-        Ok(evs) => evs.0.iter().map(|e| format!("{:?}", e)).collect::<Vec<String>>(),
+        Ok(evs) => evs
+            .0
+            .iter()
+            .map(|e| format!("{:?}", e))
+            .collect::<Vec<String>>(),
         Err(e) => vec![format!("Failed to retrieve events: {:?}", e)],
     };
 
