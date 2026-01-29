@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/simulation-response.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "request_id", "success"],
+  "properties": {
+    "version": {
+      "$ref": "common.schema.json#/definitions/Version"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fee_charged"],
+      "properties": {
+        "fee_charged": {
+          "type": "string",
+          "pattern": "^\\d+$",
+          "description": "Fee charged in stroops"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "success": { "const": true } } },
+      "then": { "required": ["result"] }
+    },
+    {
+      "if": { "properties": { "success": { "const": false } } },
+      "then": { "required": ["error"] }
+    }
+  ]
+}

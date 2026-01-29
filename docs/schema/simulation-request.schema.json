@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/simulation-request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "request_id", "network", "xdr"],
+  "properties": {
+    "version": {
+      "$ref": "common.schema.json#/definitions/Version"
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Client-generated unique request identifier"
+    },
+    "network": {
+      "type": "string",
+      "enum": ["public", "testnet", "futurenet"]
+    },
+    "xdr": {
+      "$ref": "common.schema.json#/definitions/XDRBase64"
+    }
+  }
+}

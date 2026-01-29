@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/common.schema.json",
+  "definitions": {
+    "Version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$",
+      "description": "Schema version (e.g. 1.0)"
+    },
+    "XDRBase64": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+      "description": "Base64-encoded XDR payload"
+    }
+  }
+}
