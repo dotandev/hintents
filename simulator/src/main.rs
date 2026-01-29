@@ -1,5 +1,8 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
+mod theme;
+mod config;
+mod cli;
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
@@ -7,6 +10,8 @@ use soroban_env_host::xdr::ReadXdr;
 use std::collections::HashMap;
 use std::io::{self, Read};
 use std::panic;
+
+
 
 #[derive(Debug, Deserialize)]
 struct SimulationRequest {
@@ -32,6 +37,7 @@ struct StructuredError {
 }
 
 fn main() {
+     cli::trace_viewer::render_trace();
     // Read JSON from Stdin
     let mut buffer = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut buffer) {

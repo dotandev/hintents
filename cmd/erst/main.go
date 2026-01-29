@@ -9,6 +9,7 @@ import (
 
 	"github.com/dotandev/hintents/internal/cmd"
 	"github.com/dotandev/hintents/internal/updater"
+	"github.com/dotandev/hintents/internal/decoder"
 )
 
 // Version is the current version of erst
@@ -17,8 +18,18 @@ var Version = "dev"
 
 func main() {
 	// Set version in cmd package
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: txdecode <base64-envelope>")
+		os.Exit(1)
+	}
 	cmd.Version = Version
 
+	env, err := decoder.DecodeEnvelope(os.Args[1])
+	if err != nil {
+		panic(err)
+	}
+
+	decoder.PrintEnvelope(env)
 	// Start update checker in background (non-blocking)
 	checker := updater.NewChecker(Version)
 	go checker.CheckForUpdates()
