@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	networkFlag string
-	rpcURLFlag  string
+	networkFlag  string
+	rpcURLFlag   string
+	rpcTokenFlag string
 )
 
 var debugCmd = &cobra.Command{
@@ -45,10 +46,10 @@ Example:
 		var client *rpc.Client
 		var horizonURL string
 		if rpcURLFlag != "" {
-			client = rpc.NewClientWithURL(rpcURLFlag, rpc.Network(networkFlag))
+			client = rpc.NewClientWithURL(rpcURLFlag, rpc.Network(networkFlag), rpcTokenFlag)
 			horizonURL = rpcURLFlag
 		} else {
-			client = rpc.NewClient(rpc.Network(networkFlag))
+			client = rpc.NewClient(rpc.Network(networkFlag), rpcTokenFlag)
 			// Get default Horizon URL for the network
 			switch rpc.Network(networkFlag) {
 			case rpc.Testnet:
@@ -184,6 +185,7 @@ func getErstVersion() string {
 func init() {
 	debugCmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
 	debugCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
+	debugCmd.Flags().StringVar(&rpcTokenFlag, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
 
 	rootCmd.AddCommand(debugCmd)
 }
