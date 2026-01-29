@@ -5,7 +5,13 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -204,6 +210,90 @@ func (m *mockHorizonClient) NextLiquidityPoolsPage(page hProtocol.LiquidityPools
 }
 func (m *mockHorizonClient) PrevLiquidityPoolsPage(page hProtocol.LiquidityPoolsPage) (hProtocol.LiquidityPoolsPage, error) {
 	return hProtocol.LiquidityPoolsPage{}, nil
+}
+
+func TestClient_GetLedgerEntries_Empty(t *testing.T) {
+	c := NewClientWithURL("http://example.invalid", Testnet)
+
+	got, err := c.GetLedgerEntries(context.Background(), nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, got)
+	assert.Len(t, got, 0)
+}
+
+func TestClient_GetLedgerEntries_BatchedAndMerged(t *testing.T) {
+	var callCount int32
+
+	// JSON-RPC server: expects method getLedgerEntries and replies with entries derived from requested keys.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&callCount, 1)
+		defer r.Body.Close()
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		var req jsonRPCRequest
+		if err := json.Unmarshal(bodyBytes, &req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if req.Method != "getLedgerEntries" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		// Decode params as generic map, then extract keys
+		paramsBytes, _ := json.Marshal(req.Params)
+		var params getLedgerEntriesParams
+		if err := json.Unmarshal(paramsBytes, &params); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+		}
+
+		res := getLedgerEntriesResult{Entries: make([]struct {
+			Key string `json:"key"`
+			XDR string `json:"xdr"`
+		}, 0, len(params.Keys))}
+		for _, k := range params.Keys {
+			res.Entries = append(res.Entries, struct {
+				Key string `json:"key"`
+				XDR string `json:"xdr"`
+			}{Key: k, XDR: "entry_for_" + k})
+		}
+		resp.Result, _ = json.Marshal(res)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	c := NewClientWithURL(srv.URL, Testnet)
+
+	// Force batching: 51 keys should create 2 chunks (50 + 1)
+	keys := make([]string, 0, 51)
+	for i := 0; i < 51; i++ {
+		keys = append(keys, "key_"+fmt.Sprintf("%02d", i))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, err := c.GetLedgerEntries(ctx, keys)
+	assert.NoError(t, err)
+	assert.Len(t, got, 51)
+	for _, k := range keys {
+		assert.Equal(t, "entry_for_"+k, got[k])
+	}
+
+	assert.Equal(t, int32(2), atomic.LoadInt32(&callCount))
 }
 
 type testClient struct {
