@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Theme {
     pub span: String,
     pub event: String,

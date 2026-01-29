@@ -19,6 +19,7 @@ use gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor, OptimizationReport};
 #[derive(Debug, Deserialize)]
 struct SimulationRequest {
     envelope_xdr: String,
+    #[allow(dead_code)]
     result_meta_xdr: String,
     // Key XDR -> Entry XDR
     ledger_entries: Option<HashMap<String, String>>,
@@ -52,6 +53,7 @@ struct BudgetUsage {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct StructuredError {
     error_type: String,
     message: String,

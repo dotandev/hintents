@@ -3,6 +3,7 @@
 
 use colored::Colorize;
 
+#[allow(dead_code)]
 pub fn apply(color: &str, text: &str) -> String {
     match color {
         "black" => text.black().to_string(),

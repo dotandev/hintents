@@ -5,6 +5,7 @@ use jsonschema::JSONSchema;
 use serde_json::Value;
 
 /// Validates JSON input against the simulation-request.schema.json
+#[allow(dead_code)]
 pub fn validate_request(input: &str) -> Result<Value, String> {
     // include the schema at compile-time
     let schema_json = include_str!("../../../docs/schema/simulation-request.schema.json");

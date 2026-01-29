@@ -8,6 +8,7 @@ use super::theme::Theme;
 use crate::config::paths::theme_path;
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ThemeConfig {
     span: Option<String>,
     event: Option<String>,
@@ -18,6 +19,7 @@ struct ThemeConfig {
     highlight: Option<String>,
 }
 
+#[allow(dead_code)]
 pub fn load_theme() -> Theme {
     let default = Theme::default();
 

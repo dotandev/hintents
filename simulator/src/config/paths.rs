@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+#[allow(dead_code)]
 pub fn theme_path() -> PathBuf {
     let mut path = std::env::var("HOME")
         .map(PathBuf::from)

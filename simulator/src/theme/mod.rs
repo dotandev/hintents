@@ -3,7 +3,9 @@
 
 pub mod ansi;
 pub mod loader;
+#[allow(clippy::module_inception)]
 pub mod theme;
 
 pub use loader::load_theme;
+#[allow(unused_imports)]
 pub use theme::Theme;

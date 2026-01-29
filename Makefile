@@ -42,3 +42,11 @@ clean:
 deps:
 	go mod tidy
 	go mod download
+
+# Run full CI checks locally (matches GitHub Actions)
+ci-local:
+	./scripts/test-ci-locally.sh
+
+# Quick pre-push checks (fast feedback)
+pre-push:
+	./scripts/pre-push-quick.sh
