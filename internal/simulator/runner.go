@@ -54,13 +54,12 @@ func NewRunner() (*ConcreteRunner, error) {
 }
 
 // Run executes the simulation with the given request
-func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
+func (r *ConcreteRunner) Run(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 	tracer := telemetry.GetTracer()
 	ctx, span := tracer.Start(ctx, "simulate_transaction")
 	span.SetAttributes(attribute.String("simulator.binary_path", r.BinaryPath))
 	defer span.End()
 
-func (r *ConcreteRunner) Run(req *SimulationRequest) (*SimulationResponse, error) {
 	logger.Logger.Debug("Starting simulation", "binary", r.BinaryPath)
 
 	// Serialize Request

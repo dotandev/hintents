@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd
 
 import (
@@ -10,11 +13,10 @@ import (
 )
 
 var (
-	authNetworkFlag      string
-	authRPCURLFlag       string
-	authDetailedFlag     bool
-	authJSONOutputFlag   bool
-	authCustomConfigFlag string
+	authNetworkFlag    string
+	authRPCURLFlag     string
+	authDetailedFlag   bool
+	authJSONOutputFlag bool
 )
 
 var authDebugCmd = &cobra.Command{

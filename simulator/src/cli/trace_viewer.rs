@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::theme::{load_theme};
 use crate::theme::ansi::apply;
 

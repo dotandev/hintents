@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd
 
 import (
@@ -11,14 +14,14 @@ import (
 func TestExtractLedgerKeys(t *testing.T) {
 	// Create a dummy TransactionResultMeta
 	// We'll simulate a LedgerEntryChange (Created)
-	
+
 	key := xdr.LedgerKey{
 		Type: xdr.LedgerEntryTypeAccount,
 		Account: &xdr.LedgerKeyAccount{
-			AccountId: xdr.MustAddress("GB7BDSZU2Y27LYNLJLVC6MMDDDPY9KKE73M5MPJ7Z7XG5J5K5M5M5M5M"),
+			AccountId: xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H"),
 		},
 	}
-	
+
 	entry := xdr.LedgerEntry{
 		LastModifiedLedgerSeq: 1,
 		Data: xdr.LedgerEntryData{
@@ -32,14 +35,19 @@ func TestExtractLedgerKeys(t *testing.T) {
 
 	changes := xdr.LedgerEntryChanges{
 		{
-			Type: xdr.LedgerEntryChangeTypeLedgerEntryCreated,
+			Type:    xdr.LedgerEntryChangeTypeLedgerEntryCreated,
 			Created: &entry,
 		},
 	}
 
 	meta := xdr.TransactionResultMeta{
-		V: 0,
-		Operations: changes,
+		FeeProcessing: changes,
+		TxApplyProcessing: xdr.TransactionMeta{
+			V: 0,
+			Operations: &[]xdr.OperationMeta{
+				{Changes: changes},
+			},
+		},
 		Result: xdr.TransactionResultPair{
 			Result: xdr.TransactionResult{
 				Result: xdr.TransactionResultResult{
@@ -58,7 +66,7 @@ func TestExtractLedgerKeys(t *testing.T) {
 	keys, err := extractLedgerKeys(metaB64)
 	assert.NoError(t, err)
 	assert.Len(t, keys, 1)
-	
+
 	// Verify key matches
 	keyBytes, _ := key.MarshalBinary()
 	keyB64 := base64.StdEncoding.EncodeToString(keyBytes)

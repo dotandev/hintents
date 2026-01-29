@@ -4,15 +4,14 @@
 package simulator
 
 import (
-	"github.com/dotandev/hintents/internal/authtrace"
-)
-
 	"database/sql"
 	"os"
 	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/dotandev/hintents/internal/authtrace"
 )
 
 // SimulationRequest is the JSON object passed to the Rust binary via Stdin
