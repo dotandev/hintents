@@ -58,8 +58,8 @@ func NewRunner() (*Runner, error) {
 }
 
 // Run executes the simulation with the given request
-func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
-	ctx := context.Background()
+// Run executes the simulation with the given request
+func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 	tracer := telemetry.GetTracer()
 	ctx, span := tracer.Start(ctx, "simulate_transaction")
 	span.SetAttributes(attribute.String("simulator.binary_path", r.BinaryPath))
@@ -148,7 +148,7 @@ func (r *Runner) RunWithTrace(ctx context.Context, req *SimulationRequest, txHas
 	})
 
 	// Run the simulation
-	resp, err := r.Run(req)
+	resp, err := r.Run(ctx, req)
 	if err != nil {
 		// Add error state
 		executionTrace.AddState(trace.ExecutionState{

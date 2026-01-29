@@ -128,31 +128,31 @@ func TestDetector_FlawedContract(t *testing.T) {
 // TestDetector_TypeDistinction verifies clear distinction between risk types
 func TestDetector_TypeDistinction(t *testing.T) {
 	tests := []struct {
-		name           string
-		events         []string
-		logs           []string
-		expectVerified bool
+		name            string
+		events          []string
+		logs            []string
+		expectVerified  bool
 		expectHeuristic bool
 	}{
 		{
-			name:           "Verified Risk - Overflow",
-			events:         []string{},
-			logs:           []string{"overflow detected"},
-			expectVerified: true,
+			name:            "Verified Risk - Overflow",
+			events:          []string{},
+			logs:            []string{"overflow detected"},
+			expectVerified:  true,
 			expectHeuristic: false,
 		},
 		{
-			name:           "Heuristic Warning - Auth Pattern",
-			events:         []string{},
-			logs:           []string{"admin operation", "privileged access"},
-			expectVerified: false,
+			name:            "Heuristic Warning - Auth Pattern",
+			events:          []string{},
+			logs:            []string{"admin operation", "privileged access"},
+			expectVerified:  false,
 			expectHeuristic: true,
 		},
 		{
-			name:           "Verified Risk - Auth Failure",
-			events:         []string{"auth check failed"},
-			logs:           []string{},
-			expectVerified: true,
+			name:            "Verified Risk - Auth Failure",
+			events:          []string{"auth check failed"},
+			logs:            []string{},
+			expectVerified:  true,
 			expectHeuristic: false,
 		},
 	}

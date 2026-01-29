@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -192,7 +193,7 @@ Local WASM Replay Mode:
 				ResultMetaXdr: resp.ResultMetaXdr,
 				LedgerEntries: ledgerEntries,
 			}
-			simResp, err = runner.Run(simReq)
+			simResp, err = runner.Run(ctx, simReq)
 			if err != nil {
 				return fmt.Errorf("simulation failed: %w", err)
 			}
@@ -211,7 +212,7 @@ Local WASM Replay Mode:
 					primaryErr = err
 					return
 				}
-				primaryResult, primaryErr = runner.Run(&simulator.SimulationRequest{
+				primaryResult, primaryErr = runner.Run(ctx, &simulator.SimulationRequest{
 					EnvelopeXdr:   resp.EnvelopeXdr,
 					ResultMetaXdr: resp.ResultMetaXdr,
 					LedgerEntries: entries,
@@ -226,7 +227,7 @@ Local WASM Replay Mode:
 					compareErr = err
 					return
 				}
-				compareResult, compareErr = runner.Run(&simulator.SimulationRequest{
+				compareResult, compareErr = runner.Run(ctx, &simulator.SimulationRequest{
 					EnvelopeXdr:   resp.EnvelopeXdr,
 					ResultMetaXdr: resp.ResultMetaXdr,
 					LedgerEntries: entries,
@@ -246,9 +247,6 @@ Local WASM Replay Mode:
 			printSimulationResult(compareNetworkFlag, compareResult)
 			diffResults(primaryResult, compareResult, networkFlag, compareNetworkFlag)
 
-			// Print token flow and security analysis
-			printTokenFlow(resp.EnvelopeXdr, resp.ResultMetaXdr)
-			printSecurityAnalysis(resp.EnvelopeXdr, resp.ResultMetaXdr, primaryResult.Events, primaryResult.Logs)
 		}
 
 		// Analysis: Security
@@ -321,7 +319,7 @@ func runLocalWasmReplay() error {
 
 	// Run simulation
 	color.Green("▶ Executing contract locally...")
-	resp, err := runner.Run(req)
+	resp, err := runner.Run(context.Background(), req)
 	if err != nil {
 		color.Red("✗ Execution failed: %v", err)
 		return err

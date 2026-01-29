@@ -4,6 +4,7 @@
 package cache
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
