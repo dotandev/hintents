@@ -1,0 +1,6 @@
+{
+  "ledger_entries": {
+    "balance_key_1": "base64_encoded_balance_1000xlm",
+    "contract_data_key": "base64_encoded_contract_state"
+  }
+}
