@@ -1,11 +1,11 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-mod theme;
-mod config;
 mod cli;
-mod ipc;
+mod config;
 mod gas_optimizer;
+mod ipc;
+mod theme;
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
@@ -196,8 +196,10 @@ fn main() {
         let mut result = Vec::new();
         let mut options = inferno::flamegraph::Options::default();
         options.title = "Soroban Resource Consumption".to_string();
-        
-        if let Err(e) = inferno::flamegraph::from_reader(&mut options, folded_data.as_bytes(), &mut result) {
+
+        if let Err(e) =
+            inferno::flamegraph::from_reader(&mut options, folded_data.as_bytes(), &mut result)
+        {
             eprintln!("Failed to generate flamegraph: {}", e);
         } else {
             flamegraph_svg = Some(String::from_utf8_lossy(&result).to_string());
@@ -278,7 +280,7 @@ fn send_error(msg: String) {
 
 fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
     use std::fs;
-    
+
     eprintln!("🔧 Local WASM Replay Mode");
     eprintln!("WASM Path: {}", wasm_path);
     eprintln!("⚠️  WARNING: Using Mock State (not mainnet data)");
@@ -289,7 +291,7 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
         Ok(bytes) => {
             eprintln!("✓ Loaded WASM file: {} bytes", bytes.len());
             bytes
-        },
+        }
         Err(e) => {
             return send_error(format!("Failed to read WASM file: {}", e));
         }
@@ -297,8 +299,9 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
 
     // Initialize Host with mock state
     let host = soroban_env_host::Host::default();
-    host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug).unwrap();
-    
+    host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug)
+        .unwrap();
+
     eprintln!("✓ Initialized Host with diagnostic level: Debug");
 
     // TODO: In a full implementation, we would:
@@ -307,7 +310,7 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
     // 3. Parse mock_args into proper ScVal types
     // 4. Invoke the contract function with the arguments
     // 5. Capture and return the result
-    
+
     // For now, we'll create a basic response showing the setup worked
     let mut logs = vec![
         format!("Host Initialized with Budget: {:?}", host.budget_cloned()),
@@ -326,11 +329,17 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
 
     logs.push("".to_string());
     logs.push("⚠️  Note: Full WASM execution not yet implemented".to_string());
-    logs.push("This is a mock response showing the local replay infrastructure is working.".to_string());
+    logs.push(
+        "This is a mock response showing the local replay infrastructure is working.".to_string(),
+    );
 
     // Capture diagnostic events
     let events = match host.get_events() {
-        Ok(evs) => evs.0.iter().map(|e| format!("{:?}", e)).collect::<Vec<String>>(),
+        Ok(evs) => evs
+            .0
+            .iter()
+            .map(|e| format!("{:?}", e))
+            .collect::<Vec<String>>(),
         Err(e) => vec![format!("Failed to retrieve events: {:?}", e)],
     };
 
