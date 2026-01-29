@@ -64,3 +64,4 @@ func init() {
 	// Register commands
 	rootCmd.AddCommand(versionCmd)
 }
+
