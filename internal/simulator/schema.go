@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/dotandev/hintents/internal/authtrace"
 	_ "modernc.org/sqlite"
 )
-
 
 // SimulationRequest is the JSON object passed to the Rust binary via Stdin
 type SimulationRequest struct {
@@ -21,16 +21,32 @@ type SimulationRequest struct {
 	ResultMetaXdr string `json:"result_meta_xdr"`
 	// Snapshot of Ledger Entries (Key XDR -> Entry XDR) necessary for replay
 	LedgerEntries map[string]string `json:"ledger_entries,omitempty"`
-	// XDR encoded LedgerHeader (optional, for context)
-	// LedgerHeaderXdr string `json:"ledger_header_xdr,omitempty"`
+	// Path to local WASM file for local replay (optional)
+	WasmPath *string `json:"wasm_path,omitempty"`
+	// Mock arguments for local replay (optional, JSON array of strings)
+	MockArgs *[]string `json:"mock_args,omitempty"`
+	// Enable profiling
+	Profile bool `json:"profile,omitempty"`
+
+	// Advanced options
+	AuthTraceOpts *AuthTraceOptions      `json:"auth_trace_opts,omitempty"`
+	CustomAuthCfg map[string]interface{} `json:"custom_auth_config,omitempty"`
 }
 
-// SimulationResponse is the JSON object returned by the Rust binary via Stdout
+type AuthTraceOptions struct {
+	Enabled              bool `json:"enabled"`
+	TraceCustomContracts bool `json:"trace_custom_contracts"`
+	CaptureSigDetails    bool `json:"capture_sig_details"`
+	MaxEventDepth        int  `json:"max_event_depth,omitempty"`
+}
+
 type SimulationResponse struct {
-	Status string   `json:"status"` // "success" or "error"
-	Error  string   `json:"error,omitempty"`
-	Events []string `json:"events,omitempty"` // Diagnostic events
-	Logs   []string `json:"logs,omitempty"`   // Host debug logs
+	Status     string               `json:"status"` // "success" or "error"
+	Error      string               `json:"error,omitempty"`
+	Events     []string             `json:"events,omitempty"`     // Diagnostic events
+	Logs       []string             `json:"logs,omitempty"`       // Host debug logs
+	Flamegraph string               `json:"flamegraph,omitempty"` // SVG flamegraph
+	AuthTrace  *authtrace.AuthTrace `json:"auth_trace,omitempty"`
 }
 
 // Session represents a stored simulation result
@@ -158,4 +174,3 @@ func (db *DB) SearchSessions(filters SearchFilters) ([]Session, error) {
 
 	return sessions, nil
 }
-

@@ -1,3 +1,4 @@
+.PHONY: build test lint lint-unused test-unused validate-ci validate-interface clean
 .PHONY: build test lint lint-unused test-unused validate-ci clean
 .PHONY: build test lint validate-errors clean
 
@@ -27,6 +28,10 @@ validate-ci:
 # Validate error standardization
 validate-errors:
 	./scripts/validate-errors.sh
+
+# Validate interface implementation
+validate-interface:
+	./scripts/validate-interface.sh
 
 # Clean build artifacts
 clean:

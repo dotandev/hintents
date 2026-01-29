@@ -4,14 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-soroban-env-host = { version = "20.0.0" } # Ensure this matches the network protocol version (Protocol 20 for Soroban)
-soroban-sdk = "20.0.0"
+soroban-env-host = "20.3.0"
+soroban-sdk = "20.3.0"
 hex = "0.4"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0.192", features = ["derive"] }
 serde_json = "1.0"
 clap = { version = "4.4", features = ["derive"] }
 base64 = "0.21"
+inferno = "0.11"
+jsonschema = "0.17"
+colored = "2.0.0"
 
 [[bin]]
 name = "erst-sim"
 path = "src/main.rs"
+

@@ -24,7 +24,7 @@ func BenchmarkVersionComparison(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		checker.compareVersions("v1.0.0", "v2.0.0")
+		_, _ = checker.compareVersions("v1.0.0", "v2.0.0")
 	}
 }
 
@@ -34,7 +34,7 @@ func BenchmarkCacheCheck(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		checker.shouldCheck()
+		_, _ = checker.shouldCheck()
 	}
 }
 
