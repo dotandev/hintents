@@ -1,0 +1,13 @@
+# Set default behavior to handle line endings automatically.
+* text=auto
+
+# Force shell scripts to always use LF, even on Windows.
+*.sh text eol=lf
+
+# Force Go and Rust files to use LF to prevent cross-platform issues in CI checks.
+*.go text eol=lf
+*.rs text eol=lf
+
+# Keep YAML files clean for CI runners.
+*.yml text eol=lf
+*.yaml text eol=lf
