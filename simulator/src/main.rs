@@ -4,12 +4,17 @@ use soroban_env_host::xdr::ReadXdr;
 use std::collections::HashMap;
 use std::io::{self, Read};
 
+mod source_mapper;
+use source_mapper::{SourceMapper, SourceLocation};
+
 #[derive(Debug, Deserialize)]
 struct SimulationRequest {
     envelope_xdr: String,
     result_meta_xdr: String,
     // Key XDR -> Entry XDR
     ledger_entries: Option<HashMap<String, String>>,
+    // Optional WASM bytecode for source mapping
+    contract_wasm: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -18,6 +23,7 @@ struct SimulationResponse {
     error: Option<String>,
     events: Vec<String>,
     logs: Vec<String>,
+    source_location: Option<SourceLocation>,
 }
 
 fn main() {
@@ -37,6 +43,7 @@ fn main() {
                 error: Some(format!("Invalid JSON: {}", e)),
                 events: vec![],
                 logs: vec![],
+                source_location: None,
             };
             println!("{}", serde_json::to_string(&res).unwrap());
             return;
@@ -79,6 +86,28 @@ fn main() {
                 None
             }
         }
+    };
+
+    // Initialize source mapper if WASM is provided
+    let source_mapper = if let Some(wasm_base64) = &request.contract_wasm {
+        match base64::engine::general_purpose::STANDARD.decode(wasm_base64) {
+            Ok(wasm_bytes) => {
+                let mapper = SourceMapper::new(wasm_bytes);
+                if mapper.has_debug_symbols() {
+                    eprintln!("Debug symbols found in WASM");
+                    Some(mapper)
+                } else {
+                    eprintln!("No debug symbols found in WASM");
+                    None
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to decode WASM base64: {}", e);
+                None
+            }
+        }
+    } else {
+        None
     };
 
     // Initialize Host
@@ -149,6 +178,24 @@ fn main() {
                     invocation_logs.push(format!("Function: {:?}", func_name));
                     invocation_logs.push(format!("Args Count: {}", invoke_args_vec.len()));
 
+                    // Simulate contract execution with error trapping
+                    if let Some(mapper) = &source_mapper {
+                        // In a real implementation, we would:
+                        // 1. Execute the contract function
+                        // 2. Catch any WASM traps or errors
+                        // 3. Map the failure point to source code
+                        
+                        // For demonstration, simulate a failure at WASM offset 0x1234
+                        let simulated_failure_offset = 0x1234u64;
+                        if let Some(location) = mapper.map_wasm_offset_to_source(simulated_failure_offset) {
+                            let error_msg = format!(
+                                "Contract execution failed. Failed at line {} in {}",
+                                location.line, location.file
+                            );
+                            return send_error_with_location(error_msg, Some(location));
+                        }
+                    }
+
                     // In a full implementation, we'd do:
                     // let res = host.invoke_function(Host::from_xdr(address), ...);
                 }
@@ -192,17 +239,23 @@ fn main() {
             logs.extend(invocation_logs);
             logs
         },
+        source_location: None, // Set when there's an actual failure
     };
 
     println!("{}", serde_json::to_string(&response).unwrap());
 }
 
 fn send_error(msg: String) {
+    send_error_with_location(msg, None)
+}
+
+fn send_error_with_location(msg: String, source_location: Option<SourceLocation>) {
     let res = SimulationResponse {
         status: "error".to_string(),
         error: Some(msg),
         events: vec![],
         logs: vec![],
+        source_location,
     };
     println!("{}", serde_json::to_string(&res).unwrap());
 }
