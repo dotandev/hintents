@@ -14,12 +14,16 @@ import (
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/session"
 	"github.com/dotandev/hintents/internal/simulator"
+	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/dotandev/hintents/internal/tokenflow"
 	"github.com/spf13/cobra"
 	"github.com/stellar/go/xdr"
 )
 
 var (
+	networkFlag  string
+	rpcURLFlag   string
+	snapshotFlag string
 	networkFlag        string
 	rpcURLFlag         string
 	compareNetworkFlag string
@@ -204,6 +208,16 @@ Example:
 			diffResults(primaryResult, compareResult, networkFlag, compareNetworkFlag)
 		}
 
+		var ledgerEntries map[string]string
+		if snapshotFlag != "" {
+			snap, err := snapshot.Load(snapshotFlag)
+			if err != nil {
+				return fmt.Errorf("failed to load snapshot: %w", err)
+			}
+			ledgerEntries = snap.ToMap()
+			fmt.Printf("Loaded %d ledger entries from snapshot\n", len(ledgerEntries))
+		}
+
 		return nil
 	},
 }
@@ -230,7 +244,7 @@ func extractLedgerKeys(metaXdr string) ([]string, error) {
 		simReq := &simulator.SimulationRequest{
 			EnvelopeXdr:   txResp.EnvelopeXdr,
 			ResultMetaXdr: txResp.ResultMetaXdr,
-			LedgerEntries: nil, // TODO: fetch ledger entries if needed
+			LedgerEntries: ledgerEntries,
 		}
 
 		fmt.Printf("Running simulation...\n")
@@ -431,6 +445,7 @@ func getErstVersion() string {
 func init() {
 	debugCmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
 	debugCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
+	debugCmd.Flags().StringVar(&snapshotFlag, "snapshot", "", "Load state from JSON snapshot file")
 	debugCmd.Flags().StringVar(&compareNetworkFlag, "compare-network", "", "Network to compare against (testnet, mainnet, futurenet)")
 
 	rootCmd.AddCommand(debugCmd)
