@@ -76,7 +76,7 @@ impl GasOptimizationAdvisor {
                     "CPU consumption is {}x higher than baseline. Consider optimizing loops and reducing computational complexity.",
                     cpu_per_op / self.baseline_cpu_per_op
                 ),
-                estimated_savings: format!("~{}% reduction possible", 
+                estimated_savings: format!("~{}% reduction possible",
                     ((cpu_per_op - self.baseline_cpu_per_op) as f64 / cpu_per_op as f64 * 100.0) as u32),
                 code_location: Some("Loop operations".to_string()),
             });

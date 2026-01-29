@@ -196,7 +196,7 @@ fn main() {
         let mut result = Vec::new();
         let mut options = inferno::flamegraph::Options::default();
         options.title = "Soroban Resource Consumption".to_string();
-        
+
         if let Err(e) = inferno::flamegraph::from_reader(&mut options, folded_data.as_bytes(), &mut result) {
             eprintln!("Failed to generate flamegraph: {}", e);
         } else {
@@ -278,7 +278,7 @@ fn send_error(msg: String) {
 
 fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
     use std::fs;
-    
+
     eprintln!("🔧 Local WASM Replay Mode");
     eprintln!("WASM Path: {}", wasm_path);
     eprintln!("⚠️  WARNING: Using Mock State (not mainnet data)");
@@ -298,7 +298,7 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
     // Initialize Host with mock state
     let host = soroban_env_host::Host::default();
     host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug).unwrap();
-    
+
     eprintln!("✓ Initialized Host with diagnostic level: Debug");
 
     // TODO: In a full implementation, we would:
@@ -307,7 +307,7 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
     // 3. Parse mock_args into proper ScVal types
     // 4. Invoke the contract function with the arguments
     // 5. Capture and return the result
-    
+
     // For now, we'll create a basic response showing the setup worked
     let mut logs = vec![
         format!("Host Initialized with Budget: {:?}", host.budget_cloned()),
