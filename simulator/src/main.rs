@@ -1,18 +1,19 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-mod theme;
-mod config;
 mod cli;
-mod ipc;
+mod config;
 mod gas_optimizer;
+mod ipc;
+mod theme;
+
+use std::collections::HashMap;
+use std::io::{self, Read};
+use std::panic;
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use soroban_env_host::xdr::ReadXdr;
-use std::collections::HashMap;
-use std::io::{self, Read};
-use std::panic;
 
 use gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor, OptimizationReport};
 
@@ -197,7 +198,11 @@ fn main() {
         let mut options = inferno::flamegraph::Options::default();
         options.title = "Soroban Resource Consumption".to_string();
 
-        if let Err(e) = inferno::flamegraph::from_reader(&mut options, folded_data.as_bytes(), &mut result) {
+        if let Err(e) = inferno::flamegraph::from_reader(
+            &mut options,
+            folded_data.as_bytes(),
+            &mut result,
+        ) {
             eprintln!("Failed to generate flamegraph: {}", e);
         } else {
             flamegraph_svg = Some(String::from_utf8_lossy(&result).to_string());
@@ -279,15 +284,15 @@ fn send_error(msg: String) {
 fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
     use std::fs;
 
-    eprintln!("🔧 Local WASM Replay Mode");
+    eprintln!("ðŸ”§ Local WASM Replay Mode");
     eprintln!("WASM Path: {}", wasm_path);
-    eprintln!("⚠️  WARNING: Using Mock State (not mainnet data)");
+    eprintln!("âš ï¸  WARNING: Using Mock State (not mainnet data)");
     eprintln!();
 
     // Read WASM file
     let wasm_bytes = match fs::read(wasm_path) {
         Ok(bytes) => {
-            eprintln!("✓ Loaded WASM file: {} bytes", bytes.len());
+            eprintln!("âœ“ Loaded WASM file: {} bytes", bytes.len());
             bytes
         },
         Err(e) => {
@@ -299,7 +304,7 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
     let host = soroban_env_host::Host::default();
     host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug).unwrap();
 
-    eprintln!("✓ Initialized Host with diagnostic level: Debug");
+    eprintln!("âœ“ Initialized Host with diagnostic level: Debug");
 
     // TODO: In a full implementation, we would:
     // 1. Parse the WASM module to extract contract metadata
@@ -325,8 +330,10 @@ fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
     }
 
     logs.push("".to_string());
-    logs.push("⚠️  Note: Full WASM execution not yet implemented".to_string());
-    logs.push("This is a mock response showing the local replay infrastructure is working.".to_string());
+    logs.push("âš ï¸  Note: Full WASM execution not yet implemented".to_string());
+    logs.push(
+        "This is a mock response showing the local replay infrastructure is working.".to_string(),
+    );
 
     // Capture diagnostic events
     let events = match host.get_events() {

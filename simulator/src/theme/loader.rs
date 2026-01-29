@@ -1,11 +1,11 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-use serde::Deserialize;
 use std::fs;
+use serde::Deserialize;
 
-use super::theme::Theme;
 use crate::config::paths::theme_path;
+use super::theme::Theme;
 
 #[derive(Debug, Deserialize)]
 struct ThemeConfig {

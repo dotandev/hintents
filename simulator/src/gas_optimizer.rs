@@ -1,8 +1,8 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BudgetMetrics {
@@ -73,11 +73,16 @@ impl GasOptimizationAdvisor {
                 category: "CPU Usage".to_string(),
                 severity: "high".to_string(),
                 message: format!(
-                    "CPU consumption is {}x higher than baseline. Consider optimizing loops and reducing computational complexity.",
+                    "CPU consumption is {}x higher than baseline. \
+                     Consider optimizing loops and reducing computational complexity.",
                     cpu_per_op / self.baseline_cpu_per_op
                 ),
-                estimated_savings: format!("~{}% reduction possible",
-                    ((cpu_per_op - self.baseline_cpu_per_op) as f64 / cpu_per_op as f64 * 100.0) as u32),
+                estimated_savings: format!(
+                    "~{}% reduction possible",
+                    ((cpu_per_op - self.baseline_cpu_per_op) as f64
+                        / cpu_per_op as f64
+                        * 100.0) as u32
+                ),
                 code_location: Some("Loop operations".to_string()),
             });
         } else if cpu_per_op > self.baseline_cpu_per_op {
@@ -85,11 +90,16 @@ impl GasOptimizationAdvisor {
                 category: "CPU Usage".to_string(),
                 severity: "medium".to_string(),
                 message: format!(
-                    "CPU usage is {}x baseline. Review computational operations for optimization opportunities.",
+                    "CPU usage is {}x baseline. \
+                     Review computational operations for optimization opportunities.",
                     cpu_per_op / self.baseline_cpu_per_op
                 ),
-                estimated_savings: format!("~{}% reduction possible",
-                    ((cpu_per_op - self.baseline_cpu_per_op) as f64 / cpu_per_op as f64 * 100.0) as u32),
+                estimated_savings: format!(
+                    "~{}% reduction possible",
+                    ((cpu_per_op - self.baseline_cpu_per_op) as f64
+                        / cpu_per_op as f64
+                        * 100.0) as u32
+                ),
                 code_location: None,
             });
         }
@@ -100,11 +110,16 @@ impl GasOptimizationAdvisor {
                 category: "Memory Usage".to_string(),
                 severity: "high".to_string(),
                 message: format!(
-                    "Memory consumption is {}x higher than baseline. Consider using more efficient data structures or reducing allocations.",
+                    "Memory consumption is {}x higher than baseline. \
+                     Consider using more efficient data structures or reducing allocations.",
                     memory_per_op / self.baseline_memory_per_op
                 ),
-                estimated_savings: format!("~{}% reduction possible",
-                    ((memory_per_op - self.baseline_memory_per_op) as f64 / memory_per_op as f64 * 100.0) as u32),
+                estimated_savings: format!(
+                    "~{}% reduction possible",
+                    ((memory_per_op - self.baseline_memory_per_op) as f64
+                        / memory_per_op as f64
+                        * 100.0) as u32
+                ),
                 code_location: Some("Data storage operations".to_string()),
             });
         } else if memory_per_op > self.baseline_memory_per_op {
@@ -128,7 +143,8 @@ impl GasOptimizationAdvisor {
                 category: "Budget Allocation".to_string(),
                 severity: "high".to_string(),
                 message: format!(
-                    "This operation consumes {:.1}% of the CPU budget; consider batching multiple operations or caching results.",
+                    "This operation consumes {:.1}% of the CPU budget; \
+                     consider batching multiple operations or caching results.",
                     cpu_percentage
                 ),
                 estimated_savings: "20-40% with batching".to_string(),
@@ -142,7 +158,8 @@ impl GasOptimizationAdvisor {
                 category: "Memory Efficiency".to_string(),
                 severity: "medium".to_string(),
                 message: format!(
-                    "Memory usage is {:.1}% of budget. Consider using references instead of cloning data.",
+                    "Memory usage is {:.1}% of budget. \
+                     Consider using references instead of cloning data.",
                     memory_percentage
                 ),
                 estimated_savings: "10-25% with better memory management".to_string(),
@@ -155,7 +172,8 @@ impl GasOptimizationAdvisor {
             tips.push(OptimizationTip {
                 category: "General".to_string(),
                 severity: "low".to_string(),
-                message: "Contract execution is efficient. Consider testing with larger datasets to ensure scalability.".to_string(),
+                message: "Contract execution is efficient. \
+                          Consider testing with larger datasets to ensure scalability.".to_string(),
                 estimated_savings: "N/A".to_string(),
                 code_location: None,
             });
@@ -208,7 +226,8 @@ impl GasOptimizationAdvisor {
                 category: "Loop Optimization".to_string(),
                 severity: "high".to_string(),
                 message: format!(
-                    "Loop executes {} times consuming {} CPU instructions. Consider batching or reducing iterations.",
+                    "Loop executes {} times consuming {} CPU instructions. \
+                     Consider batching or reducing iterations.",
                     count, cpu_cost
                 ),
                 estimated_savings: "30-50% with batching".to_string(),

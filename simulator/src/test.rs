@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod contract_execution_tests {
     use crate::gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor};
-    use crate::{execute_operations, StructuredError};
+    use crate::{StructuredError, execute_operations};
 
     // Mock helper to simulate HostError scenarios
     fn simulate_host_error() -> Result<Vec<String>, soroban_env_host::HostError> {
