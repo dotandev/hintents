@@ -10,6 +10,7 @@ import (
 
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/rpc"
+	"github.com/dotandev/hintents/internal/security"
 	"github.com/dotandev/hintents/internal/session"
 	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/dotandev/hintents/internal/tokenflow"
@@ -162,6 +163,47 @@ Example:
 			}
 			fmt.Printf("\nToken Flow Chart (Mermaid):\n")
 			fmt.Println(report.MermaidFlowchart())
+		}
+
+		// Security vulnerability analysis
+		fmt.Printf("\n=== Security Analysis ===\n")
+		secDetector := security.NewDetector()
+		findings := secDetector.Analyze(txResp.EnvelopeXdr, txResp.ResultMetaXdr, simResp.Events, simResp.Logs)
+
+		if len(findings) == 0 {
+			fmt.Printf("✓ No security issues detected\n")
+		} else {
+			verifiedCount := 0
+			heuristicCount := 0
+
+			for _, finding := range findings {
+				if finding.Type == security.FindingVerifiedRisk {
+					verifiedCount++
+				} else {
+					heuristicCount++
+				}
+			}
+
+			if verifiedCount > 0 {
+				fmt.Printf("\n⚠️  VERIFIED SECURITY RISKS: %d\n", verifiedCount)
+			}
+			if heuristicCount > 0 {
+				fmt.Printf("⚡ HEURISTIC WARNINGS: %d\n", heuristicCount)
+			}
+
+			fmt.Printf("\nFindings:\n")
+			for i, finding := range findings {
+				icon := "⚡"
+				if finding.Type == security.FindingVerifiedRisk {
+					icon = "⚠️"
+				}
+
+				fmt.Printf("\n%d. %s [%s] %s - %s\n", i+1, icon, finding.Type, finding.Severity, finding.Title)
+				fmt.Printf("   %s\n", finding.Description)
+				if finding.Evidence != "" {
+					fmt.Printf("   Evidence: %s\n", finding.Evidence)
+				}
+			}
 		}
 
 		// Store as current session for potential saving
