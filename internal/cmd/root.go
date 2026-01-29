@@ -8,14 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "erst",
-	Short: "Erst - Soroban Error Decoder & Debugger",
-	Long: `Erst is a specialized developer tool for the Stellar network,
-designed to solve the "black box" debugging experience on Soroban.`,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return localization.LoadTranslations()
-	},
 // Global flag variables
 var (
 	ProfileFlag bool
@@ -42,13 +34,15 @@ Examples:
   erst cache status                          Check cache usage
 
 Get started with 'erst debug --help' or visit the documentation.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return localization.LoadTranslations()
+	},
 }
 
 func Execute() error {
 	return rootCmd.Execute()
 }
 
-func init() {}
 func init() {
 	// Root command initialization
 	rootCmd.PersistentFlags().BoolVar(

@@ -1,6 +1,10 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 package simulator
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,7 +13,7 @@ import (
 func TestRunnerInterface_CompileTimeCheck(t *testing.T) {
 	// Verify Runner implements RunnerInterface at compile time
 	var _ RunnerInterface = (*Runner)(nil)
-	
+
 	// This test ensures the interface contract is maintained
 	assert.True(t, true, "Runner implements RunnerInterface")
 }
@@ -17,7 +21,7 @@ func TestRunnerInterface_CompileTimeCheck(t *testing.T) {
 func TestNewRunnerInterface(t *testing.T) {
 	// Test the factory function
 	runner, err := NewRunnerInterface()
-	
+
 	// Note: This will fail in the current environment due to missing binary
 	// but the interface structure is correct
 	if err != nil {
@@ -33,14 +37,15 @@ func TestNewRunnerInterface(t *testing.T) {
 func TestExampleUsage(t *testing.T) {
 	// Create a mock implementation for testing
 	mockRunner := &mockRunnerForTest{}
-	
+
 	req := &SimulationRequest{
 		EnvelopeXdr:   "test-envelope",
 		ResultMetaXdr: "test-meta",
 	}
-	
-	resp, err := ExampleUsage(mockRunner, req)
-	
+
+	ctx := context.Background()
+	resp, err := ExampleUsage(ctx, mockRunner, req)
+
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.Equal(t, "success", resp.Status)
@@ -49,7 +54,7 @@ func TestExampleUsage(t *testing.T) {
 // Simple mock for testing the interface
 type mockRunnerForTest struct{}
 
-func (m *mockRunnerForTest) Run(req *SimulationRequest) (*SimulationResponse, error) {
+func (m *mockRunnerForTest) Run(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 	return &SimulationResponse{
 		Status: "success",
 		Events: []string{"mock-event"},

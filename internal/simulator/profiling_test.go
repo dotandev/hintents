@@ -1,7 +1,11 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 package simulator
 
 import (
 	"testing"
+
 	"github.com/stretchr/testify/assert"
 )
 
