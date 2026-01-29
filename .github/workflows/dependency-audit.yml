@@ -1,0 +1,77 @@
+name: Dependency Security Audits
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  go-audit:
+    runs-on: ubuntu-latest
+    name: Go Vulnerability Scan
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+          cache: true
+      
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+        continue-on-error: true
+      
+      - name: Parse govulncheck results
+        id: go-check
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          if govulncheck ./... 2>&1 | grep -q "Vulnerability"; then
+            echo "critical=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+  
+  rust-audit:
+    runs-on: ubuntu-latest
+    name: Rust Dependency Audit
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      
+      - name: Run cargo audit
+        working-directory: ./simulator
+        run: |
+          cargo audit --deny warnings
+        continue-on-error: true
+      
+      - name: Parse cargo audit results
+        id: rust-check
+        working-directory: ./simulator
+        run: |
+          if cargo audit --json | grep -q '"vulnerability":'; then
+            echo "critical=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+  
+  report:
+    runs-on: ubuntu-latest
+    name: Audit Summary
+    needs: [go-audit, rust-audit]
+    if: always()
+    steps:
+      - name: Check audit results
+        run: |
+          if [[ "${{ needs.go-audit.result }}" == "failure" ]] || [[ "${{ needs.rust-audit.result }}" == "failure" ]]; then
+            echo "CRITICAL: Vulnerabilities detected in dependencies"
+            exit 1
+          fi
+          echo "SUCCESS: All dependency audits passed"

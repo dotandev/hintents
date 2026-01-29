@@ -1,0 +1,16 @@
+mode: atomic
+github.com/dotandev/hintents/internal/rpc/cache.go:21.55,24.16 2 1036
+github.com/dotandev/hintents/internal/rpc/cache.go:24.16,26.3 1 0
+github.com/dotandev/hintents/internal/rpc/cache.go:29.2,32.41 2 1036
+github.com/dotandev/hintents/internal/rpc/client.go:36.37,37.15 1 0
+github.com/dotandev/hintents/internal/rpc/client.go:37.15,39.3 1 0
+github.com/dotandev/hintents/internal/rpc/client.go:41.2,43.13 2 0
+github.com/dotandev/hintents/internal/rpc/client.go:44.15,45.53 1 0
+github.com/dotandev/hintents/internal/rpc/client.go:46.17,51.4 1 0
+github.com/dotandev/hintents/internal/rpc/client.go:52.15,53.14 1 0
+github.com/dotandev/hintents/internal/rpc/client.go:54.10,55.55 1 0
+github.com/dotandev/hintents/internal/rpc/client.go:58.2,61.3 1 0
+github.com/dotandev/hintents/internal/rpc/client.go:65.56,75.2 2 0
+github.com/dotandev/hintents/internal/rpc/client.go:85.97,89.16 3 3
+github.com/dotandev/hintents/internal/rpc/client.go:89.16,92.3 2 2
+github.com/dotandev/hintents/internal/rpc/client.go:94.2,100.8 2 1
