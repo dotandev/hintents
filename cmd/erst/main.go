@@ -12,8 +12,6 @@ import (
 	"github.com/dotandev/hintents/internal/updater"
 )
 
-// Version is the current version of erst
-// This should be set via ldflags during build: -ldflags "-X main.Version=v1.2.3"
 var Version = "dev"
 
 func main() {
@@ -30,7 +28,7 @@ func main() {
 	}
 
 	decoder.PrintEnvelope(env)
-	// Start update checker in background (non-blocking)
+
 	checker := updater.NewChecker(Version)
 	go checker.CheckForUpdates()
 
