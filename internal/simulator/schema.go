@@ -21,6 +21,10 @@ type SimulationRequest struct {
 	ResultMetaXdr string `json:"result_meta_xdr"`
 	// Snapshot of Ledger Entries (Key XDR -> Entry XDR) necessary for replay
 	LedgerEntries map[string]string `json:"ledger_entries,omitempty"`
+	// Path to local WASM file for local replay (optional)
+	WasmPath *string `json:"wasm_path,omitempty"`
+	// Mock arguments for local replay (optional, JSON array of strings)
+	MockArgs *[]string `json:"mock_args,omitempty"`
 	// Enable profiling
 	Profile bool `json:"profile,omitempty"`
 

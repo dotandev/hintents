@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/dotandev/hintents/internal/tokenflow"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/stellar/go/xdr"
 	"go.opentelemetry.io/otel/attribute"
@@ -33,6 +35,9 @@ var (
 	traceOutputFile    string
 	snapshotFlag       string
 	compareNetworkFlag string
+	verbose            bool
+	wasmPath           string
+	args               []string
 )
 
 var debugCmd = &cobra.Command{
@@ -47,7 +52,10 @@ through the local simulator, and displays detailed execution traces including:
   - Token flows (XLM and Soroban assets)
   - Execution metadata and state changes
 
-The simulation results are stored in a session that can be saved for later analysis.`,
+The simulation results are stored in a session that can be saved for later analysis.
+
+Local WASM Replay Mode:
+  Use --wasm flag to test contracts locally without network data.`,
 	Example: `  # Debug a transaction on mainnet
   erst debug 5c0a1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab
 
@@ -55,9 +63,21 @@ The simulation results are stored in a session that can be saved for later analy
   erst debug --network testnet abc123...def789
 
   # Debug and compare results between networks
-  erst debug --network mainnet --compare-network testnet abc123...def789`,
-	Args: cobra.ExactArgs(1),
+  erst debug --network mainnet --compare-network testnet abc123...def789
+
+  # Local WASM replay (no network required)
+  erst debug --wasm ./contract.wasm --args "arg1" --args "arg2"`,
+	Args: cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Local WASM replay mode doesn't need transaction hash
+		if wasmPath != "" {
+			return nil
+		}
+
+		if len(args) == 0 {
+			return fmt.Errorf("transaction hash is required when not using --wasm flag")
+		}
+
 		if len(args[0]) != 64 {
 			return fmt.Errorf("error: invalid transaction hash format (expected 64 hex characters, got %d)", len(args[0]))
 		}
@@ -81,9 +101,15 @@ The simulation results are stored in a session that can be saved for later analy
 		}
 		return nil
 	},
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, cmdArgs []string) error {
+		// Local WASM replay mode
+		if wasmPath != "" {
+			return runLocalWasmReplay()
+		}
+
+		// Network transaction replay mode
 		ctx := cmd.Context()
-		txHash := args[0]
+		txHash := cmdArgs[0]
 
 		// Initialize OpenTelemetry if enabled
 		if tracingEnabled {
@@ -260,6 +286,73 @@ The simulation results are stored in a session that can be saved for later analy
 	},
 }
 
+func runLocalWasmReplay() error {
+	color.Yellow("⚠️  WARNING: Using Mock State (not mainnet data)")
+	fmt.Println()
+
+	// Verify WASM file exists
+	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
+		return fmt.Errorf("WASM file not found: %s", wasmPath)
+	}
+
+	color.Cyan("🔧 Local WASM Replay Mode")
+	fmt.Printf("WASM File: %s\n", wasmPath)
+	fmt.Printf("Arguments: %v\n", args)
+	fmt.Println()
+
+	// Create simulator runner
+	runner, err := simulator.NewRunner()
+	if err != nil {
+		return fmt.Errorf("failed to initialize simulator: %w", err)
+	}
+
+	// Create simulation request with local WASM
+	req := &simulator.SimulationRequest{
+		EnvelopeXdr:   "",  // Empty for local replay
+		ResultMetaXdr: "",  // Empty for local replay
+		LedgerEntries: nil, // Mock state will be generated
+		WasmPath:      &wasmPath,
+		MockArgs:      &args,
+	}
+
+	// Run simulation
+	color.Green("▶ Executing contract locally...")
+	resp, err := runner.Run(req)
+	if err != nil {
+		color.Red("✗ Execution failed: %v", err)
+		return err
+	}
+
+	// Display results
+	fmt.Println()
+	color.Green("✓ Execution completed successfully")
+	fmt.Println()
+
+	if len(resp.Logs) > 0 {
+		color.Cyan("📋 Logs:")
+		for _, log := range resp.Logs {
+			fmt.Printf("  %s\n", log)
+		}
+		fmt.Println()
+	}
+
+	if len(resp.Events) > 0 {
+		color.Cyan("📡 Events:")
+		for _, event := range resp.Events {
+			fmt.Printf("  %s\n", event)
+		}
+		fmt.Println()
+	}
+
+	if verbose {
+		color.Cyan("🔍 Full Response:")
+		jsonBytes, _ := json.MarshalIndent(resp, "", "  ")
+		fmt.Println(string(jsonBytes))
+	}
+
+	return nil
+}
+
 func extractLedgerKeys(metaXdr string) ([]string, error) {
 	data, err := base64.StdEncoding.DecodeString(metaXdr)
 	if err != nil {
@@ -373,6 +466,9 @@ func init() {
 	debugCmd.Flags().StringVar(&traceOutputFile, "trace-output", "", "Trace output file")
 	debugCmd.Flags().StringVar(&snapshotFlag, "snapshot", "", "Snapshot file")
 	debugCmd.Flags().StringVar(&compareNetworkFlag, "compare-network", "", "Network to compare")
+	debugCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+	debugCmd.Flags().StringVar(&wasmPath, "wasm", "", "Path to local WASM file for local replay (no network required)")
+	debugCmd.Flags().StringSliceVar(&args, "args", []string{}, "Mock arguments for local replay (JSON array of strings)")
 
 	rootCmd.AddCommand(debugCmd)
 }

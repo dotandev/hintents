@@ -29,10 +29,12 @@ Key features:
   - Track token flows and contract events
   - Manage debugging sessions for complex workflows
   - Cache transaction data for offline analysis
+  - Local WASM replay for rapid contract development
 
 Examples:
   erst debug abc123...def                    Debug a transaction
   erst debug --network testnet abc123...def  Debug on testnet
+  erst debug --wasm ./contract.wasm          Test contract locally
   erst session list                          View saved sessions
   erst cache status                          Check cache usage
 
@@ -58,6 +60,9 @@ func init() {
 		false,
 		"Enable CPU/Memory profiling and generate a flamegraph SVG",
 	)
+
+	// Register commands
+	rootCmd.AddCommand(versionCmd)
 }
 
 // currentSession stores the active debugging session

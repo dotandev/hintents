@@ -47,6 +47,13 @@ type Client struct {
 	SorobanURL string
 }
 
+// TransactionResponse contains the raw XDR fields needed for simulation
+type TransactionResponse struct {
+	EnvelopeXdr   string
+	ResultXdr     string
+	ResultMetaXdr string
+}
+
 // NewClient creates a new RPC client with the specified network
 // If network is empty, defaults to Mainnet
 func NewClient(net Network) *Client {
@@ -97,13 +104,6 @@ func NewClientWithURL(url string, net Network) *Client {
 		Network:    net,
 		SorobanURL: defaultClient.SorobanURL,
 	}
-}
-
-// TransactionResponse contains the raw XDR fields needed for simulation
-type TransactionResponse struct {
-	EnvelopeXdr   string
-	ResultXdr     string
-	ResultMetaXdr string
 }
 
 // GetTransaction fetches the transaction details and full XDR data

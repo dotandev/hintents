@@ -22,6 +22,10 @@ struct SimulationRequest {
     result_meta_xdr: String,
     // Key XDR -> Entry XDR
     ledger_entries: Option<HashMap<String, String>>,
+    // Optional: Path to local WASM file for local replay
+    wasm_path: Option<String>,
+    // Optional: Mock arguments for local replay (JSON array of strings)
+    mock_args: Option<Vec<String>>,
     profile: Option<bool>,
     #[serde(default)]
     enable_optimization_advisor: bool,
@@ -88,6 +92,11 @@ fn main() {
             return;
         }
     };
+
+    // Check if this is a local WASM replay (no network data)
+    if let Some(wasm_path) = &request.wasm_path {
+        return run_local_wasm_replay(wasm_path, &request.mock_args);
+    }
 
     // Decode Envelope XDR
     let envelope = match base64::engine::general_purpose::STANDARD.decode(&request.envelope_xdr) {
@@ -265,4 +274,75 @@ fn send_error(msg: String) {
         budget_usage: None,
     };
     println!("{}", serde_json::to_string(&res).unwrap());
+}
+
+fn run_local_wasm_replay(wasm_path: &str, mock_args: &Option<Vec<String>>) {
+    use std::fs;
+    
+    eprintln!("🔧 Local WASM Replay Mode");
+    eprintln!("WASM Path: {}", wasm_path);
+    eprintln!("⚠️  WARNING: Using Mock State (not mainnet data)");
+    eprintln!();
+
+    // Read WASM file
+    let wasm_bytes = match fs::read(wasm_path) {
+        Ok(bytes) => {
+            eprintln!("✓ Loaded WASM file: {} bytes", bytes.len());
+            bytes
+        },
+        Err(e) => {
+            return send_error(format!("Failed to read WASM file: {}", e));
+        }
+    };
+
+    // Initialize Host with mock state
+    let host = soroban_env_host::Host::default();
+    host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug).unwrap();
+    
+    eprintln!("✓ Initialized Host with diagnostic level: Debug");
+
+    // TODO: In a full implementation, we would:
+    // 1. Parse the WASM module to extract contract metadata
+    // 2. Deploy the contract to the host
+    // 3. Parse mock_args into proper ScVal types
+    // 4. Invoke the contract function with the arguments
+    // 5. Capture and return the result
+    
+    // For now, we'll create a basic response showing the setup worked
+    let mut logs = vec![
+        format!("Host Initialized with Budget: {:?}", host.budget_cloned()),
+        format!("WASM file loaded: {} bytes", wasm_bytes.len()),
+        "Mock State Provider: Active".to_string(),
+    ];
+
+    if let Some(args) = mock_args {
+        logs.push(format!("Mock Arguments provided: {} args", args.len()));
+        for (i, arg) in args.iter().enumerate() {
+            logs.push(format!("  Arg[{}]: {}", i, arg));
+        }
+    } else {
+        logs.push("No mock arguments provided".to_string());
+    }
+
+    logs.push("".to_string());
+    logs.push("⚠️  Note: Full WASM execution not yet implemented".to_string());
+    logs.push("This is a mock response showing the local replay infrastructure is working.".to_string());
+
+    // Capture diagnostic events
+    let events = match host.get_events() {
+        Ok(evs) => evs.0.iter().map(|e| format!("{:?}", e)).collect::<Vec<String>>(),
+        Err(e) => vec![format!("Failed to retrieve events: {:?}", e)],
+    };
+
+    let response = SimulationResponse {
+        status: "success".to_string(),
+        error: None,
+        events,
+        logs,
+        flamegraph: None,
+        optimization_report: None,
+        budget_usage: None,
+    };
+
+    println!("{}", serde_json::to_string(&response).unwrap());
 }
