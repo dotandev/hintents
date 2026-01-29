@@ -89,5 +89,6 @@ func (c *Client) GetTransaction(ctx context.Context, hash string) (*TransactionR
 
 	logger.Logger.Info("Transaction fetched successfully", "hash", hash, "envelope_size", len(tx.EnvelopeXdr))
 
-	return parseTransactionResponse(tx), nil
+	return ParseTransactionResponse(tx), nil
 }
+
