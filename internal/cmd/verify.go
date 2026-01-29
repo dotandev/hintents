@@ -1,4 +1,4 @@
-package audit
+package cmd
 
 import (
 	"crypto/ed25519"
