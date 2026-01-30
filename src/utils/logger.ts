@@ -114,10 +114,14 @@ export class Logger {
      */
     private getTimestamp(): string {
         const elapsed = Date.now() - this.startTime;
-        const seconds = Math.floor(elapsed / 1000);
+        const minutes = Math.floor(elapsed / 60000);
+        const seconds = Math.floor((elapsed % 60000) / 1000);
         const ms = elapsed % 1000;
-        return `[${String(seconds).padStart(2, '0')}:${String(ms).padStart(2, '0')}.${String(ms).padStart(3, '0')}]`;
+
+        return `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(ms).padStart(3, '0')}]`;
     }
+
+    // TODO: Add support for logging to a file in the future
 
     /**
      * Get color for category
