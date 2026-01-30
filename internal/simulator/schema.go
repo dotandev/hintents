@@ -15,6 +15,8 @@ import (
 
 // SimulationRequest is the JSON object passed to the Rust binary via Stdin
 type SimulationRequest struct {
+	// Network identifier (mainnet, testnet, futurenet)
+	Network string `json:"network,omitempty"`
 	// XDR encoded TransactionEnvelope
 	EnvelopeXdr string `json:"envelope_xdr"`
 	// XDR encoded TransactionResultMeta (historical data)

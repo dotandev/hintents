@@ -205,6 +205,7 @@ Local WASM Replay Mode:
 
 				fmt.Printf("Running simulation on %s...\n", networkFlag)
 				simReq := &simulator.SimulationRequest{
+					Network:      networkFlag,
 					EnvelopeXdr:   resp.EnvelopeXdr,
 					ResultMetaXdr: resp.ResultMetaXdr,
 					LedgerEntries: ledgerEntries,
@@ -234,6 +235,7 @@ Local WASM Replay Mode:
 						return
 					}
 					primaryResult, primaryErr = runner.Run(&simulator.SimulationRequest{
+						Network:      networkFlag,
 						EnvelopeXdr:   resp.EnvelopeXdr,
 						ResultMetaXdr: resp.ResultMetaXdr,
 						LedgerEntries: entries,
@@ -250,6 +252,7 @@ Local WASM Replay Mode:
 						return
 					}
 					compareResult, compareErr = runner.Run(&simulator.SimulationRequest{
+						Network:      compareNetworkFlag,
 						EnvelopeXdr:   resp.EnvelopeXdr,
 						ResultMetaXdr: resp.ResultMetaXdr,
 						LedgerEntries: entries,

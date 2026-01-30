@@ -7,6 +7,7 @@ edition = "2021"
 soroban-env-host = "20.3.0"
 soroban-sdk = "20.3.0"
 hex = "0.4"
+sha2 = "0.10"
 serde = { version = "1.0.192", features = ["derive"] }
 serde_json = "1.0"
 clap = { version = "4.4", features = ["derive"] }

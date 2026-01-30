@@ -9,6 +9,7 @@ mod gas_optimizer;
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use soroban_env_host::xdr::ReadXdr;
 use std::collections::HashMap;
 use std::io::{self, Read};
@@ -18,6 +19,8 @@ use gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor, OptimizationReport};
 
 #[derive(Debug, Deserialize)]
 struct SimulationRequest {
+    #[serde(default)]
+    network: Option<String>,
     envelope_xdr: String,
     result_meta_xdr: String,
     // Key XDR -> Entry XDR
@@ -58,6 +61,24 @@ struct StructuredError {
     error_type: String,
     message: String,
     details: Option<String>,
+}
+
+fn network_passphrase(network: &str) -> Option<&'static str> {
+    match network.to_lowercase().as_str() {
+        "public" | "mainnet" => Some("Public Global Stellar Network ; September 2015"),
+        "testnet" => Some("Test SDF Network ; September 2015"),
+        "futurenet" => Some("Test SDF Future Network ; October 2022"),
+        _ => None,
+    }
+}
+
+fn network_id_from_passphrase(passphrase: &str) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(passphrase.as_bytes());
+    let digest = hasher.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest[..]);
+    out
 }
 
 fn main() {
@@ -120,6 +141,17 @@ fn main() {
     let host = soroban_env_host::Host::default();
     host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug)
         .unwrap();
+
+    // Set network passphrase / network_id if provided
+    if let Some(network) = &request.network {
+        if let Some(passphrase) = network_passphrase(network) {
+            let network_id = network_id_from_passphrase(passphrase);
+            host.with_mut_ledger_info(|ledger_info| {
+                ledger_info.network_id = network_id;
+            })
+            .unwrap();
+        }
+    }
 
     // Override Ledger Info if provided
     if request.timestamp.is_some() || request.ledger_sequence.is_some() {
