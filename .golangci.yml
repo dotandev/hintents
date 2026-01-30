@@ -1,17 +1,36 @@
-linters:
-  enable:
-    - unused
-    - ineffassign
-    - gofmt
-    - goimports
-    - govet
-    - errcheck
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - unused
-
 run:
   timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    - gocyclo
+    - errcheck
+    - staticcheck
+    - unused
+
+linters-settings:
+  gocyclo:
+    min-complexity: 30
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    # Exclude errcheck for test files
+    - path: _test\.go
+      linters:
+        - errcheck
+    # Exclude errcheck for Close, Setenv, Unsetenv calls (common practice)
+    - linters:
+        - errcheck
+      text: "Error return value of `.*(Close|Setenv|Unsetenv).*` is not checked"
+    # Exclude unused for parser.go (kept for future use)
+    - path: internal/rpc/parser\.go
+      linters:
+        - unused

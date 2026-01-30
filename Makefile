@@ -2,9 +2,23 @@
 .PHONY: build test lint lint-unused test-unused validate-ci clean
 .PHONY: build test lint validate-errors clean
 
+# Build variables
+VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT_SHA?=$(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE?=$(shell date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+# Go build flags
+LDFLAGS=-ldflags "-X 'github.com/dotandev/hintents/internal/cmd.Version=$(VERSION)' \
+                  -X 'github.com/dotandev/hintents/internal/cmd.CommitSHA=$(COMMIT_SHA)' \
+                  -X 'github.com/dotandev/hintents/internal/cmd.BuildDate=$(BUILD_DATE)'"
+
 # Build the main binary
 build:
-	go build -o bin/erst ./cmd/erst
+	go build $(LDFLAGS) -o bin/erst ./cmd/erst
+
+# Build for release (optimized)
+build-release:
+	go build $(LDFLAGS) -ldflags "-s -w" -o bin/erst ./cmd/erst
 
 # Run tests
 test:
