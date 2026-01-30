@@ -23,62 +23,213 @@ import (
 )
 
 func TestSentinelErrors(t *testing.T) {
-	// Test that sentinel errors are defined
-	assert.NotNil(t, ErrTransactionNotFound)
-	assert.NotNil(t, ErrRPCConnectionFailed)
-	assert.NotNil(t, ErrSimulatorNotFound)
-	assert.NotNil(t, ErrSimulationFailed)
-	assert.NotNil(t, ErrInvalidNetwork)
-	assert.NotNil(t, ErrMarshalFailed)
-	assert.NotNil(t, ErrUnmarshalFailed)
-	assert.NotNil(t, ErrSimulationLogicError)
+	// Test that all sentinel errors are defined
+	sentinelErrors := []error{
+		// Core simulation and RPC errors
+		ErrTransactionNotFound,
+		ErrRPCConnectionFailed,
+		ErrSimulatorNotFound,
+		ErrSimulationFailed,
+		ErrInvalidNetwork,
+		ErrMarshalFailed,
+		ErrUnmarshalFailed,
+		ErrSimulationLogicError,
+
+		// File I/O errors
+		ErrFileReadFailed,
+		ErrFileCreationFailed,
+		ErrFileWriteFailed,
+		ErrDirectoryCreationFailed,
+
+		// Database errors
+		ErrDatabaseOpenFailed,
+		ErrDatabaseInitializationFailed,
+		ErrSchemaMigrationFailed,
+
+		// Session errors
+		ErrSessionStoreOpenFailed,
+		ErrSessionSaveFailed,
+		ErrSessionLoadFailed,
+		ErrSessionDeleteFailed,
+		ErrSessionListFailed,
+		ErrSessionCleanupFailed,
+		ErrNoActiveSession,
+
+		// RPC/Network errors
+		ErrRequestCreationFailed,
+		ErrResponseReadFailed,
+		ErrRPCError,
+		ErrTransactionFetchFailed,
+		ErrLedgerEntriesFetchFailed,
+		ErrLedgerKeyExtractionFailed,
+
+		// Snapshot/Config errors
+		ErrSnapshotReadFailed,
+		ErrSnapshotParseFailed,
+		ErrSnapshotWriteFailed,
+		ErrConfigReadFailed,
+		ErrConfigWriteFailed,
+
+		// Webhook errors
+		ErrInvalidWebhookURL,
+		ErrWebhookRequestFailed,
+		ErrWebhookSendFailed,
+
+		// Simulator/Execution errors
+		ErrSimulatorInitializationFailed,
+		ErrContractIdentificationFailed,
+		ErrCodeInjectionFailed,
+
+		// Template/Generation errors
+		ErrTemplateParsingFailed,
+		ErrTemplateExecutionFailed,
+
+		// Validation errors
+		ErrInvalidPublicKey,
+		ErrInvalidSignature,
+		ErrInvalidExecutionState,
+		ErrInvalidUserInput,
+
+		// Other errors
+		ErrInputReadFailed,
+		ErrSearchFailed,
+		ErrServerCreationFailed,
+		ErrGasModelReadFailed,
+		ErrTraceFileReadFailed,
+		ErrTraceFileParseFailed,
+	}
+
+	for _, err := range sentinelErrors {
+		assert.NotNil(t, err)
+		assert.NotEmpty(t, err.Error())
+	}
 }
 
 func TestErrorWrapping(t *testing.T) {
 	baseErr := fmt.Errorf("base error")
 
-	// Test WrapTransactionNotFound
+	// Test core error wrapping
 	wrappedErr := WrapTransactionNotFound(baseErr)
 	assert.True(t, errors.Is(wrappedErr, ErrTransactionNotFound))
 	assert.True(t, errors.Is(wrappedErr, baseErr))
 
-	// Test WrapRPCConnectionFailed
 	wrappedErr = WrapRPCConnectionFailed(baseErr)
 	assert.True(t, errors.Is(wrappedErr, ErrRPCConnectionFailed))
 	assert.True(t, errors.Is(wrappedErr, baseErr))
 
-	// Test WrapSimulatorNotFound
 	wrappedErr = WrapSimulatorNotFound("test message")
 	assert.True(t, errors.Is(wrappedErr, ErrSimulatorNotFound))
 	assert.Contains(t, wrappedErr.Error(), "test message")
 
-	// Test WrapSimulationFailed
 	wrappedErr = WrapSimulationFailed(baseErr, "stderr output")
 	assert.True(t, errors.Is(wrappedErr, ErrSimulationFailed))
 	assert.True(t, errors.Is(wrappedErr, baseErr))
 	assert.Contains(t, wrappedErr.Error(), "stderr output")
 
-	// Test WrapInvalidNetwork
 	wrappedErr = WrapInvalidNetwork("invalid")
 	assert.True(t, errors.Is(wrappedErr, ErrInvalidNetwork))
 	assert.Contains(t, wrappedErr.Error(), "invalid")
 	assert.Contains(t, wrappedErr.Error(), "testnet, mainnet, futurenet")
 
-	// Test WrapMarshalFailed
 	wrappedErr = WrapMarshalFailed(baseErr)
 	assert.True(t, errors.Is(wrappedErr, ErrMarshalFailed))
 	assert.True(t, errors.Is(wrappedErr, baseErr))
 
-	// Test WrapUnmarshalFailed
 	wrappedErr = WrapUnmarshalFailed(baseErr, "output")
 	assert.True(t, errors.Is(wrappedErr, ErrUnmarshalFailed))
 	assert.True(t, errors.Is(wrappedErr, baseErr))
 	assert.Contains(t, wrappedErr.Error(), "output")
 
-	// Test WrapSimulationLogicError
 	wrappedErr = WrapSimulationLogicError("logic error")
 	assert.True(t, errors.Is(wrappedErr, ErrSimulationLogicError))
 	assert.Contains(t, wrappedErr.Error(), "logic error")
+
+	// Test file I/O error wrapping
+	wrappedErr = WrapFileReadFailed(baseErr, "test.txt")
+	assert.True(t, errors.Is(wrappedErr, ErrFileReadFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+	assert.Contains(t, wrappedErr.Error(), "test.txt")
+
+	wrappedErr = WrapFileCreationFailed(baseErr, "output.txt")
+	assert.True(t, errors.Is(wrappedErr, ErrFileCreationFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+	assert.Contains(t, wrappedErr.Error(), "output.txt")
+
+	wrappedErr = WrapDirectoryCreationFailed(baseErr, "/tmp/test")
+	assert.True(t, errors.Is(wrappedErr, ErrDirectoryCreationFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+	assert.Contains(t, wrappedErr.Error(), "/tmp/test")
+
+	// Test database error wrapping
+	wrappedErr = WrapDatabaseOpenFailed(baseErr, "test.db")
+	assert.True(t, errors.Is(wrappedErr, ErrDatabaseOpenFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+	assert.Contains(t, wrappedErr.Error(), "test.db")
+
+	wrappedErr = WrapSchemaMigrationFailed(baseErr)
+	assert.True(t, errors.Is(wrappedErr, ErrSchemaMigrationFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+
+	// Test session error wrapping
+	wrappedErr = WrapSessionStoreOpenFailed(baseErr)
+	assert.True(t, errors.Is(wrappedErr, ErrSessionStoreOpenFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+
+	wrappedErr = WrapSessionSaveFailed(baseErr, "session123")
+	assert.True(t, errors.Is(wrappedErr, ErrSessionSaveFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+	assert.Contains(t, wrappedErr.Error(), "session123")
+
+	wrappedErr = WrapNoActiveSession("run debug first")
+	assert.True(t, errors.Is(wrappedErr, ErrNoActiveSession))
+	assert.Contains(t, wrappedErr.Error(), "run debug first")
+
+	// Test RPC error wrapping
+	wrappedErr = WrapRequestCreationFailed(baseErr)
+	assert.True(t, errors.Is(wrappedErr, ErrRequestCreationFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+
+	wrappedErr = WrapRPCError("timeout", 500)
+	assert.True(t, errors.Is(wrappedErr, ErrRPCError))
+	assert.Contains(t, wrappedErr.Error(), "timeout")
+	assert.Contains(t, wrappedErr.Error(), "500")
+
+	wrappedErr = WrapTransactionFetchFailed(baseErr, "abc123")
+	assert.True(t, errors.Is(wrappedErr, ErrTransactionFetchFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+	assert.Contains(t, wrappedErr.Error(), "abc123")
+
+	// Test snapshot error wrapping
+	wrappedErr = WrapSnapshotReadFailed(baseErr, "snapshot.json")
+	assert.True(t, errors.Is(wrappedErr, ErrSnapshotReadFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+	assert.Contains(t, wrappedErr.Error(), "snapshot.json")
+
+	// Test webhook error wrapping
+	wrappedErr = WrapInvalidWebhookURL(baseErr, "invalid-url")
+	assert.True(t, errors.Is(wrappedErr, ErrInvalidWebhookURL))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+	assert.Contains(t, wrappedErr.Error(), "invalid-url")
+
+	// Test simulator error wrapping
+	wrappedErr = WrapSimulatorInitializationFailed(baseErr)
+	assert.True(t, errors.Is(wrappedErr, ErrSimulatorInitializationFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+
+	// Test template error wrapping
+	wrappedErr = WrapTemplateParsingFailed(baseErr, "go_test")
+	assert.True(t, errors.Is(wrappedErr, ErrTemplateParsingFailed))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+	assert.Contains(t, wrappedErr.Error(), "go_test")
+
+	// Test validation error wrapping
+	wrappedErr = WrapInvalidPublicKey(baseErr)
+	assert.True(t, errors.Is(wrappedErr, ErrInvalidPublicKey))
+	assert.True(t, errors.Is(wrappedErr, baseErr))
+
+	wrappedErr = WrapInvalidUserInput("invalid selection")
+	assert.True(t, errors.Is(wrappedErr, ErrInvalidUserInput))
+	assert.Contains(t, wrappedErr.Error(), "invalid selection")
 }
 
 func TestErrorComparison(t *testing.T) {
