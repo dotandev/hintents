@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 package trace
 
 // TraceNode represents a single node in the execution trace tree
