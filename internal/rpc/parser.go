@@ -16,6 +16,14 @@ package rpc
 
 import hProtocol "github.com/stellar/go/protocols/horizon"
 
+// TransactionResponse holds the XDR data for a transaction
+type TransactionResponse struct {
+	EnvelopeXdr   string
+	ResultXdr     string
+	ResultMetaXdr string
+}
+
+
 // ParseTransactionResponse converts a Horizon transaction into a TransactionResponse
 func ParseTransactionResponse(tx hProtocol.Transaction) *TransactionResponse {
 	return &TransactionResponse{

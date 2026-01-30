@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotandev/hintents/internal/config"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/localization"
 	"github.com/dotandev/hintents/internal/rpc"
@@ -96,11 +97,22 @@ Example:
 func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
 	txHash := args[0]
 
+	token := rpcTokenFlag
+	if token == "" {
+		token = os.Getenv("ERST_RPC_TOKEN")
+	}
+	if token == "" {
+		cfg, err := config.LoadConfig()
+		if err == nil && cfg.RPCToken != "" {
+			token = cfg.RPCToken
+		}
+	}
+
 	var client *rpc.Client
 	if rpcURLFlag != "" {
-		client = rpc.NewClientWithURL(rpcURLFlag, rpc.Network(networkFlag), rpcTokenFlag)
+		client = rpc.NewClientWithURL(rpcURLFlag, rpc.Network(networkFlag), token)
 	} else {
-		client = rpc.NewClient(rpc.Network(networkFlag), rpcTokenFlag)
+		client = rpc.NewClient(rpc.Network(networkFlag), token)
 	}
 
 	fmt.Printf("Debugging transaction: %s\n", txHash)
