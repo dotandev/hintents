@@ -38,6 +38,14 @@ export class XDRDecoder {
     }
 
     /**
+     * Get meta version as string for logging
+     */
+    static getMetaVersionString(version: TransactionMetaVersion): string {
+        return `v${version}`;
+    }
+
+
+    /**
      * Decode LedgerKey from XDR
      */
     static decodeLedgerKey(ledgerKey: xdr.LedgerKey): string {
