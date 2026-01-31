@@ -63,6 +63,27 @@ export class FootprintExtractor {
     private static extractFromMetaV2(meta: xdr.TransactionMetaV2): LedgerKey[] {
         const keys: LedgerKey[] = [];
 
+        const changesBefore = meta.txChangesBefore();
+        for (const change of changesBefore) {
+            const ledgerKeys = this.extractFromLedgerEntryChange(change);
+            keys.push(...ledgerKeys);
+        }
+
+        const operations = meta.operations();
+        for (const operation of operations) {
+            const changes = operation.changes();
+            for (const change of changes) {
+                const ledgerKeys = this.extractFromLedgerEntryChange(change);
+                keys.push(...ledgerKeys);
+            }
+        }
+
+        const changesAfter = meta.txChangesAfter();
+        for (const change of changesAfter) {
+            const ledgerKeys = this.extractFromLedgerEntryChange(change);
+            keys.push(...ledgerKeys);
+        }
+
         return keys;
     }
 
