@@ -1,22 +1,5 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
-<<<<<<< HEAD
-=======
-
-// Copyright (c) 2026 dotandev
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
->>>>>>> f6fee4164e00510feac1e9c06e2ca622d6ef9a31
 
 package rpc
 
@@ -117,11 +100,6 @@ type Client struct {
 	AltURLs      []string
 	mu           sync.RWMutex
 	currIndex    int
-	AltURLs      []string
-	currIndex    int
-	mu           sync.RWMutex
-	Network      Network
-	SorobanURL   string
 	token        string
 	Config       NetworkConfig
 	CacheEnabled bool
@@ -150,20 +128,6 @@ func NewClientWithURLOption(url string, net Network, token string) *Client {
 	return client
 }
 
-	httpClient := createHTTPClient(token)
-
-	return &Client{
-		HorizonURL: urls[0],
-		Horizon: &horizonclient.Client{
-			HorizonURL: urls[0],
-			HTTP:       httpClient,
-		},
-		Network:      net,
-		SorobanURL:   sorobanURL,
-		AltURLs:      urls,
-		token:        token,
-		Config:       config,
-		CacheEnabled: true,
 // NewClientWithURLsOption creates a new RPC client with multiple Horizon URLs for failover
 // Deprecated: Use NewClient with WithAltURLs instead
 func NewClientWithURLsOption(urls []string, net Network, token string) *Client {
@@ -219,27 +183,6 @@ func createHTTPClient(token string) *http.Client {
 // NewCustomClient creates a new RPC client for a custom/private network
 // Deprecated: Use NewClient with WithNetworkConfig instead
 func NewCustomClient(config NetworkConfig) (*Client, error) {
-	if err := ValidateNetworkConfig(config); err != nil {
-		return nil, err
-	}
-
-	horizonClient := &horizonclient.Client{
-		HorizonURL: config.HorizonURL,
-		HTTP:       http.DefaultClient,
-	}
-
-	sorobanURL := config.SorobanRPCURL
-	if sorobanURL == "" {
-		sorobanURL = config.HorizonURL
-	}
-
-	return &Client{
-		Horizon:      horizonClient,
-		Network:      "custom",
-		SorobanURL:   sorobanURL,
-		Config:       config,
-		CacheEnabled: true,
-	}, nil
 	return NewClient(WithNetworkConfig(config))
 }
 
