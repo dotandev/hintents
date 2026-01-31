@@ -45,7 +45,8 @@ export class FootprintExtractor {
 
         const operations = meta.operations();
 
-        for (const operation of operations) {
+        for (let i = 0; i < operations.length; i++) {
+            const operation = operations[i];
             const changes = operation.changes();
 
             for (const change of changes) {
