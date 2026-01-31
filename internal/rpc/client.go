@@ -606,3 +606,77 @@ func getTransactionStatus(tx hProtocol.Transaction) string {
 	}
 	return "✗ failed"
 }
+
+type SimulateTransactionRequest struct {
+	Jsonrpc string        `json:"jsonrpc"`
+	ID      int           `json:"id"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+}
+
+type SimulateTransactionResponse struct {
+	Jsonrpc string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Result  struct {
+		// Soroban RPC returns these in various versions. Keep fields optional.
+		// We only need minimal pieces for fee/budget estimation.
+		MinResourceFee  string `json:"minResourceFee,omitempty"`
+		TransactionData string `json:"transactionData,omitempty"`
+		Cost            struct {
+			CpuInsns  int64 `json:"cpuInsns,omitempty"`
+			MemBytes  int64 `json:"memBytes,omitempty"`
+			CpuInsns_ int64 `json:"cpu_insns,omitempty"`
+			MemBytes_ int64 `json:"mem_bytes,omitempty"`
+		} `json:"cost,omitempty"`
+	} `json:"result"`
+	Error *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+// SimulateTransaction calls Soroban RPC simulateTransaction using a base64 TransactionEnvelope XDR.
+// This is used for pre-submission "dry-run" cost estimation.
+func (c *Client) SimulateTransaction(ctx context.Context, envelopeXdr string) (*SimulateTransactionResponse, error) {
+	logger.Logger.Debug("Simulating transaction (preflight)", "url", c.SorobanURL)
+
+	reqBody := SimulateTransactionRequest{
+		Jsonrpc: "2.0",
+		ID:      1,
+		Method:  "simulateTransaction",
+		Params:  []interface{}{envelopeXdr},
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.SorobanURL, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var rpcResp SimulateTransactionResponse
+	if err := json.Unmarshal(respBytes, &rpcResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if rpcResp.Error != nil {
+		return nil, fmt.Errorf("rpc error: %s (code %d)", rpcResp.Error.Message, rpcResp.Error.Code)
+	}
+
+	return &rpcResp, nil
+}

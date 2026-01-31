@@ -5,6 +5,7 @@
 
 import { Command } from 'commander';
 import { registerProtocolCommands } from './commands/protocol-handler';
+import { registerAuditCommands } from './commands/audit';
 import { registerDebugCommand } from './commands/debug';
 
 const program = new Command();
@@ -17,6 +18,9 @@ program
 // Register commands
 registerProtocolCommands(program);
 registerDebugCommand(program);
+
+// Register audit commands
+registerAuditCommands(program);
 
 program.parse(process.argv);
 

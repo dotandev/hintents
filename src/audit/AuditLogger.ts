@@ -3,6 +3,7 @@
 
 import { sign, createHash } from 'crypto';
 import stringify from 'fast-json-stable-stringify';
+import type { AuditSigner } from './signing/types';
 
 // Define the structure of the execution trace
 interface ExecutionTrace {
@@ -17,19 +18,22 @@ interface SignedAuditLog {
   hash: string;
   signature: string;
   algorithm: string;
+  publicKey: string;
+  signer: {
+    provider: string;
+  };
 }
 
 export class AuditLogger {
-  private privateKey: string;
-
-  constructor(privateKeyPEM: string) {
-    this.privateKey = privateKeyPEM;
-  }
+  constructor(
+    private readonly signer: AuditSigner,
+    private readonly signerProvider: string = 'software'
+  ) {}
 
   /**
    * Generates a deterministic, signed audit log.
    */
-  public generateLog(trace: ExecutionTrace): SignedAuditLog {
+  public async generateLog(trace: ExecutionTrace): Promise<SignedAuditLog> {
     // 1. Canonicalize the data (Sort keys deterministically)
     // Without this, {a:1, b:2} and {b:2, a:1} would produce different signatures.
     const canonicalString = stringify(trace);
@@ -38,22 +42,21 @@ export class AuditLogger {
     // We hash the canonical string, not the raw object.
     const traceHash = createHash('sha256').update(canonicalString).digest('hex');
 
-    // 3. Sign the Hash (Proof of Authenticity)
-    // Using Ed25519 via the crypto module
-    const signatureBuffer = sign(
-      null, 
-      Buffer.from(traceHash), 
-      this.privateKey
-    );
-    
-    const signatureHex = signatureBuffer.toString('hex');
+    // Sign the hash bytes (the verifier verifies the same bytes)
+    const signatureBuffer = await this.signer.sign(Buffer.from(traceHash));
+    const signatureHex = Buffer.from(signatureBuffer).toString('hex');
 
-    // 4. Return the complete package
+    const publicKeyPem = await this.signer.public_key();
+
     return {
       trace: trace,
       hash: traceHash,
       signature: signatureHex,
-      algorithm: 'Ed25519+SHA256'
+      algorithm: 'Ed25519+SHA256',
+      publicKey: publicKeyPem,
+      signer: {
+        provider: this.signerProvider,
+      },
     };
   }
 }

@@ -47,6 +47,56 @@ Launch an interactive terminal UI to explore transaction execution traces with s
 
 See [internal/trace/README.md](internal/trace/README.md) for detailed documentation.
 
+### Audit log signing (software / HSM)
+
+`erst` includes a small utility command to generate a deterministic, signed audit log from a JSON payload.
+
+#### Software signing (Ed25519 private key)
+
+Provide a PKCS#8 PEM Ed25519 private key via env or CLI:
+
+- Env: `ERST_AUDIT_PRIVATE_KEY_PEM`
+- CLI: `--software-private-key <pem>`
+
+Example:
+
+```bash
+node dist/index.js audit:sign \
+  --payload '{"input":{},"state":{},"events":[],"timestamp":"2026-01-01T00:00:00.000Z"}' \
+  --software-private-key "$(cat ./ed25519-private-key.pem)"
+```
+
+#### PKCS#11 HSM signing
+
+Select the PKCS#11 provider with `--hsm-provider pkcs11` and configure the module/token/key via env vars.
+
+Required env vars:
+
+- `ERST_PKCS11_MODULE` (path to the PKCS#11 module `.so`)
+- `ERST_PKCS11_PIN`
+- `ERST_PKCS11_KEY_LABEL` **or** `ERST_PKCS11_KEY_ID` (hex)
+- `ERST_PKCS11_PUBLIC_KEY_PEM` (SPKI PEM public key for verification/audit metadata)
+
+Optional:
+
+- `ERST_PKCS11_SLOT` (numeric index into the slot list)
+- `ERST_PKCS11_TOKEN_LABEL`
+
+Example:
+
+```bash
+export ERST_PKCS11_MODULE=/usr/lib/softhsm/libsofthsm2.so
+export ERST_PKCS11_PIN=1234
+export ERST_PKCS11_KEY_LABEL=erst-audit-ed25519
+export ERST_PKCS11_PUBLIC_KEY_PEM="$(cat ./ed25519-public-key-spki.pem)"
+
+node dist/index.js audit:sign \
+  --hsm-provider pkcs11 \
+  --payload '{"input":{},"state":{},"events":[],"timestamp":"2026-01-01T00:00:00.000Z"}'
+```
+
+The command prints the signed audit log JSON to stdout so it can be redirected to a file.
+
 ## Documentation
 
 - **[Architecture Overview](docs/architecture.md)**: Deep dive into how the Go CLI communicates with the Rust simulator, including data flow, IPC mechanisms, and design decisions.
