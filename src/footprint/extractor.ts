@@ -325,7 +325,7 @@ export class FootprintExtractor {
         const unique: LedgerKey[] = [];
 
         for (const key of keys) {
-            if (!seen.has(key.hash)) {
+            if (key.hash && key.hash.length > 0 && !seen.has(key.hash)) {
                 seen.add(key.hash);
                 unique.push(key);
             }
