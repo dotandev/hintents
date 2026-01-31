@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/stellar/go/clients/horizonclient"
+	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 )
 
 type ClientOption func(*clientBuilder) error

@@ -41,9 +41,16 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		txHash := args[0]
 
-		client := rpc.NewClient(rpc.Network(authNetworkFlag), "")
+		opts := []rpc.ClientOption{
+			rpc.WithNetwork(rpc.Network(authNetworkFlag)),
+			rpc.WithToken(""),
+		}
 		if authRPCURLFlag != "" {
-			client = rpc.NewClientWithURL(authRPCURLFlag, rpc.Network(authNetworkFlag), "")
+			opts = append(opts, rpc.WithHorizonURL(authRPCURLFlag))
+		}
+		client, err := rpc.NewClient(opts...)
+		if err != nil {
+			return err
 		}
 
 		logger.Logger.Info("Fetching transaction for auth analysis", "tx_hash", txHash)
