@@ -1,5 +1,24 @@
 [dependencies]
+<<<<<<< HEAD
 # ... keep existing dependencies ...
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 serde_json = "1.0"
+=======
+soroban-env-host = "20.3.0"
+soroban-sdk = "20.3.0"
+hex = "0.4"
+sha2 = "0.10"
+serde = { version = "1.0.192", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+base64 = "0.21"
+inferno = "0.11"
+jsonschema = "0.17"
+colored = "2.0.0"
+
+[[bin]]
+name = "erst-sim"
+path = "src/main.rs"
+
+>>>>>>> f6fee4164e00510feac1e9c06e2ca622d6ef9a31

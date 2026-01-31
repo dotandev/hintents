@@ -1,6 +1,9 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
+<<<<<<< HEAD
 
+=======
+>>>>>>> f6fee4164e00510feac1e9c06e2ca622d6ef9a31
 
 package config
 

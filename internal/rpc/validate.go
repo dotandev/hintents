@@ -28,15 +28,6 @@ func isValidURL(urlStr string) error {
 
 	if parsed.Host == "" {
 		return fmt.Errorf("URL must include a host")
-		return fmt.Errorf("failed to parse URL: %w", err)
-	}
-
-	if parsed.Scheme == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return fmt.Errorf("URL must use http or https scheme")
-	}
-
-	if parsed.Host == "" {
-		return fmt.Errorf("URL must have a host")
 	}
 
 	return nil
@@ -65,14 +56,6 @@ func ValidateNetworkConfig(config NetworkConfig) error {
 		if err := isValidURL(config.SorobanRPCURL); err != nil {
 			return fmt.Errorf("invalid SorobanRPCURL: %w", err)
 		}
-	}
-
-	if config.HorizonURL == "" && config.SorobanRPCURL == "" {
-		return fmt.Errorf("at least one of HorizonURL or SorobanRPCURL must be provided")
-	}
-
-	if config.NetworkPassphrase == "" {
-		return fmt.Errorf("network passphrase is required")
 	}
 
 	return nil
