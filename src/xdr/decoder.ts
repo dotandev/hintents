@@ -66,4 +66,35 @@ export class XDRDecoder {
         const xdrBuffer = ledgerKey.toXDR();
         return crypto.createHash('sha256').update(xdrBuffer).digest('hex');
     }
+
+    /**
+     * Get LedgerEntryType name as string
+     */
+    static getLedgerEntryTypeName(type: xdr.LedgerEntryType): string {
+        const typeMap: Record<number, string> = {
+            0: 'ACCOUNT',
+            1: 'TRUSTLINE',
+            2: 'OFFER',
+            3: 'DATA',
+            4: 'CLAIMABLE_BALANCE',
+            5: 'LIQUIDITY_POOL',
+            6: 'CONTRACT_DATA',
+            7: 'CONTRACT_CODE',
+            8: 'CONFIG_SETTING',
+            9: 'TTL',
+        };
+        return typeMap[type.value] || 'UNKNOWN';
+    }
+
+    /**
+     * Validate base64 XDR string
+     */
+    static isValidBase64(str: string): boolean {
+        try {
+            Buffer.from(str, 'base64');
+            return true;
+        } catch {
+            return false;
+        }
+    }
 }
