@@ -144,7 +144,9 @@ export class FootprintExtractor {
     private static extractFromLedgerEntryChange(change: xdr.LedgerEntryChange): LedgerKey[] {
         const keys: LedgerKey[] = [];
 
-        switch (change.switch().name) {
+        const changeType = change.switch().name;
+
+        switch (changeType) {
             case 'ledgerEntryCreated':
                 const created = change.created();
                 if (created) {
@@ -179,6 +181,9 @@ export class FootprintExtractor {
                     if (key) keys.push(key);
                 }
                 break;
+
+            default:
+                console.warn(`Unknown ledger entry change type: ${changeType}`);
         }
 
         return keys;
