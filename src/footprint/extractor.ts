@@ -12,27 +12,38 @@ export class FootprintExtractor {
 
         console.log(`Extracting footprint from TransactionMeta ${XDRDecoder.getMetaVersionString(version)}...`);
 
-        let allKeys: LedgerKey[] = [];
+        let allKeysWithType: Array<{ key: LedgerKey; isReadOnly: boolean }> = [];
 
         switch (version) {
             case TransactionMetaVersion.V1:
-                allKeys = this.extractFromMetaV1(meta.v1());
+                allKeysWithType = this.extractFromMetaV1(meta.v1());
                 break;
             case TransactionMetaVersion.V2:
-                allKeys = this.extractFromMetaV2(meta.v2());
+                allKeysWithType = this.extractFromMetaV2(meta.v2());
                 break;
             case TransactionMetaVersion.V3:
-                allKeys = this.extractFromMetaV3(meta.v3());
+                allKeysWithType = this.extractFromMetaV3(meta.v3());
                 break;
             default:
                 throw new Error(`Unsupported meta version: ${version}`);
         }
 
+        const allKeys = allKeysWithType.map(k => k.key);
         const deduplicated = this.deduplicateKeys(allKeys);
 
+        const readOnly = deduplicated.filter(key => {
+            const match = allKeysWithType.find(k => k.key.hash === key.hash);
+            return match?.isReadOnly === true;
+        });
+
+        const readWrite = deduplicated.filter(key => {
+            const match = allKeysWithType.find(k => k.key.hash === key.hash);
+            return match?.isReadOnly !== true;
+        });
+
         return {
-            readOnly: [],
-            readWrite: deduplicated,
+            readOnly,
+            readWrite,
             all: deduplicated,
         };
     }
@@ -40,8 +51,8 @@ export class FootprintExtractor {
     /**
      * Extract from TransactionMeta V1
      */
-    private static extractFromMetaV1(meta: xdr.TransactionMetaV1): LedgerKey[] {
-        const keys: LedgerKey[] = [];
+    private static extractFromMetaV1(meta: xdr.TransactionMetaV1): Array<{ key: LedgerKey; isReadOnly: boolean }> {
+        const keys: Array<{ key: LedgerKey; isReadOnly: boolean }> = [];
 
         const operations = meta.operations();
 
@@ -61,8 +72,8 @@ export class FootprintExtractor {
     /**
      * Extract from TransactionMeta V2
      */
-    private static extractFromMetaV2(meta: xdr.TransactionMetaV2): LedgerKey[] {
-        const keys: LedgerKey[] = [];
+    private static extractFromMetaV2(meta: xdr.TransactionMetaV2): Array<{ key: LedgerKey; isReadOnly: boolean }> {
+        const keys: Array<{ key: LedgerKey; isReadOnly: boolean }> = [];
 
         const changesBefore = meta.txChangesBefore();
         for (const change of changesBefore) {
@@ -91,8 +102,8 @@ export class FootprintExtractor {
     /**
      * Extract from TransactionMeta V3 (Soroban)
      */
-    private static extractFromMetaV3(meta: xdr.TransactionMetaV3): LedgerKey[] {
-        const keys: LedgerKey[] = [];
+    private static extractFromMetaV3(meta: xdr.TransactionMetaV3): Array<{ key: LedgerKey; isReadOnly: boolean }> {
+        const keys: Array<{ key: LedgerKey; isReadOnly: boolean }> = [];
 
         const changesBefore = meta.txChangesBefore();
         for (const change of changesBefore) {
@@ -128,8 +139,8 @@ export class FootprintExtractor {
     /**
      * Extract from SorobanTransactionMeta
      */
-    private static extractFromSorobanMeta(sorobanMeta: xdr.SorobanTransactionMeta): LedgerKey[] {
-        const keys: LedgerKey[] = [];
+    private static extractFromSorobanMeta(sorobanMeta: xdr.SorobanTransactionMeta): Array<{ key: LedgerKey; isReadOnly: boolean }> {
+        const keys: Array<{ key: LedgerKey; isReadOnly: boolean }> = [];
 
         // TODO: Extract contract data/code keys from Soroban events
         // For now, the contract state changes are already captured in the
@@ -141,8 +152,8 @@ export class FootprintExtractor {
     /**
      * Extract LedgerKey from LedgerEntryChange
      */
-    private static extractFromLedgerEntryChange(change: xdr.LedgerEntryChange): LedgerKey[] {
-        const keys: LedgerKey[] = [];
+    private static extractFromLedgerEntryChange(change: xdr.LedgerEntryChange): Array<{ key: LedgerKey; isReadOnly: boolean }> {
+        const keys: Array<{ key: LedgerKey; isReadOnly: boolean }> = [];
 
         const changeType = change.switch().name;
 
@@ -151,7 +162,7 @@ export class FootprintExtractor {
                 const created = change.created();
                 if (created) {
                     const key = this.ledgerEntryToKey(created);
-                    if (key) keys.push(key);
+                    if (key) keys.push({ key, isReadOnly: false });
                 }
                 break;
 
@@ -159,7 +170,7 @@ export class FootprintExtractor {
                 const updated = change.updated();
                 if (updated) {
                     const key = this.ledgerEntryToKey(updated);
-                    if (key) keys.push(key);
+                    if (key) keys.push({ key, isReadOnly: false });
                 }
                 break;
 
@@ -167,9 +178,12 @@ export class FootprintExtractor {
                 const removedKey = change.removed();
                 if (removedKey) {
                     keys.push({
-                        type: removedKey.switch(),
-                        key: XDRDecoder.decodeLedgerKey(removedKey),
-                        hash: XDRDecoder.hashLedgerKey(removedKey),
+                        key: {
+                            type: removedKey.switch(),
+                            key: XDRDecoder.decodeLedgerKey(removedKey),
+                            hash: XDRDecoder.hashLedgerKey(removedKey),
+                        },
+                        isReadOnly: false,
                     });
                 }
                 break;
@@ -178,7 +192,7 @@ export class FootprintExtractor {
                 const state = change.state();
                 if (state) {
                     const key = this.ledgerEntryToKey(state);
-                    if (key) keys.push(key);
+                    if (key) keys.push({ key, isReadOnly: true });
                 }
                 break;
 
