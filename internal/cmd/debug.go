@@ -107,11 +107,16 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	var client *rpc.Client
+	opts := []rpc.ClientOption{
+		rpc.WithNetwork(rpc.Network(networkFlag)),
+		rpc.WithToken(token),
+	}
 	if rpcURLFlag != "" {
-		client = rpc.NewClientWithURL(rpcURLFlag, rpc.Network(networkFlag), token)
-	} else {
-		client = rpc.NewClient(rpc.Network(networkFlag), token)
+		opts = append(opts, rpc.WithHorizonURL(rpcURLFlag))
+	}
+	client, err := rpc.NewClient(opts...)
+	if err != nil {
+		return err
 	}
 
 	fmt.Printf("Debugging transaction: %s\n", txHash)
@@ -259,10 +264,26 @@ Local WASM Replay Mode:
 			for i := range urls {
 				urls[i] = strings.TrimSpace(urls[i])
 			}
-			client = rpc.NewClientWithURLs(urls, rpc.Network(networkFlag), rpcTokenFlag)
+			opts := []rpc.ClientOption{
+				rpc.WithNetwork(rpc.Network(networkFlag)),
+				rpc.WithToken(rpcTokenFlag),
+				rpc.WithAltURLs(urls),
+			}
+			c, err := rpc.NewClient(opts...)
+			if err != nil {
+				return err
+			}
+			client = c
 			horizonURL = urls[0]
 		} else {
-			client = rpc.NewClient(rpc.Network(networkFlag), rpcTokenFlag)
+			c, err := rpc.NewClient(
+				rpc.WithNetwork(rpc.Network(networkFlag)),
+				rpc.WithToken(rpcTokenFlag),
+			)
+			if err != nil {
+				return err
+			}
+			client = c
 			switch rpc.Network(networkFlag) {
 			case rpc.Testnet:
 				horizonURL = rpc.TestnetHorizonURL
@@ -421,7 +442,14 @@ Local WASM Replay Mode:
 
 				go func() {
 					defer wg.Done()
-					compareClient := rpc.NewClient(rpc.Network(compareNetworkFlag), rpcTokenFlag)
+					compareClient, err := rpc.NewClient(
+						rpc.WithNetwork(rpc.Network(compareNetworkFlag)),
+						rpc.WithToken(rpcTokenFlag),
+					)
+					if err != nil {
+						logger.Logger.Warn("Failed to create compare client", "error", err)
+						return
+					}
 					if noCacheFlag {
 						compareClient.CacheEnabled = false
 					}

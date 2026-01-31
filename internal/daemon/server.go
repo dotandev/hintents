@@ -61,11 +61,16 @@ type GetTraceResponse struct {
 
 // NewServer creates a new JSON-RPC server
 func NewServer(config Config) (*Server, error) {
-	var client *stellarrpc.Client
+	var opts []stellarrpc.ClientOption
+	opts = append(opts, stellarrpc.WithNetwork(stellarrpc.Network(config.Network)))
+	opts = append(opts, stellarrpc.WithToken(""))
 	if config.RPCURL != "" {
-		client = stellarrpc.NewClientWithURL(config.RPCURL, stellarrpc.Network(config.Network), "")
-	} else {
-		client = stellarrpc.NewClient(stellarrpc.Network(config.Network), "")
+		opts = append(opts, stellarrpc.WithHorizonURL(config.RPCURL))
+	}
+
+	client, err := stellarrpc.NewClient(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rpc client: %w", err)
 	}
 
 	sim, err := simulator.NewRunner("", false)

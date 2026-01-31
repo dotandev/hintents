@@ -93,11 +93,16 @@ func runDryRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create RPC client
-	var client *rpc.Client
+	opts := []rpc.ClientOption{
+		rpc.WithNetwork(rpc.Network(dryRunNetworkFlag)),
+		rpc.WithToken(dryRunRPCTokenFlag),
+	}
 	if dryRunRPCURLFlag != "" {
-		client = rpc.NewClientWithURL(dryRunRPCURLFlag, rpc.Network(dryRunNetworkFlag), dryRunRPCTokenFlag)
-	} else {
-		client = rpc.NewClient(rpc.Network(dryRunNetworkFlag), dryRunRPCTokenFlag)
+		opts = append(opts, rpc.WithHorizonURL(dryRunRPCURLFlag))
+	}
+	client, err := rpc.NewClient(opts...)
+	if err != nil {
+		return err
 	}
 
 	ctx := cmd.Context()

@@ -191,7 +191,7 @@ func TestDeprecatedNewCustomClient(t *testing.T) {
 	}
 }
 
-func TestValidateNetworkConfig_Valid(t *testing.T) {
+func TestValidateNetworkConfig_Valid_Simple(t *testing.T) {
 	config := NetworkConfig{
 		Name:              "custom",
 		HorizonURL:        "https://custom.org",
@@ -203,7 +203,7 @@ func TestValidateNetworkConfig_Valid(t *testing.T) {
 	}
 }
 
-func TestValidateNetworkConfig_MissingName(t *testing.T) {
+func TestValidateNetworkConfig_MissingName_Simple(t *testing.T) {
 	config := NetworkConfig{
 		HorizonURL:        "https://custom.org",
 		NetworkPassphrase: "custom network",
@@ -214,7 +214,7 @@ func TestValidateNetworkConfig_MissingName(t *testing.T) {
 	}
 }
 
-func TestValidateNetworkConfig_InvalidURL(t *testing.T) {
+func TestValidateNetworkConfig_InvalidURL_Simple(t *testing.T) {
 	config := NetworkConfig{
 		Name:              "custom",
 		HorizonURL:        "not a url",

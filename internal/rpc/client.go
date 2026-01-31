@@ -100,11 +100,6 @@ type Client struct {
 	AltURLs      []string
 	mu           sync.RWMutex
 	currIndex    int
-	AltURLs      []string
-	currIndex    int
-	mu           sync.RWMutex
-	Network      Network
-	SorobanURL   string
 	token        string
 	Config       NetworkConfig
 	CacheEnabled bool
@@ -133,20 +128,6 @@ func NewClientWithURLOption(url string, net Network, token string) *Client {
 	return client
 }
 
-	httpClient := createHTTPClient(token)
-
-	return &Client{
-		HorizonURL: urls[0],
-		Horizon: &horizonclient.Client{
-			HorizonURL: urls[0],
-			HTTP:       httpClient,
-		},
-		Network:      net,
-		SorobanURL:   sorobanURL,
-		AltURLs:      urls,
-		token:        token,
-		Config:       config,
-		CacheEnabled: true,
 // NewClientWithURLsOption creates a new RPC client with multiple Horizon URLs for failover
 // Deprecated: Use NewClient with WithAltURLs instead
 func NewClientWithURLsOption(urls []string, net Network, token string) *Client {
@@ -223,16 +204,36 @@ func NewCustomClient(config NetworkConfig) (*Client, error) {
 		Config:       config,
 		CacheEnabled: true,
 	}, nil
-	return NewClient(WithNetworkConfig(config))
 }
 
 // GetTransaction fetches the transaction details and full XDR data
 func (c *Client) GetTransaction(ctx context.Context, hash string) (*TransactionResponse, error) {
+	// Set a timeout if context doesn't have one
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+
+	// Backwards-compatible: tests and some callers may construct a Client
+	// without AltURLs configured. In that case, attempt once using the
+	// configured Horizon client/URL.
+	if len(c.AltURLs) == 0 {
+		resp, err := c.getTransactionAttempt(ctx, hash)
+		if err != nil {
+			return nil, err
+		}
+		return resp, nil
+	}
+
+	var lastErr error
+
 	for attempt := 0; attempt < len(c.AltURLs); attempt++ {
 		resp, err := c.getTransactionAttempt(ctx, hash)
 		if err == nil {
 			return resp, nil
 		}
+		lastErr = err
 
 		// Only rotate if this isn't the last possible URL
 		if attempt < len(c.AltURLs)-1 {
@@ -242,7 +243,10 @@ func (c *Client) GetTransaction(ctx context.Context, hash string) (*TransactionR
 			}
 			continue
 		}
-		return nil, err
+		return nil, fmt.Errorf("all RPC endpoints failed: %w", err)
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("all RPC endpoints failed: %w", lastErr)
 	}
 	return nil, fmt.Errorf("all RPC endpoints failed")
 }
@@ -471,6 +475,13 @@ func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[strin
 		return map[string]string{}, nil
 	}
 
+	// Set a timeout if context doesn't have one
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+
 	entries := make(map[string]string)
 	var keysToFetch []string
 
@@ -498,27 +509,61 @@ func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[strin
 		return entries, nil
 	}
 
-	logger.Logger.Debug("Fetching ledger entries from RPC", "count", len(keysToFetch), "url", c.SorobanURL)
-	for attempt := 0; attempt < len(c.AltURLs); attempt++ {
-		entries, err := c.getLedgerEntriesAttempt(ctx, keysToFetch)
-		if err == nil {
-			return entries, nil
-		}
+	const batchSize = 50
+	const maxConcurrentBatches = 4
 
-		if attempt < len(c.AltURLs)-1 {
-			logger.Logger.Warn("Retrying with fallback Soroban RPC...", "error", err)
-			if !c.rotateURL() {
-				break
+	chunks := chunkStrings(keysToFetch, batchSize)
+	logger.Logger.Debug("Fetching ledger entries from RPC (batched)", "total", len(keysToFetch), "batches", len(chunks), "url", c.SorobanURL)
+
+	sem := make(chan struct{}, maxConcurrentBatches)
+	errCh := make(chan error, len(chunks))
+	resCh := make(chan map[string]string, len(chunks))
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	for _, chunk := range chunks {
+		chunk := chunk
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
 			}
-			continue
-		}
+
+			batchEntries, err := c.getLedgerEntriesAttempt(ctx, chunk)
+			if err != nil {
+				errCh <- err
+				cancel()
+				return
+			}
+			resCh <- batchEntries
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+	close(resCh)
+
+	if err := firstErr(errCh); err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("all Soroban RPC endpoints failed")
+
+	for m := range resCh {
+		for k, v := range m {
+			entries[k] = v
+		}
+	}
+
+	return entries, nil
 }
 
 func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []string) (map[string]string, error) {
-	logger.Logger.Debug("Fetching ledger entries", "count", len(keysToFetch), "url", c.HorizonURL)
+	logger.Logger.Debug("Fetching ledger entries", "count", len(keysToFetch), "url", c.SorobanURL)
 	reqBody := GetLedgerEntriesRequest{
 		Jsonrpc: "2.0",
 		ID:      1,
@@ -531,11 +576,16 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	targetURL := c.HorizonURL
-	if c.Network == Testnet && targetURL == "" {
-		targetURL = TestnetSorobanURL
-	} else if c.Network == Mainnet && targetURL == "" {
-		targetURL = MainnetSorobanURL
+	targetURL := c.SorobanURL
+	if targetURL == "" {
+		switch c.Network {
+		case Testnet:
+			targetURL = TestnetSorobanURL
+		case Futurenet:
+			targetURL = FuturenetSorobanURL
+		default:
+			targetURL = MainnetSorobanURL
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewBuffer(bodyBytes))
@@ -544,7 +594,7 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := createHTTPClient(c.token).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request to %s: %w", targetURL, err)
 	}
@@ -565,10 +615,8 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 	}
 
 	entries := make(map[string]string)
-	fetchedCount := 0
 	for _, entry := range rpcResp.Result.Entries {
 		entries[entry.Key] = entry.Xdr
-		fetchedCount++
 
 		// Cache the new entry
 		if c.CacheEnabled {
@@ -578,15 +626,35 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 		}
 	}
 
-	logger.Logger.Info("Ledger entries fetched",
-		// 		"total_requested", len(keys),
-		"total_requested", len(keysToFetch),
-		"from_cache", len(keysToFetch)-fetchedCount,
-		"from_rpc", fetchedCount,
-		"url", targetURL,
-	)
-
 	return entries, nil
+}
+
+func chunkStrings(in []string, size int) [][]string {
+	if size <= 0 {
+		size = 1
+	}
+	if len(in) == 0 {
+		return nil
+	}
+
+	out := make([][]string, 0, (len(in)+size-1)/size)
+	for i := 0; i < len(in); i += size {
+		end := i + size
+		if end > len(in) {
+			end = len(in)
+		}
+		out = append(out, in[i:end])
+	}
+	return out
+}
+
+func firstErr(errCh <-chan error) error {
+	for err := range errCh {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type TransactionSummary struct {
