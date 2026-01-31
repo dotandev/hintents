@@ -114,6 +114,26 @@ export class FootprintExtractor {
             keys.push(...ledgerKeys);
         }
 
+        const sorobanMeta = meta.sorobanMeta();
+        if (sorobanMeta) {
+            console.log('Extracting Soroban footprint from meta v3...');
+            const sorobanKeys = this.extractFromSorobanMeta(sorobanMeta);
+            keys.push(...sorobanKeys);
+        }
+
+        return keys;
+    }
+
+    /**
+     * Extract from SorobanTransactionMeta
+     */
+    private static extractFromSorobanMeta(sorobanMeta: xdr.SorobanTransactionMeta): LedgerKey[] {
+        const keys: LedgerKey[] = [];
+
+        // TODO: Extract contract data/code keys from Soroban events
+        // For now, the contract state changes are already captured in the
+        // txChangesBefore/After and operation changes above
+
         return keys;
     }
 
@@ -201,7 +221,7 @@ export class FootprintExtractor {
                 );
                 break;
 
-            case 'datum':
+            case 'data':
                 const dataEntry = data.data();
                 ledgerKey = xdr.LedgerKey.data(
                     new xdr.LedgerKeyData({
@@ -250,13 +270,9 @@ export class FootprintExtractor {
                 break;
 
             case 'configSetting':
-                const configSetting = data.configSetting();
-                ledgerKey = xdr.LedgerKey.configSetting(
-                    new xdr.LedgerKeyConfigSetting({
-                        configSettingId: configSetting.configSettingId(),
-                    })
-                );
-                break;
+                // TODO: Add support for config setting entries in future protocol versions
+                console.warn('ConfigSetting entries not yet fully supported');
+                return null;
 
             case 'ttl':
                 const ttl = data.ttl();
