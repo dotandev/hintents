@@ -1,7 +1,6 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-
 package daemon
 
 import (
@@ -61,11 +60,17 @@ type GetTraceResponse struct {
 
 // NewServer creates a new JSON-RPC server
 func NewServer(config Config) (*Server, error) {
-	var client *stellarrpc.Client
+	opts := []stellarrpc.ClientOption{
+		stellarrpc.WithNetwork(stellarrpc.Network(config.Network)),
+	}
+
 	if config.RPCURL != "" {
-		client = stellarrpc.NewClientWithURL(config.RPCURL, stellarrpc.Network(config.Network), "")
-	} else {
-		client = stellarrpc.NewClient(stellarrpc.Network(config.Network), "")
+		opts = append(opts, stellarrpc.WithHorizonURL(config.RPCURL))
+	}
+
+	client, err := stellarrpc.NewClient(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RPC client: %w", err)
 	}
 
 	sim, err := simulator.NewRunner("", false)

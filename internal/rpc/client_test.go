@@ -1,7 +1,6 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-
 package rpc
 
 import (
@@ -217,7 +216,11 @@ type testClient struct {
 
 func newTestClient(mock horizonclient.ClientInterface) *testClient {
 	return &testClient{
-		&Client{Horizon: mock.(*mockHorizonClient)},
+		&Client{
+			Horizon:    mock.(*mockHorizonClient),
+			HorizonURL: "https://horizon-testnet.stellar.org",
+			AltURLs:    []string{"https://horizon-testnet.stellar.org"},
+		},
 	}
 }
 

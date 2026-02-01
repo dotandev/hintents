@@ -93,19 +93,14 @@ var (
 
 // Client handles interactions with the Stellar Network
 type Client struct {
-	HorizonURL   string
 	Horizon      horizonclient.ClientInterface
+	HorizonURL   string
 	Network      Network
 	SorobanURL   string
 	AltURLs      []string
-	mu           sync.RWMutex
-	currIndex    int
-	AltURLs      []string
 	currIndex    int
 	mu           sync.RWMutex
-	Network      Network
-	SorobanURL   string
-	token        string
+	token        string // stored for reference, not logged
 	Config       NetworkConfig
 	CacheEnabled bool
 }
@@ -133,20 +128,6 @@ func NewClientWithURLOption(url string, net Network, token string) *Client {
 	return client
 }
 
-	httpClient := createHTTPClient(token)
-
-	return &Client{
-		HorizonURL: urls[0],
-		Horizon: &horizonclient.Client{
-			HorizonURL: urls[0],
-			HTTP:       httpClient,
-		},
-		Network:      net,
-		SorobanURL:   sorobanURL,
-		AltURLs:      urls,
-		token:        token,
-		Config:       config,
-		CacheEnabled: true,
 // NewClientWithURLsOption creates a new RPC client with multiple Horizon URLs for failover
 // Deprecated: Use NewClient with WithAltURLs instead
 func NewClientWithURLsOption(urls []string, net Network, token string) *Client {
@@ -223,7 +204,6 @@ func NewCustomClient(config NetworkConfig) (*Client, error) {
 		Config:       config,
 		CacheEnabled: true,
 	}, nil
-	return NewClient(WithNetworkConfig(config))
 }
 
 // GetTransaction fetches the transaction details and full XDR data
@@ -240,9 +220,7 @@ func (c *Client) GetTransaction(ctx context.Context, hash string) (*TransactionR
 			if !c.rotateURL() {
 				break
 			}
-			continue
 		}
-		return nil, err
 	}
 	return nil, fmt.Errorf("all RPC endpoints failed")
 }

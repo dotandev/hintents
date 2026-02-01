@@ -21,8 +21,8 @@ import (
 
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/simulator"
-	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/spf13/cobra"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 var (
@@ -93,11 +93,17 @@ func runDryRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create RPC client
-	var client *rpc.Client
+	opts := []rpc.ClientOption{
+		rpc.WithNetwork(rpc.Network(dryRunNetworkFlag)),
+		rpc.WithToken(dryRunRPCTokenFlag),
+	}
 	if dryRunRPCURLFlag != "" {
-		client = rpc.NewClientWithURL(dryRunRPCURLFlag, rpc.Network(dryRunNetworkFlag), dryRunRPCTokenFlag)
-	} else {
-		client = rpc.NewClient(rpc.Network(dryRunNetworkFlag), dryRunRPCTokenFlag)
+		opts = append(opts, rpc.WithHorizonURL(dryRunRPCURLFlag))
+	}
+
+	client, err := rpc.NewClient(opts...)
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
 	}
 
 	ctx := cmd.Context()
@@ -169,8 +175,8 @@ func estimateFeeFromBudget(b simulator.BudgetUsage) (int64, error) {
 	// TODO: Replace with exact network pricing once fee config is exposed by public RPC.
 	// Base fee + CPU + memory components.
 	const base int64 = 100
-	cpu := int64(b.CPUInstructions / 10000)      // 1 stroop per 10k insns
-	mem := int64(b.MemoryBytes / (64 * 1024))    // 1 stroop per 64KiB
+	cpu := int64(b.CPUInstructions / 10000)   // 1 stroop per 10k insns
+	mem := int64(b.MemoryBytes / (64 * 1024)) // 1 stroop per 64KiB
 	if cpu < 0 || mem < 0 {
 		return 0, fmt.Errorf("invalid budget usage")
 	}

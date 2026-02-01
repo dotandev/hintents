@@ -56,9 +56,9 @@ func TestSymbolReturnsPlainASCIIWhenDisabled(t *testing.T) {
 	defer os.Unsetenv("NO_COLOR")
 
 	for name, wantPlain := range map[string]string{
-		"check":  "[OK]",
-		"cross":  "[X]",
-		"warn":   "[!]",
+		"check":   "[OK]",
+		"cross":   "[X]",
+		"warn":    "[!]",
 		"arrow_r": "->",
 	} {
 		got := Symbol(name)

@@ -28,9 +28,9 @@ import (
 // BenchmarkSimulationRequestMarshal benchmarks JSON marshaling of simulation requests
 func BenchmarkSimulationRequestMarshal(b *testing.B) {
 	tests := []struct {
-		name           string
-		numLedgerKeys  int
-		hasAuthTrace   bool
+		name          string
+		numLedgerKeys int
+		hasAuthTrace  bool
 	}{
 		{"Small", 1, false},
 		{"Medium", 10, false},
@@ -41,12 +41,12 @@ func BenchmarkSimulationRequestMarshal(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			req := &SimulationRequest{
-				EnvelopeXdr:   strings.Repeat("e", 512),
-				ResultMetaXdr: strings.Repeat("m", 1024),
-				LedgerEntries: make(map[string]string, tt.numLedgerKeys),
-				Timestamp:     1234567890,
+				EnvelopeXdr:    strings.Repeat("e", 512),
+				ResultMetaXdr:  strings.Repeat("m", 1024),
+				LedgerEntries:  make(map[string]string, tt.numLedgerKeys),
+				Timestamp:      1234567890,
 				LedgerSequence: 12345,
-				Profile:       false,
+				Profile:        false,
 			}
 
 			// Add ledger entries
@@ -81,9 +81,9 @@ func BenchmarkSimulationRequestMarshal(b *testing.B) {
 // BenchmarkSimulationResponseUnmarshal benchmarks JSON unmarshaling of simulation responses
 func BenchmarkSimulationResponseUnmarshal(b *testing.B) {
 	tests := []struct {
-		name       string
-		numEvents  int
-		hasBudget  bool
+		name         string
+		numEvents    int
+		hasBudget    bool
 		hasAuthTrace bool
 	}{
 		{"Small", 5, false, false},
@@ -236,9 +236,9 @@ func BenchmarkLargeEventParsing(b *testing.B) {
 // BenchmarkAuthTraceProcessing benchmarks auth trace data processing
 func BenchmarkAuthTraceProcessing(b *testing.B) {
 	tests := []struct {
-		name       string
-		numEvents  int
-		maxDepth   int
+		name      string
+		numEvents int
+		maxDepth  int
 	}{
 		{"Small", 10, 3},
 		{"Medium", 50, 5},

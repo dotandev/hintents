@@ -21,7 +21,7 @@ func TestGetLedgerHeader_Integration_Testnet(t *testing.T) {
 
 	client, err := NewClient(WithNetwork(Testnet))
 	require.NoError(t, err)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -70,7 +70,7 @@ func TestGetLedgerHeader_Integration_FutureLedger(t *testing.T) {
 
 	client, err := NewClient(WithNetwork(Testnet))
 	require.NoError(t, err)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -105,7 +105,7 @@ func TestGetLedgerHeader_Integration_MultipleNetworks(t *testing.T) {
 		t.Run(string(tt.network), func(t *testing.T) {
 			client, err := NewClient(WithNetwork(tt.network))
 			require.NoError(t, err)
-			
+
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
@@ -135,7 +135,7 @@ func TestGetLedgerHeader_Integration_RecentLedger(t *testing.T) {
 
 	client, err := NewClient(WithNetwork(Testnet))
 	require.NoError(t, err)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

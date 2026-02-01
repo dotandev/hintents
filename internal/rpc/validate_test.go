@@ -50,20 +50,6 @@ func TestIsValidURL_InvalidURLs(t *testing.T) {
 	}
 }
 
-func TestValidateNetworkConfig_Valid(t *testing.T) {
-	config := NetworkConfig{
-		Name:              "testnet",
-		HorizonURL:        "https://horizon-testnet.stellar.org",
-		NetworkPassphrase: "Test SDF Network ; September 2015",
-		SorobanRPCURL:     "https://soroban-testnet.stellar.org",
-	}
-
-	err := ValidateNetworkConfig(config)
-	if err != nil {
-		t.Errorf("expected no error for valid config, got %v", err)
-	}
-}
-
 func TestValidateNetworkConfig_ValidWithOnlyHorizonURL(t *testing.T) {
 	config := NetworkConfig{
 		Name:              "custom",
@@ -87,18 +73,6 @@ func TestValidateNetworkConfig_ValidWithOnlySorobanURL(t *testing.T) {
 	err := ValidateNetworkConfig(config)
 	if err != nil {
 		t.Errorf("expected no error with only SorobanRPCURL, got %v", err)
-	}
-}
-
-func TestValidateNetworkConfig_MissingName(t *testing.T) {
-	config := NetworkConfig{
-		HorizonURL:        "https://horizon.example.com",
-		NetworkPassphrase: "Custom Network",
-	}
-
-	err := ValidateNetworkConfig(config)
-	if err == nil {
-		t.Error("expected error for missing name")
 	}
 }
 

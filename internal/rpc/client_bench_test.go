@@ -34,8 +34,8 @@ import (
 // BenchmarkJSONRPCMarshal benchmarks JSON-RPC request marshaling
 func BenchmarkJSONRPCMarshal(b *testing.B) {
 	tests := []struct {
-		name     string
-		numKeys  int
+		name    string
+		numKeys int
 	}{
 		{"Single", 1},
 		{"Small", 10},
@@ -141,16 +141,16 @@ func BenchmarkLedgerHeaderParsing(b *testing.B) {
 	txCount := int32(10)
 	failedTxCount := int32(2)
 	ledger := hProtocol.Ledger{
-		Hash:                        "test-hash",
-		Sequence:                    12345,
-		SuccessfulTransactionCount:  txCount,
-		FailedTransactionCount:      &failedTxCount,
-		ProtocolVersion:             20,
-		BaseFee:                     100,
-		BaseReserve:                 5000000,
-		MaxTxSetSize:                1000,
-		HeaderXDR:                   strings.Repeat("h", 256),
-		ClosedAt:                    time.Now(),
+		Hash:                       "test-hash",
+		Sequence:                   12345,
+		SuccessfulTransactionCount: txCount,
+		FailedTransactionCount:     &failedTxCount,
+		ProtocolVersion:            20,
+		BaseFee:                    100,
+		BaseReserve:                5000000,
+		MaxTxSetSize:               1000,
+		HeaderXDR:                  strings.Repeat("h", 256),
+		ClosedAt:                   time.Now(),
 	}
 
 	b.ResetTimer()
@@ -243,8 +243,8 @@ func BenchmarkXDRExtraction(b *testing.B) {
 // BenchmarkGetLedgerEntries benchmarks the GetLedgerEntries RPC call
 func BenchmarkGetLedgerEntries(b *testing.B) {
 	tests := []struct {
-		name     string
-		numKeys  int
+		name    string
+		numKeys int
 	}{
 		{"Single", 1},
 		{"Small", 10},
@@ -343,16 +343,16 @@ func BenchmarkGetLedgerHeader(b *testing.B) {
 	txCount := int32(10)
 	failedTxCount := int32(2)
 	mockLedger := hProtocol.Ledger{
-		Hash:                        "test-hash",
-		Sequence:                    12345,
-		SuccessfulTransactionCount:  txCount,
-		FailedTransactionCount:      &failedTxCount,
-		ProtocolVersion:             20,
-		BaseFee:                     100,
-		BaseReserve:                 5000000,
-		MaxTxSetSize:                1000,
-		HeaderXDR:                   strings.Repeat("h", 256),
-		ClosedAt:                    time.Now(),
+		Hash:                       "test-hash",
+		Sequence:                   12345,
+		SuccessfulTransactionCount: txCount,
+		FailedTransactionCount:     &failedTxCount,
+		ProtocolVersion:            20,
+		BaseFee:                    100,
+		BaseReserve:                5000000,
+		MaxTxSetSize:               1000,
+		HeaderXDR:                  strings.Repeat("h", 256),
+		ClosedAt:                   time.Now(),
 	}
 
 	mock := &mockHorizonClient{

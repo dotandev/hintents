@@ -1,7 +1,6 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-
 package cmd
 
 import (
@@ -41,9 +40,16 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		txHash := args[0]
 
-		client := rpc.NewClient(rpc.Network(authNetworkFlag), "")
+		opts := []rpc.ClientOption{
+			rpc.WithNetwork(rpc.Network(authNetworkFlag)),
+		}
 		if authRPCURLFlag != "" {
-			client = rpc.NewClientWithURL(authRPCURLFlag, rpc.Network(authNetworkFlag), "")
+			opts = append(opts, rpc.WithHorizonURL(authRPCURLFlag))
+		}
+
+		client, err := rpc.NewClient(opts...)
+		if err != nil {
+			return fmt.Errorf("failed to create client: %w", err)
 		}
 
 		logger.Logger.Info("Fetching transaction for auth analysis", "tx_hash", txHash)

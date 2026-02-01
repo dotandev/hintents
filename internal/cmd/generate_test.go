@@ -1,7 +1,6 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-
 package cmd
 
 import (
@@ -35,11 +34,17 @@ Example:
 		txHash := args[0]
 
 		// Create RPC client
-		var client *rpc.Client
+		opts := []rpc.ClientOption{
+			rpc.WithNetwork(rpc.Network(networkFlag)),
+			rpc.WithToken(rpcTokenFlag),
+		}
 		if rpcURLFlag != "" {
-			client = rpc.NewClientWithURL(rpcURLFlag, rpc.Network(networkFlag), rpcTokenFlag)
-		} else {
-			client = rpc.NewClient(rpc.Network(networkFlag), rpcTokenFlag)
+			opts = append(opts, rpc.WithHorizonURL(rpcURLFlag))
+		}
+
+		client, err := rpc.NewClient(opts...)
+		if err != nil {
+			return fmt.Errorf("failed to create client: %w", err)
 		}
 
 		// Get current working directory as default output

@@ -43,11 +43,16 @@ Example:
 		fmt.Printf("Loaded new WASM code: %d bytes\n", len(newWasmBytes))
 
 		// 2. Setup Client
-		var client *rpc.Client
+		opts := []rpc.ClientOption{
+			rpc.WithNetwork(rpc.Network(networkFlag)),
+		}
 		if rpcURLFlag != "" {
-			client = rpc.NewClientWithURL(rpcURLFlag, rpc.Network(networkFlag), "")
-		} else {
-			client = rpc.NewClient(rpc.Network(networkFlag), "")
+			opts = append(opts, rpc.WithHorizonURL(rpcURLFlag))
+		}
+
+		client, err := rpc.NewClient(opts...)
+		if err != nil {
+			return fmt.Errorf("failed to create client: %w", err)
 		}
 
 		// 3. Fetch Transaction

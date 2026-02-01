@@ -18,7 +18,7 @@ import (
 func TestConfigPriority(t *testing.T) {
 	// Setup generic temporary home directory for config
 	tmpDir := t.TempDir()
-	
+
 	// Mock HOME to point to tmpDir so config.LoadConfig uses it
 	originalHome := os.Getenv("HOME")
 	defer os.Setenv("HOME", originalHome)
@@ -52,7 +52,7 @@ func TestConfigPriority(t *testing.T) {
 	t.Run("ConfigOnly", func(t *testing.T) {
 		// Unset ENV
 		os.Unsetenv("ERST_RPC_TOKEN")
-		
+
 		token := resolveToken("")
 		assert.Equal(t, "CONFIG_TOKEN", token, "Should load from config file when flag and env are empty")
 	})

@@ -153,9 +153,10 @@ We are building this open-source to help the entire Stellar community.
 
 See [docs/proposal.md](docs/proposal.md) for the detailed proposal.
 
-1.  [ ] **Phase 1**: Research RPC endpoints for fetching historical ledger keys.
-2.  [ ] **Phase 2**: Build a basic "Replay Harness" that can execute a loaded WASM file.
-3.  [ ] **Phase 3**: Connect the harness to live mainnet data.
+1.  [x] **Phase 1**: Research RPC endpoints for fetching historical ledger keys.
+2.  [x] **Phase 2**: Build a basic "Replay Harness" that can execute a loaded WASM file.
+3.  [x] **Phase 3**: Connect the harness to live mainnet data.
+4.  [ ] **Phase 4**: Advanced Diagnostics & Source Mapping (Current Focus).
 
 ## Contributors ✨
 

@@ -1,7 +1,6 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-
 package rpc
 
 import hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
@@ -12,7 +11,6 @@ type TransactionResponse struct {
 	ResultXdr     string
 	ResultMetaXdr string
 }
-
 
 // ParseTransactionResponse converts a Horizon transaction into a TransactionResponse
 func ParseTransactionResponse(tx hProtocol.Transaction) *TransactionResponse {

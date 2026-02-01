@@ -129,29 +129,29 @@ func TestLedgerKeyFromEntry_ContractData(t *testing.T) {
 	// TODO: Fix xdr.Uint32Ptr and xdr.Uint64Ptr compatibility issues
 	t.Skip("Skipping due to xdr compatibility issues with recent stellar-go version")
 	/*
-	contractID := xdr.Hash([32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32})
-	keyVal := xdr.ScVal{Type: xdr.ScValTypeScvU32, U32: xdr.Uint32Ptr(42)}
+		contractID := xdr.Hash([32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32})
+		keyVal := xdr.ScVal{Type: xdr.ScValTypeScvU32, U32: uint32Ptr(42)}
 
-	entry := xdr.LedgerEntry{
-		Data: xdr.LedgerEntryData{
-			Type: xdr.LedgerEntryTypeContractData,
-			ContractData: &xdr.ContractDataEntry{
-				Contract:   xdr.ScAddress{Type: xdr.ScAddressTypeScAddressTypeContract, ContractId: &contractID},
-				Key:        keyVal,
-				Durability: xdr.ContractDataDurabilityPersistent,
-				Val:        xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: xdr.Uint64Ptr(1000)},
+		entry := xdr.LedgerEntry{
+			Data: xdr.LedgerEntryData{
+				Type: xdr.LedgerEntryTypeContractData,
+				ContractData: &xdr.ContractDataEntry{
+					Contract:   xdr.ScAddress{Type: xdr.ScAddressTypeScAddressTypeContract, ContractId: (*xdr.ContractId)(&contractID)},
+					Key:        keyVal,
+					Durability: xdr.ContractDataDurabilityPersistent,
+					Val:        xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: uint64Ptr(1000)},
+				},
 			},
-		},
-	}
+		}
 
-	key := ledgerKeyFromEntry(entry)
-	if key == nil {
-		t.Fatal("Expected non-nil key")
-	}
+		key := ledgerKeyFromEntry(entry)
+		if key == nil {
+			t.Fatal("Expected non-nil key")
+		}
 
-	if key.Type != xdr.LedgerEntryTypeContractData {
-		t.Errorf("Expected ContractData type, got %v", key.Type)
-	}
+		if key.Type != xdr.LedgerEntryTypeContractData {
+			t.Errorf("Expected ContractData type, got %v", key.Type)
+		}
 	*/
 }
 
@@ -248,8 +248,48 @@ func TestExtractFromChanges(t *testing.T) {
 }
 
 func TestExtractFromChanges_MultipleTypes(t *testing.T) {
-	// TODO: Fix xdr compatibility issues with ContractId field
-	t.Skip("Skipping due to xdr compatibility issues")
+	accountID := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
+
+	accountEntry := xdr.LedgerEntry{
+		Data: xdr.LedgerEntryData{
+			Type: xdr.LedgerEntryTypeAccount,
+			Account: &xdr.AccountEntry{
+				AccountId: accountID,
+				Balance:   1000000,
+			},
+		},
+	}
+
+	contractID := xdr.Hash([32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32})
+	contractEntry := xdr.LedgerEntry{
+		Data: xdr.LedgerEntryData{
+			Type: xdr.LedgerEntryTypeContractData,
+			ContractData: &xdr.ContractDataEntry{
+				Contract:   xdr.ScAddress{Type: xdr.ScAddressTypeScAddressTypeContract, ContractId: (*xdr.ContractId)(&contractID)},
+				Key:        xdr.ScVal{Type: xdr.ScValTypeScvU32, U32: uint32Ptr(100)},
+				Durability: xdr.ContractDataDurabilityPersistent,
+				Val:        xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: uint64Ptr(999)},
+			},
+		},
+	}
+
+	changes := xdr.LedgerEntryChanges{
+		{
+			Type:    xdr.LedgerEntryChangeTypeLedgerEntryCreated,
+			Created: &accountEntry,
+		},
+		{
+			Type:    xdr.LedgerEntryChangeTypeLedgerEntryUpdated,
+			Updated: &contractEntry,
+		},
+	}
+
+	entries := make(map[string]string)
+	extractFromChanges(changes, entries)
+
+	if len(entries) != 2 {
+		t.Errorf("Expected 2 entries, got %d", len(entries))
+	}
 }
 
 // =============================================================================
@@ -619,4 +659,14 @@ func TestGetLedgerHeader_ContextWithoutDeadline(t *testing.T) {
 	header, err := client.GetLedgerHeader(ctx, 12345)
 	require.NoError(t, err)
 	assert.NotNil(t, header)
+}
+
+func uint32Ptr(i uint32) *xdr.Uint32 {
+	v := xdr.Uint32(i)
+	return &v
+}
+
+func uint64Ptr(i uint64) *xdr.Uint64 {
+	v := xdr.Uint64(i)
+	return &v
 }

@@ -30,7 +30,7 @@ pub fn validate_request(input: &str) -> Result<Value, String> {
     // validate against the schema
     compiled
         .validate(&instance)
-        .map_err(|errors| errors.map(|e| e.to_string()).collect::<Vec<_>>().join(", "))?;
+        .map_err(|errors| errors.map(|e: jsonschema::ValidationError| e.to_string()).collect::<Vec<_>>().join(", "))?;
 
     Ok(instance)
 }

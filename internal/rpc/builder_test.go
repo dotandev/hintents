@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/stellar/go/clients/horizonclient"
+	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 )
 
 func TestWithNetwork(t *testing.T) {
