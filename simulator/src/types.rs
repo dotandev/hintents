@@ -7,13 +7,14 @@ use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
 pub struct SimulationRequest {
-    pub envelope_xdr: String,
-    pub result_meta_xdr: String,
+    pub envelope_xdr: Option<String>,
+    pub result_meta_xdr: Option<String>,
     pub ledger_entries: Option<HashMap<String, String>>,
     pub contract_wasm: Option<String>,
-    pub enable_optimization_advisor: bool,
+    pub enable_optimization_advisor: Option<bool>,
     pub profile: Option<bool>,
     pub timestamp: String,
+    pub analyze_only: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -29,6 +30,22 @@ pub struct SimulationResponse {
     pub budget_usage: Option<BudgetUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_location: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wasm_analysis: Option<WasmAnalysis>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WasmAnalysis {
+    pub total_size: usize,
+    pub sections: Vec<WasmSection>,
+    pub source_files: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WasmSection {
+    pub name: String,
+    pub size: usize,
+    pub category: String, // "Logic", "Debug", "Data", "Other"
 }
 
 #[derive(Debug, Serialize)]

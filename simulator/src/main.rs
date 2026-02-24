@@ -13,7 +13,7 @@ use crate::types::*;
 use base64::Engine;
 use soroban_env_host::xdr::ReadXdr;
 use soroban_env_host::{
-    xdr::{HostFunction, Operation, OperationBody, ScVal},
+    xdr::{Operation, OperationBody},
     Host, HostError,
 };
 use std::env;
@@ -54,6 +54,7 @@ fn send_error(msg: String) {
         optimization_report: None,
         budget_usage: None,
         source_location: None,
+        wasm_analysis: None,
     };
     println!("{}", serde_json::to_string(&res).unwrap());
     std::process::exit(1);
@@ -153,6 +154,7 @@ fn main() {
             optimization_report: None,
             budget_usage: None,
             source_location: None,
+            wasm_analysis: None,
         };
         println!("{}", serde_json::to_string(&res).unwrap());
         eprintln!("Failed to read stdin: {}", e);
@@ -174,55 +176,20 @@ fn main() {
                 optimization_report: None,
                 budget_usage: None,
                 source_location: None,
+                wasm_analysis: None,
             };
             println!("{}", serde_json::to_string(&res).unwrap());
             return;
         }
     };
 
-    // Decode Envelope XDR
-    let envelope = match base64::engine::general_purpose::STANDARD.decode(&request.envelope_xdr) {
-        Ok(bytes) => match soroban_env_host::xdr::TransactionEnvelope::from_xdr(
-            bytes,
-            soroban_env_host::xdr::Limits::none(),
-        ) {
-            Ok(env) => env,
-            Err(e) => {
-                return send_error(format!("Failed to parse Envelope XDR: {}", e));
-            }
-        },
-        Err(e) => {
-            return send_error(format!("Failed to decode Envelope Base64: {}", e));
-        }
-    };
-
-    // Decode ResultMeta XDR
-    let _result_meta = if request.result_meta_xdr.is_empty() {
-        eprintln!("Warning: ResultMetaXdr is empty. Host storage will be empty.");
-        None
-    } else {
-        match base64::engine::general_purpose::STANDARD.decode(&request.result_meta_xdr) {
-            Ok(bytes) => match soroban_env_host::xdr::TransactionResultMeta::from_xdr(
-                bytes,
-                soroban_env_host::xdr::Limits::none(),
-            ) {
-                Ok(meta) => Some(meta),
-                Err(e) => {
-                    return send_error(format!("Failed to parse ResultMeta XDR: {}", e));
-                }
-            },
-            Err(e) => {
-                eprintln!("Warning: Failed to decode ResultMeta Base64: {}. Proceeding with empty storage.", e);
-                None
-            }
-        }
-    };
-
     // Initialize source mapper if WASM is provided
-    let source_mapper = if let Some(wasm_base64) = &request.contract_wasm {
+    let mut wasm_analysis = None;
+    let _source_mapper = if let Some(wasm_base64) = &request.contract_wasm {
         match base64::engine::general_purpose::STANDARD.decode(wasm_base64) {
             Ok(wasm_bytes) => {
                 let mapper = SourceMapper::new(wasm_bytes);
+                wasm_analysis = Some(mapper.analyze_wasm());
                 if mapper.has_debug_symbols() {
                     eprintln!("Debug symbols found in WASM");
                     Some(mapper)
@@ -234,6 +201,72 @@ fn main() {
             Err(e) => {
                 eprintln!("Failed to decode WASM base64: {}", e);
                 None
+            }
+        }
+    } else {
+        None
+    };
+
+    if request.analyze_only.unwrap_or(false) {
+        let response = SimulationResponse {
+            status: "success".to_string(),
+            error: None,
+            events: vec![],
+            diagnostic_events: vec![],
+            categorized_events: vec![],
+            logs: vec!["Analysis complete".to_string()],
+            flamegraph: None,
+            optimization_report: None,
+            budget_usage: None,
+            source_location: None,
+            wasm_analysis,
+        };
+        println!("{}", serde_json::to_string(&response).unwrap());
+        return;
+    }
+
+    // Decode Envelope XDR
+    let envelope = if let Some(envelope_xdr) = &request.envelope_xdr {
+        match base64::engine::general_purpose::STANDARD.decode(envelope_xdr) {
+            Ok(bytes) => match soroban_env_host::xdr::TransactionEnvelope::from_xdr(
+                bytes,
+                soroban_env_host::xdr::Limits::none(),
+            ) {
+                Ok(env) => Some(env),
+                Err(e) => {
+                    return send_error(format!("Failed to parse Envelope XDR: {}", e));
+                }
+            },
+            Err(e) => {
+                return send_error(format!("Failed to decode Envelope Base64: {}", e));
+            }
+        }
+    } else if request.analyze_only.unwrap_or(false) {
+        None
+    } else {
+        return send_error("Envelope XDR is required for simulation".to_string());
+    };
+
+    // Decode ResultMeta XDR
+    let _result_meta = if let Some(result_meta_xdr) = &request.result_meta_xdr {
+        if result_meta_xdr.is_empty() {
+            eprintln!("Warning: ResultMetaXdr is empty. Host storage will be empty.");
+            None
+        } else {
+            match base64::engine::general_purpose::STANDARD.decode(result_meta_xdr) {
+                Ok(bytes) => match soroban_env_host::xdr::TransactionResultMeta::from_xdr(
+                    bytes,
+                    soroban_env_host::xdr::Limits::none(),
+                ) {
+                    Ok(meta) => Some(meta),
+                    Err(e) => {
+                        return send_error(format!("Failed to parse ResultMeta XDR: {}", e));
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Warning: Failed to decode ResultMeta Base64: {}. Proceeding with empty storage.", e);
+                    None
+                }
             }
         }
     } else {
@@ -275,13 +308,20 @@ fn main() {
     }
 
     // Extract Operations and Simulate
-    let operations = match &envelope {
-        soroban_env_host::xdr::TransactionEnvelope::Tx(tx_v1) => &tx_v1.tx.operations,
-        soroban_env_host::xdr::TransactionEnvelope::TxV0(tx_v0) => &tx_v0.tx.operations,
-        soroban_env_host::xdr::TransactionEnvelope::TxFeeBump(bump) => match &bump.tx.inner_tx {
-            soroban_env_host::xdr::FeeBumpTransactionInnerTx::Tx(tx_v1) => &tx_v1.tx.operations,
-        },
+    let operations_storage = if let Some(env) = &envelope {
+        let operations = match env {
+            soroban_env_host::xdr::TransactionEnvelope::Tx(tx_v1) => &tx_v1.tx.operations,
+            soroban_env_host::xdr::TransactionEnvelope::TxV0(tx_v0) => &tx_v0.tx.operations,
+            soroban_env_host::xdr::TransactionEnvelope::TxFeeBump(bump) => match &bump.tx.inner_tx {
+                soroban_env_host::xdr::FeeBumpTransactionInnerTx::Tx(tx_v1) => &tx_v1.tx.operations,
+            },
+        };
+        Some(operations)
+    } else {
+        None
     };
+
+    let operations = operations_storage.map(|ops| ops.as_slice()).unwrap_or(&[]);
 
     // Wrap the operation execution in panic protection
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -299,14 +339,14 @@ fn main() {
     let budget_usage = BudgetUsage {
         cpu_instructions: cpu_insns,
         memory_bytes: mem_bytes,
-        operations_count: operations.as_slice().len(),
+        operations_count: operations.len(),
         cpu_limit: CPU_LIMIT,
         memory_limit: MEMORY_LIMIT,
         cpu_usage_percent,
         memory_usage_percent,
     };
 
-    let optimization_report = if request.enable_optimization_advisor {
+    let optimization_report = if request.enable_optimization_advisor.unwrap_or(false) {
         let advisor = GasOptimizationAdvisor::new();
         let metrics = BudgetMetrics {
             cpu_instructions: budget_usage.cpu_instructions,
@@ -419,6 +459,7 @@ fn main() {
                 optimization_report,
                 budget_usage: Some(budget_usage),
                 source_location: None,
+                wasm_analysis,
             };
 
             println!("{}", serde_json::to_string(&response).unwrap());
@@ -445,6 +486,7 @@ fn main() {
                 optimization_report: None,
                 budget_usage: None,
                 source_location: None,
+                wasm_analysis: None,
             };
             println!("{}", serde_json::to_string(&response).unwrap());
         }
@@ -468,9 +510,18 @@ fn main() {
                 optimization_report: None,
                 budget_usage: None,
                 source_location: None,
+                wasm_analysis: None,
             };
             println!("{}", serde_json::to_string(&response).unwrap());
         }
+    }
+}
+
+fn decode_error(msg: &str) -> String {
+    if msg.contains("out of bounds memory access") {
+        "VM Trap: Out of Bounds Access".to_string()
+    } else {
+        msg.to_string()
     }
 }
 

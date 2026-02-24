@@ -3,6 +3,10 @@ name = "simulator"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "erst-sim"
+path = "src/main.rs"
+
 [dependencies]
 soroban-env-host = "25.0.1" # Updated to latest version
 base64 = "0.21"

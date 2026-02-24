@@ -15,18 +15,14 @@ import (
 
 // SimulationRequest is the JSON object passed to the Rust binary via Stdin
 type SimulationRequest struct {
-	EnvelopeXdr     string            `json:"envelope_xdr"`
-	ResultMetaXdr   string            `json:"result_meta_xdr"`
-	LedgerEntries   map[string]string `json:"ledger_entries,omitempty"`
-	Timestamp       int64             `json:"timestamp,omitempty"`
-	LedgerSequence  uint32            `json:"ledger_sequence,omitempty"`
-	WasmPath        *string           `json:"wasm_path,omitempty"`
-	MockArgs        *[]string         `json:"mock_args,omitempty"`
-	Profile         bool              `json:"profile,omitempty"`
-	ProtocolVersion *uint32           `json:"protocol_version,omitempty"`
-
-	AuthTraceOpts *AuthTraceOptions      `json:"auth_trace_opts,omitempty"`
-	CustomAuthCfg map[string]interface{} `json:"custom_auth_config,omitempty"`
+	EnvelopeXdr                *string             `json:"envelope_xdr,omitempty"`
+	ResultMetaXdr              *string             `json:"result_meta_xdr,omitempty"`
+	LedgerEntries              *map[string]string  `json:"ledger_entries,omitempty"`
+	ContractWasm               *string             `json:"contract_wasm,omitempty"`
+	EnableOptimizationAdvisor *bool               `json:"enable_optimization_advisor,omitempty"`
+	Profile                     *bool               `json:"profile,omitempty"`
+	Timestamp                   string              `json:"timestamp,omitempty"`
+	AnalyzeOnly                 *bool               `json:"analyze_only,omitempty"`
 }
 
 type AuthTraceOptions struct {
@@ -67,6 +63,19 @@ type SimulationResponse struct {
 	BudgetUsage       *BudgetUsage         `json:"budget_usage,omitempty"` // Resource consumption metrics
 	CategorizedEvents []CategorizedEvent   `json:"categorized_events,omitempty"`
 	ProtocolVersion   *uint32              `json:"protocol_version,omitempty"` // Protocol version used
+	WasmAnalysis      *WasmAnalysis        `json:"wasm_analysis,omitempty"`
+}
+
+type WasmAnalysis struct {
+	TotalSize   uint64        `json:"total_size"`
+	Sections    []WasmSection `json:"sections"`
+	SourceFiles []string      `json:"source_files,omitempty"`
+}
+
+type WasmSection struct {
+	Name     string `json:"name"`
+	Size     uint64 `json:"size"`
+	Category string `json:"category"`
 }
 
 type CategorizedEvent struct {
