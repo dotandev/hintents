@@ -89,6 +89,11 @@ func SaveCustomNetworks(config *CustomNetworkConfig) error {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
+	// Explicitly set permissions to ensure they're correct regardless of umask
+	if err := os.Chmod(configPath, 0600); err != nil {
+		return fmt.Errorf("failed to set file permissions: %w", err)
+	}
+
 	return nil
 }
 
