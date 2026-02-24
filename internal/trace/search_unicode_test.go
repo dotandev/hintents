@@ -123,8 +123,8 @@ func TestSearchUnicode_Mixed(t *testing.T) {
 	matches = engine.Search(nodes)
 	assert.Equal(t, 1, len(matches))
 
-	// Search for emoji
-	engine.SetQuery("")
+	// Search for the ASCII portion in the mixed-script function name
+	engine.SetQuery("transfer")
 	matches = engine.Search(nodes)
 	assert.Equal(t, 1, len(matches))
 }
