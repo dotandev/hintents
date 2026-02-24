@@ -66,6 +66,44 @@ export class Pkcs11Ed25519Signer implements AuditSigner {
     throw new Error(msg);
   }
 
+  async preflight(): Promise<void> {
+    const pkcs11 = this.pkcs11;
+    if (!pkcs11) throw new Error('pkcs11 internal error: module not loaded');
+
+    const lib = new pkcs11.PKCS11();
+    try {
+      lib.load(this.cfg.module);
+      lib.C_Initialize();
+
+      const slots = lib.C_GetSlotList(true);
+      if (!slots || slots.length === 0) throw new Error('no PKCS#11 slots with tokens found');
+
+      const slot = this.cfg.slot ? slots[Number(this.cfg.slot)] : slots[0];
+      if (slot === undefined) throw new Error('configured ERST_PKCS11_SLOT did not resolve to a valid slot');
+
+      const session = lib.C_OpenSession(slot, pkcs11.CKF_SERIAL_SESSION | pkcs11.CKF_RW_SESSION);
+      try {
+        // We intentionally do not login/sign in preflight to avoid prompting for PIN
+        // before the operator explicitly starts a signing flow.
+      } finally {
+        try {
+          lib.C_CloseSession(session);
+        } catch {
+          // ignore
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`pkcs11 preflight failed: ${msg}`);
+    } finally {
+      try {
+        lib.C_Finalize();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   async sign(payload: Uint8Array): Promise<Signature> {
     // Minimal skeleton that surfaces errors clearly.
     // Implementing full PKCS#11 key discovery + Ed25519 mechanisms depends on token capabilities.
