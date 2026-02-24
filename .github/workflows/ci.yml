@@ -155,8 +155,18 @@ jobs:
         if: matrix.rust-version == 'stable'
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests
+      - name: Run tests (stable with all features)
+        if: matrix.rust-version == 'stable'
         run: cargo test --verbose --all-features
 
-      - name: Build
+      - name: Run tests (older Rust without optional features)
+        if: matrix.rust-version != 'stable'
+        run: cargo test --verbose
+
+      - name: Build (stable with all features)
+        if: matrix.rust-version == 'stable'
         run: cargo build --verbose --all-features
+
+      - name: Build (older Rust without optional features)
+        if: matrix.rust-version != 'stable'
+        run: cargo build --verbose
