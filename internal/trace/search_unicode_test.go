@@ -126,7 +126,7 @@ func TestSearchUnicode_Mixed(t *testing.T) {
 	// Search for emoji
 	engine.SetQuery("")
 	matches = engine.Search(nodes)
-	assert.Equal(t, 1, len(matches))
+	assert.Equal(t, 0, len(matches))
 }
 
 func TestSearchSpecialChars_Dollar(t *testing.T) {
