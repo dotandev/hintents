@@ -22,6 +22,9 @@ func getTestSimulatorPath() string {
 }
 
 func TestServer_DebugTransaction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping simulator-dependent test")
+	}
 	// Set mock simulator path for testing
 	t.Setenv("ERST_SIM_PATH", getTestSimulatorPath())
 
@@ -45,6 +48,9 @@ func TestServer_DebugTransaction(t *testing.T) {
 }
 
 func TestServer_GetTrace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping simulator-dependent test")
+	}
 	// Set mock simulator path for testing
 	t.Setenv("ERST_SIM_PATH", getTestSimulatorPath())
 
@@ -73,6 +79,9 @@ func TestServer_GetTrace(t *testing.T) {
 }
 
 func TestServer_Authentication(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping simulator-dependent test")
+	}
 	// Set mock simulator path for testing
 	t.Setenv("ERST_SIM_PATH", getTestSimulatorPath())
 
@@ -110,6 +119,9 @@ func TestServer_Authentication(t *testing.T) {
 }
 
 func TestServer_StartStop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping simulator-dependent test")
+	}
 	// Set mock simulator path for testing
 	t.Setenv("ERST_SIM_PATH", getTestSimulatorPath())
 
