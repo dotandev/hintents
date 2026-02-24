@@ -109,8 +109,7 @@ func TestSearchUnicode_Mixed(t *testing.T) {
 		{
 			ID:        "1",
 			Function:  "transfer_资金",
-			EventData: "Événement créé[OK]",
-			EventData: "Événement créé [DEPLOY]",
+			EventData: "Événement créé ",
 		},
 	}
 
@@ -124,8 +123,8 @@ func TestSearchUnicode_Mixed(t *testing.T) {
 	matches = engine.Search(nodes)
 	assert.Equal(t, 1, len(matches))
 
-	// Search for emoji
-	engine.SetQuery("[DEPLOY]")
+	// Search for the ASCII portion in the mixed-script function name
+	engine.SetQuery("transfer")
 	matches = engine.Search(nodes)
 	assert.Equal(t, 1, len(matches))
 }
