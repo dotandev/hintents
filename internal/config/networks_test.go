@@ -6,6 +6,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/dotandev/hintents/internal/rpc"
@@ -131,10 +132,13 @@ func TestConfigFilePermissions(t *testing.T) {
 		t.Fatalf("Failed to stat config file: %v", err)
 	}
 
-	// Check that file has restrictive permissions (0600)
-	mode := info.Mode().Perm()
-	expected := os.FileMode(0600)
-	if mode != expected {
-		t.Errorf("Expected file permissions %o, got %o", expected, mode)
+	// Check file permissions only on Unix-like systems
+	// Windows doesn't support Unix-style permission bits reliably
+	if runtime.GOOS != "windows" {
+		mode := info.Mode().Perm()
+		expected := os.FileMode(0600)
+		if mode != expected {
+			t.Errorf("Expected file permissions %o, got %o", expected, mode)
+		}
 	}
 }
