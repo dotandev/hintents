@@ -2,6 +2,14 @@
 
 The simulator supports heap profiling to track memory allocation before and after contract execution.
 
+## Building with Heap Profiling
+
+Heap profiling requires the `heap-profiling` feature to be enabled:
+
+```bash
+cargo build --release --features heap-profiling
+```
+
 ## Usage
 
 Add the `--heap-profile` flag when running the simulator:
@@ -31,7 +39,7 @@ This will generate heap profile snapshots showing memory usage patterns during c
 
 ## Platform Support
 
-Heap profiling is supported on all platforms except MSVC (Windows with Microsoft Visual C++). On MSVC, the flag is accepted but profiling is disabled with a warning message.
+Heap profiling is supported on all platforms except MSVC (Windows with Microsoft Visual C++). The feature must be enabled at compile time.
 
 ## Implementation
 

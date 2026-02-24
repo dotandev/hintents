@@ -21,10 +21,10 @@ use std::env;
 use std::io::Read;
 use tracing_subscriber::{fmt, EnvFilter};
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), feature = "heap-profiling"))]
 use tikv_jemallocator::Jemalloc;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), feature = "heap-profiling"))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
@@ -58,7 +58,7 @@ fn init_logger() {
     }
 }
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), feature = "heap-profiling"))]
 fn dump_heap_profile(label: &str) {
     use std::fs::File;
     use std::io::Write;
@@ -82,9 +82,9 @@ fn dump_heap_profile(label: &str) {
     }
 }
 
-#[cfg(target_env = "msvc")]
+#[cfg(not(all(not(target_env = "msvc"), feature = "heap-profiling")))]
 fn dump_heap_profile(_label: &str) {
-    eprintln!("Heap profiling not supported on MSVC");
+    eprintln!("Heap profiling not available (requires heap-profiling feature)");
 }
 
 fn send_error(msg: String) {

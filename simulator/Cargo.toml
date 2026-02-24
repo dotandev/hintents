@@ -2,6 +2,7 @@
 name = "simulator"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.78"
 
 [dependencies]
 soroban-env-host = "25.0.1" # Updated to latest version
@@ -16,5 +17,9 @@ jsonschema = "0.40.2"
 object = "0.38.1"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = { version = "0.6", features = ["profiling", "stats"] }
-tikv-jemalloc-ctl = { version = "0.6", features = ["stats"] }
+tikv-jemallocator = { version = "0.6", features = ["profiling", "stats"], optional = true }
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
+
+[features]
+default = []
+heap-profiling = ["tikv-jemallocator", "tikv-jemalloc-ctl"]
