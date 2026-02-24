@@ -9,6 +9,7 @@ bin/
 # --- OS/System Files ---
 .DS_Store
 .env
+.env.test
 .env.example
 .cursorrules
 Thumbs.db

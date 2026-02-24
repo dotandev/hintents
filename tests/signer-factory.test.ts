@@ -9,13 +9,8 @@ jest.mock('../src/audit/signing/softwareSigner');
 jest.mock('../src/audit/signing/pkcs11Signer');
 
 describe('AuditSigner Factory', () => {
-  const mockPrivateKey = `-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIJ+DYvh6SEqVTm50DFtMDoQikTmiCqirVv9mWG9qfSnC
------END PRIVATE KEY-----`;
-
-  const mockPublicKey = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAGb+DYvh6SEqVTm50DFtMDoQikTmiCqirVv9mWG9qfSnCoAs=
------END PUBLIC KEY-----`;
+  const mockPrivateKey = process.env.TEST_PRIVATE_KEY_PEM || '';
+  const mockPublicKey = process.env.TEST_PUBLIC_KEY_PEM || '';
 
   beforeEach(() => {
     process.env.ERST_KMS_KEY_ID = 'arn:aws:kms:us-east-1:123456789012:key/test';
