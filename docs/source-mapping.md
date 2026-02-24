@@ -37,6 +37,8 @@ The simulator now accepts an optional `contract_wasm` field in the simulation re
 }
 ```
 
+For multi-contract replay, the simulator also accepts optional `contract_wasm_overrides`: a map from contract ID (32-byte hash as 64-character hex string) to base64-encoded WASM. This allows overriding external contract code that was invoked in a trace with local WASM files (dynamic contract bridging).
+
 ### Output Format
 
 When a failure occurs and debug symbols are available, the response includes source location:

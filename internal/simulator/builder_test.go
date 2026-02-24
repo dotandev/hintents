@@ -4,6 +4,7 @@
 package simulator
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -251,5 +252,31 @@ func TestSimulationRequestBuilder_NilLedgerEntries(t *testing.T) {
 
 	if req.LedgerEntries != nil {
 		t.Errorf("expected LedgerEntries to be nil, got: %v", req.LedgerEntries)
+	}
+}
+
+func TestSimulationRequestBuilder_WithContractWasmOverrides(t *testing.T) {
+	builder := NewSimulationRequestBuilder()
+
+	overrides := ContractWasmOverrides{
+		strings.Repeat("a", 64): "d2FzbQ==",
+	}
+	req, err := builder.
+		WithEnvelopeXDR("envelope").
+		WithResultMetaXDR("result").
+		WithContractWasmOverrides(overrides).
+		Build()
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if req.ContractWasmOverrides == nil {
+		t.Fatal("expected ContractWasmOverrides to be set")
+	}
+	if len(req.ContractWasmOverrides) != 1 {
+		t.Errorf("expected 1 override, got: %d", len(req.ContractWasmOverrides))
+	}
+	if req.ContractWasmOverrides[strings.Repeat("a", 64)] != "d2FzbQ==" {
+		t.Errorf("expected override value 'd2FzbQ==', got: %s", req.ContractWasmOverrides[strings.Repeat("a", 64)])
 	}
 }

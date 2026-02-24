@@ -18,10 +18,11 @@ import (
 //		WithLedgerEntry("key1", "value1").
 //		Build()
 type SimulationRequestBuilder struct {
-	envelopeXdr   string
-	resultMetaXdr string
-	ledgerEntries map[string]string
-	errors        []string
+	envelopeXdr             string
+	resultMetaXdr           string
+	ledgerEntries           map[string]string
+	contractWasmOverrides   ContractWasmOverrides
+	errors                  []string
 }
 
 // NewSimulationRequestBuilder creates a new builder instance.
@@ -85,6 +86,16 @@ func (b *SimulationRequestBuilder) WithLedgerEntries(entries map[string]string) 
 	return b
 }
 
+// WithContractWasmOverrides sets local WASM overrides by contract ID (hex) for multi-contract replay.
+func (b *SimulationRequestBuilder) WithContractWasmOverrides(overrides ContractWasmOverrides) *SimulationRequestBuilder {
+	if overrides == nil {
+		b.contractWasmOverrides = nil
+		return b
+	}
+	b.contractWasmOverrides = overrides
+	return b
+}
+
 // Build constructs and validates the final SimulationRequest.
 // Returns an error if required fields are missing or validation fails.
 func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
@@ -113,6 +124,10 @@ func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 		req.LedgerEntries = b.ledgerEntries
 	}
 
+	if len(b.contractWasmOverrides) > 0 {
+		req.ContractWasmOverrides = b.contractWasmOverrides
+	}
+
 	return req, nil
 }
 
@@ -131,6 +146,7 @@ func (b *SimulationRequestBuilder) Reset() *SimulationRequestBuilder {
 	b.envelopeXdr = ""
 	b.resultMetaXdr = ""
 	b.ledgerEntries = make(map[string]string)
+	b.contractWasmOverrides = nil
 	b.errors = make([]string, 0)
 	return b
 }

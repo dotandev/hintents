@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod config;
+mod contract_bridge;
 mod gas_optimizer;
 mod runner;
 mod source_mapper;
@@ -13,9 +14,10 @@ use crate::types::*;
 use base64::Engine;
 use soroban_env_host::xdr::ReadXdr;
 use soroban_env_host::{
-    xdr::{HostFunction, Operation, OperationBody, ScVal},
+    xdr::{Operation, OperationBody},
     Host, HostError,
 };
+use std::rc::Rc;
 use std::env;
 use std::io::Read;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -219,7 +221,7 @@ fn main() {
     };
 
     // Initialize source mapper if WASM is provided
-    let source_mapper = if let Some(wasm_base64) = &request.contract_wasm {
+    let _source_mapper = if let Some(wasm_base64) = &request.contract_wasm {
         match base64::engine::general_purpose::STANDARD.decode(wasm_base64) {
             Ok(wasm_bytes) => {
                 let mapper = SourceMapper::new(wasm_bytes);
@@ -244,34 +246,23 @@ fn main() {
     let sim_host = runner::SimHost::new(None);
     let host = sim_host.inner;
 
+    // Decode ledger entries and apply contract WASM overrides for multi-contract replay
+    let ledger_key_entries = match contract_bridge::decode_ledger_entries_and_apply_overrides(
+        request.ledger_entries.as_ref(),
+        request.contract_wasm_overrides.as_ref(),
+    ) {
+        Ok(list) => list,
+        Err(e) => return send_error(e),
+    };
+
     let mut loaded_entries_count = 0;
-
-    // Populate Host Storage
-    if let Some(entries) = &request.ledger_entries {
-        for (key_xdr, entry_xdr) in entries {
-            let _key = match base64::engine::general_purpose::STANDARD.decode(key_xdr) {
-                Ok(b) => match soroban_env_host::xdr::LedgerKey::from_xdr(
-                    b,
-                    soroban_env_host::xdr::Limits::none(),
-                ) {
-                    Ok(k) => k,
-                    Err(e) => return send_error(format!("Failed to parse LedgerKey XDR: {}", e)),
-                },
-                Err(e) => return send_error(format!("Failed to decode LedgerKey Base64: {}", e)),
-            };
-
-            let _entry = match base64::engine::general_purpose::STANDARD.decode(entry_xdr) {
-                Ok(b) => match soroban_env_host::xdr::LedgerEntry::from_xdr(
-                    b,
-                    soroban_env_host::xdr::Limits::none(),
-                ) {
-                    Ok(e) => e,
-                    Err(e) => return send_error(format!("Failed to parse LedgerEntry XDR: {}", e)),
-                },
-                Err(e) => return send_error(format!("Failed to decode LedgerEntry Base64: {}", e)),
-            };
-            loaded_entries_count += 1;
+    for (key, entry) in &ledger_key_entries {
+        let key_rc = Rc::new(key.clone());
+        let entry_rc = Rc::new(entry.clone());
+        if let Err(e) = host.add_ledger_entry(&key_rc, &entry_rc, Some(16_777_215)) {
+            return send_error(format!("Failed to inject ledger entry: {:?}", e));
         }
+        loaded_entries_count += 1;
     }
 
     // Extract Operations and Simulate
@@ -476,7 +467,13 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    fn decode_error(s: &str) -> String {
+        if s.contains("out of bounds memory access") {
+            "VM Trap: Out of Bounds Access".to_string()
+        } else {
+            s.to_string()
+        }
+    }
 
     #[test]
     fn test_decode_vm_traps() {

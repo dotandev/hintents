@@ -5,12 +5,19 @@ use crate::gas_optimizer::OptimizationReport;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Map of contract ID (32-byte hash as 64-char hex) to base64-encoded WASM.
+/// Used to override external contract code during multi-contract replay.
+pub type ContractWasmOverrides = HashMap<String, String>;
+
 #[derive(Debug, Deserialize)]
 pub struct SimulationRequest {
     pub envelope_xdr: String,
     pub result_meta_xdr: String,
     pub ledger_entries: Option<HashMap<String, String>>,
     pub contract_wasm: Option<String>,
+    /// Override WASM for specific contracts by contract ID (hex). Enables dynamic bridging for multi-contract replay.
+    #[serde(default)]
+    pub contract_wasm_overrides: Option<ContractWasmOverrides>,
     pub enable_optimization_advisor: bool,
     pub profile: Option<bool>,
     pub timestamp: String,

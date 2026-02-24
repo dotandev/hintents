@@ -13,6 +13,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// ContractWasmOverrides maps contract ID (32-byte hash as 64-char hex) to base64-encoded WASM.
+// Used for dynamic contract bridging: override external contract code during multi-contract replay.
+type ContractWasmOverrides map[string]string
+
 // SimulationRequest is the JSON object passed to the Rust binary via Stdin
 type SimulationRequest struct {
 	EnvelopeXdr     string            `json:"envelope_xdr"`
@@ -24,6 +28,9 @@ type SimulationRequest struct {
 	MockArgs        *[]string         `json:"mock_args,omitempty"`
 	Profile         bool              `json:"profile,omitempty"`
 	ProtocolVersion *uint32           `json:"protocol_version,omitempty"`
+
+	// ContractWasmOverrides allows providing local WASM to override external contract calls in a trace (multi-contract replay).
+	ContractWasmOverrides ContractWasmOverrides `json:"contract_wasm_overrides,omitempty"`
 
 	AuthTraceOpts *AuthTraceOptions      `json:"auth_trace_opts,omitempty"`
 	CustomAuthCfg map[string]interface{} `json:"custom_auth_config,omitempty"`
