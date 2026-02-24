@@ -7,7 +7,7 @@ import { createAuditSigner } from '../audit/signing/factory';
 dotenv.config();
 
 /**
- * Minimal audit command to demonstrate signer selection, including HSM/PKCS#11.
+ * Minimal audit command to demonstrate signer selection, including HSM/PKCS#11/KMS.
  *
  * This does not change the audit log format beyond including signature/publicKey metadata.
  */
@@ -16,7 +16,7 @@ export function registerAuditCommands(program: Command): void {
     .command('audit:sign')
     .description('Generate a signed audit log from a JSON payload (demo/test utility)')
     .requiredOption('--payload <json>', 'JSON string to sign as the audit trace')
-    .option('--hsm-provider <provider>', 'HSM provider to use (pkcs11). Defaults to software signing')
+    .option('--hsm-provider <provider>', 'HSM provider to use (software|pkcs11|kms). Defaults to software signing')
     .option(
       '--software-private-key <pem>',
       'Ed25519 private key (PKCS#8 PEM). If unset, uses ERST_AUDIT_PRIVATE_KEY_PEM'
