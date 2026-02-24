@@ -113,7 +113,7 @@ jobs:
     needs: license-headers
     strategy:
       matrix:
-        rust-version: [stable, "1.85"]
+        rust-version: [stable, nightly]
     defaults:
       run:
         working-directory: simulator
