@@ -7,9 +7,7 @@ jest.mock('@aws-sdk/client-kms');
 
 describe('KMS audit signing', () => {
   const mockKeyId = 'arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012';
-  const mockPublicKeyPem = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAGb+DYvh6SEqVTm50DFtMDoQikTmiCqirVv9mWG9qfSnCoAs=
------END PUBLIC KEY-----`;
+  const mockPublicKeyPem = process.env.TEST_PUBLIC_KEY_PEM || '';
 
   const mockSignature = Buffer.from('signature_bytes_from_kms_api');
 
