@@ -107,8 +107,13 @@ func TestRemoveCustomNetwork(t *testing.T) {
 func TestConfigFilePermissions(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
+	originalProfile := os.Getenv("USERPROFILE")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	os.Setenv("USERPROFILE", tmpDir)
+	defer func() {
+		os.Setenv("HOME", originalHome)
+		os.Setenv("USERPROFILE", originalProfile)
+	}()
 
 	testConfig := rpc.NetworkConfig{
 		Name:              "secure-net",

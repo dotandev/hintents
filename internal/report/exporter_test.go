@@ -6,6 +6,7 @@ package report
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -157,7 +158,12 @@ func TestFilenameGeneration(t *testing.T) {
 }
 
 func TestInvalidOutputDir(t *testing.T) {
-	invalidDir := "/root/invalid/path/that/cannot/be/created"
+	var invalidDir string
+	if runtime.GOOS == "windows" {
+		invalidDir = "Z:\\invalid\\path\\that\\does\\not\\exist\\12345"
+	} else {
+		invalidDir = "/root/invalid/path/that/cannot/be/created"
+	}
 
 	_, err := NewExporter(invalidDir)
 	if err == nil {

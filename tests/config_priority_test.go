@@ -22,10 +22,15 @@ func TestConfigPriority(t *testing.T) {
 	// Setup generic temporary home directory for config
 	tmpDir := t.TempDir()
 
-	// Mock HOME to point to tmpDir so config.LoadConfig uses it
+	// Mock HOME and USERPROFILE to point to tmpDir so config.LoadConfig uses it
 	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
+	originalProfile := os.Getenv("USERPROFILE")
+	defer func() {
+		os.Setenv("HOME", originalHome)
+		os.Setenv("USERPROFILE", originalProfile)
+	}()
 	os.Setenv("HOME", tmpDir)
+	os.Setenv("USERPROFILE", tmpDir)
 
 	// Create a dummy config file
 	configDir := filepath.Join(tmpDir, ".erst")
