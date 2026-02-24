@@ -35,6 +35,12 @@ export interface HardwareAttestation {
 
 export interface AuditSigner {
   /**
+   * Performs non-signing validation for signer readiness.
+   * Implementations should validate configuration/connectivity without consuming signing capacity.
+   */
+  preflight?(): Promise<void>;
+
+  /**
    * Signs an arbitrary payload.
    * Implementations should throw an Error with a clear message on failure.
    */

@@ -10,6 +10,10 @@ import type { AuditSigner, PublicKey, Signature } from './types';
 export class SoftwareEd25519Signer implements AuditSigner {
   constructor(private readonly privateKeyPem: string) {}
 
+  async preflight(): Promise<void> {
+    await this.public_key();
+  }
+
   async sign(payload: Uint8Array): Promise<Signature> {
     try {
       return sign(null, Buffer.from(payload), this.privateKeyPem);

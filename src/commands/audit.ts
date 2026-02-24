@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Command } from 'commander';
+import { createHash } from 'crypto';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
+import stringify from 'fast-json-stable-stringify';
+import { verifyAuditLog } from '../audit/AuditVerifier';
 import { AuditLogger } from '../audit/AuditLogger';
 import { renderAuditHTML, writeAuditReport } from '../audit/AuditRenderer';
 import { createAuditSigner } from '../audit/signing/factory';
-import { verifyAuditLog } from '../audit/AuditVerifier';
 
 // Load env for key/provider configuration
 dotenv.config();
@@ -30,6 +32,7 @@ export function registerAuditCommands(program: Command): void {
     .command('audit:sign')
     .description('Generate a signed audit log from a JSON payload')
     .requiredOption('--payload <json>', 'JSON string to sign as the audit trace')
+    .option('--dry-run', 'Validate payload/signer setup without generating a signature')
     .option(
       '--hsm-provider <provider>',
       'Signing provider: software (default), pkcs11, or kms'
@@ -46,29 +49,7 @@ export function registerAuditCommands(program: Command): void {
       '--kms-signing-algorithm <alg>',
       'AWS KMS signing algorithm (default: ECDSA_SHA_256). If unset, uses ERST_KMS_SIGNING_ALGORITHM'
     )
-    .action(async (opts: any) => {
-      try {
-        const trace = JSON.parse(opts.payload);
-
-        const signer = createAuditSigner({
-          hsmProvider: opts.hsmProvider,
-          softwarePrivateKeyPem: opts.softwarePrivateKey ?? process.env.ERST_AUDIT_PRIVATE_KEY_PEM,
-          kmsKeyId: opts.kmsKeyId,
-          kmsSigningAlgorithm: opts.kmsSigningAlgorithm,
-        });
-
-        const providerLabel = opts.hsmProvider ?? 'software';
-        const logger = new AuditLogger(signer, providerLabel);
-        const log = await logger.generateLog(trace);
-
-        // Print to stdout so callers can redirect to a file
-        process.stdout.write(JSON.stringify(log, null, 2) + '\n');
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error(`[FAIL] audit signing failed: ${msg}`);
-        process.exit(1);
-      }
-    });
+    .action(async (opts: AuditSignOptions) => runAuditSign(opts));
 
   program
     .command('audit:render')
@@ -89,6 +70,11 @@ export function registerAuditCommands(program: Command): void {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[FAIL] audit render failed: ${msg}`);
+        process.exit(1);
+      }
+    });
+
+  program
     .command('audit:verify')
     .description('Verify an audit log signature locally (offline verification)')
     .option('--payload <json>', 'JSON string of the audit trace')
@@ -103,20 +89,12 @@ export function registerAuditCommands(program: Command): void {
           const content = fs.readFileSync(opts.file, 'utf8');
           auditLog = JSON.parse(content);
         } else if (opts.payload && opts.sig && opts.pubkey) {
-          // Reconstruct enough of the log to verify
-          // verifyAuditLog calculates the hash from the trace
           auditLog = {
             trace: JSON.parse(opts.payload),
             signature: opts.sig,
             publicKey: opts.pubkey,
-            // Re-calculate hash here because verifyAuditLog expects it to exist and match
-            // However, verifyAuditLog also re-calculates it.
-            // Let's look at the implementation of verifyAuditLog again.
           };
 
-          // Re-calculate the hash to satisfy the verifyAuditLog structure
-          const stringify = (await import('fast-json-stable-stringify')).default;
-          const { createHash } = await import('crypto');
           const canonicalString = stringify(auditLog.trace);
           auditLog.hash = createHash('sha256').update(canonicalString).digest('hex');
         } else {
@@ -137,4 +115,73 @@ export function registerAuditCommands(program: Command): void {
         process.exit(1);
       }
     });
+}
+
+type AuditSignIo = {
+  stdout: Pick<NodeJS.WriteStream, 'write'>;
+  stderr: Pick<NodeJS.WriteStream, 'write'>;
+  exit: (code: number) => never;
+};
+
+type AuditSignOptions = {
+  payload: string;
+  dryRun?: boolean;
+  hsmProvider?: string;
+  softwarePrivateKey?: string;
+  kmsKeyId?: string;
+  kmsSigningAlgorithm?: string;
+};
+
+export async function runAuditSign(
+  opts: AuditSignOptions,
+  io: AuditSignIo = { stdout: process.stdout, stderr: process.stderr, exit: process.exit }
+): Promise<void> {
+  try {
+    const trace = JSON.parse(opts.payload);
+    const canonicalString = stringify(trace);
+    const traceHash = createHash('sha256').update(canonicalString).digest('hex');
+
+    const signer = createAuditSigner({
+      hsmProvider: opts.hsmProvider,
+      softwarePrivateKeyPem: opts.softwarePrivateKey ?? process.env.ERST_AUDIT_PRIVATE_KEY_PEM,
+      kmsKeyId: opts.kmsKeyId,
+      kmsSigningAlgorithm: opts.kmsSigningAlgorithm,
+    });
+
+    if (opts.dryRun) {
+      if (typeof signer.preflight === 'function') {
+        await signer.preflight();
+      }
+      await signer.public_key();
+
+      io.stdout.write(
+        JSON.stringify(
+          {
+            dryRun: true,
+            status: 'ok',
+            signer: { provider: opts.hsmProvider ?? 'software' },
+            validations: {
+              payloadParsed: true,
+              canonicalized: true,
+              connectivityChecked: true,
+            },
+            traceHash,
+          },
+          null,
+          2
+        ) + '\n'
+      );
+      return;
+    }
+
+    const logger = new AuditLogger(signer, opts.hsmProvider ?? 'software');
+    const log = await logger.generateLog(trace);
+
+    // Print to stdout so callers can redirect to a file
+    io.stdout.write(JSON.stringify(log, null, 2) + '\n');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    io.stderr.write(`[FAIL] audit signing failed: ${msg}\n`);
+    io.exit(1);
+  }
 }
