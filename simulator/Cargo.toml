@@ -14,3 +14,7 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 inferno = "0.11"
 jsonschema = "0.40.2"
 object = "0.38.1"
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6", features = ["profiling", "stats"] }
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"] }

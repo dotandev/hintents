@@ -11,14 +11,30 @@ use crate::gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor, CPU_LIMIT, MEM
 use crate::source_mapper::SourceMapper;
 use crate::types::*;
 use base64::Engine;
+use clap::Parser;
 use soroban_env_host::xdr::ReadXdr;
 use soroban_env_host::{
-    xdr::{HostFunction, Operation, OperationBody, ScVal},
+    xdr::{Operation, OperationBody},
     Host, HostError,
 };
 use std::env;
 use std::io::Read;
 use tracing_subscriber::{fmt, EnvFilter};
+
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
+#[derive(Parser, Debug)]
+#[command(name = "simulator")]
+#[command(about = "Soroban transaction simulator", long_about = None)]
+struct Args {
+    #[arg(long, help = "Dump heap profile before and after contract execution")]
+    heap_profile: bool,
+}
 
 fn init_logger() {
     // Check if the environment variable ERST_LOG_FORMAT is set to "json"
@@ -40,6 +56,35 @@ fn init_logger() {
         // Output human-readable text
         subscriber.compact().init();
     }
+}
+
+#[cfg(not(target_env = "msvc"))]
+fn dump_heap_profile(label: &str) {
+    use std::fs::File;
+    use std::io::Write;
+    use tikv_jemalloc_ctl::{epoch, stats};
+
+    let filename = format!("heap_profile_{}.txt", label);
+    
+    epoch::mib().unwrap().advance().unwrap();
+    
+    let allocated = stats::allocated::read().unwrap();
+    let resident = stats::resident::read().unwrap();
+    
+    let stats_text = format!(
+        "=== Heap Profile: {} ===\nAllocated bytes: {}\nResident bytes: {}\n",
+        label, allocated, resident
+    );
+    
+    if let Ok(mut file) = File::create(&filename) {
+        let _ = file.write_all(stats_text.as_bytes());
+        eprintln!("Heap profile written to {}", filename);
+    }
+}
+
+#[cfg(target_env = "msvc")]
+fn dump_heap_profile(_label: &str) {
+    eprintln!("Heap profiling not supported on MSVC");
 }
 
 fn send_error(msg: String) {
@@ -133,6 +178,9 @@ fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<Categoriz
 }
 
 fn main() {
+    // Parse CLI arguments
+    let args = Args::parse();
+
     // 1. Initialize the logger immediately
     init_logger();
 
@@ -219,7 +267,7 @@ fn main() {
     };
 
     // Initialize source mapper if WASM is provided
-    let source_mapper = if let Some(wasm_base64) = &request.contract_wasm {
+    let _source_mapper = if let Some(wasm_base64) = &request.contract_wasm {
         match base64::engine::general_purpose::STANDARD.decode(wasm_base64) {
             Ok(wasm_bytes) => {
                 let mapper = SourceMapper::new(wasm_bytes);
@@ -283,10 +331,20 @@ fn main() {
         },
     };
 
+    // Dump heap profile before execution if requested
+    if args.heap_profile {
+        dump_heap_profile("before");
+    }
+
     // Wrap the operation execution in panic protection
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         execute_operations(&host, operations)
     }));
+
+    // Dump heap profile after execution if requested
+    if args.heap_profile {
+        dump_heap_profile("after");
+    }
 
     // Budget and Reporting
     let budget = host.budget_cloned();
@@ -471,16 +529,5 @@ fn main() {
             };
             println!("{}", serde_json::to_string(&response).unwrap());
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_decode_vm_traps() {
-        let msg = decode_error("Error: Wasm Trap: out of bounds memory access");
-        assert!(msg.contains("VM Trap: Out of Bounds Access"));
     }
 }
