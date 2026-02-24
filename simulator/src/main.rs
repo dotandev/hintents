@@ -65,17 +65,17 @@ fn dump_heap_profile(label: &str) {
     use tikv_jemalloc_ctl::{epoch, stats};
 
     let filename = format!("heap_profile_{}.txt", label);
-    
+
     epoch::mib().unwrap().advance().unwrap();
-    
+
     let allocated = stats::allocated::read().unwrap();
     let resident = stats::resident::read().unwrap();
-    
+
     let stats_text = format!(
         "=== Heap Profile: {} ===\nAllocated bytes: {}\nResident bytes: {}\n",
         label, allocated, resident
     );
-    
+
     if let Ok(mut file) = File::create(&filename) {
         let _ = file.write_all(stats_text.as_bytes());
         eprintln!("Heap profile written to {}", filename);
@@ -118,7 +118,7 @@ fn execute_operations(host: &Host, operations: &[Operation]) -> Result<Vec<Strin
                 // Note: The host provided is already initialized with storage.
                 // We really should use `host.invoke_function`.
 
-                logs.push(format!("Executing InvokeHostFunction..."));
+                logs.push("Executing InvokeHostFunction...".to_string());
                 let val = host.invoke_function(invoke_op.host_function.clone())?;
                 logs.push(format!("Result: {:?}", val));
             }

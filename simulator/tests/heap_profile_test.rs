@@ -1,24 +1,32 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 use std::process::{Command, Stdio};
 
 #[test]
 fn test_heap_profile_flag_exists() {
     let simulator_path = env!("CARGO_BIN_EXE_simulator");
-    
+
     let output = Command::new(simulator_path)
         .arg("--help")
         .output()
         .expect("Failed to run simulator");
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--heap-profile"), "CLI should have --heap-profile flag");
-    assert!(stdout.contains("Dump heap profile before and after contract execution"), 
-            "Help text should describe heap profiling");
+    assert!(
+        stdout.contains("--heap-profile"),
+        "CLI should have --heap-profile flag"
+    );
+    assert!(
+        stdout.contains("Dump heap profile before and after contract execution"),
+        "Help text should describe heap profiling"
+    );
 }
 
 #[test]
 fn test_heap_profile_flag_accepted() {
     let simulator_path = env!("CARGO_BIN_EXE_simulator");
-    
+
     let test_input = r#"{
         "envelope_xdr": "",
         "result_meta_xdr": "",
@@ -28,7 +36,7 @@ fn test_heap_profile_flag_accepted() {
         "profile": false,
         "timestamp": "2026-02-24T15:30:00Z"
     }"#;
-    
+
     let output = Command::new(simulator_path)
         .arg("--heap-profile")
         .stdin(Stdio::piped())
@@ -44,7 +52,9 @@ fn test_heap_profile_flag_accepted() {
             }
             child.wait_with_output()
         });
-    
-    assert!(output.is_ok(), "Simulator should accept --heap-profile flag");
-}
 
+    assert!(
+        output.is_ok(),
+        "Simulator should accept --heap-profile flag"
+    );
+}
