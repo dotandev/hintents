@@ -9,6 +9,7 @@ pub struct SourceMapper {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct SourceLocation {
     pub file: String,
     pub line: u32,
@@ -31,6 +32,7 @@ impl SourceMapper {
         }
     }
 
+    #[allow(dead_code)]
     pub fn map_wasm_offset_to_source(&self, _wasm_offset: u64) -> Option<SourceLocation> {
         if !self.has_symbols {
             return None;

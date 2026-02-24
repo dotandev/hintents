@@ -13,6 +13,7 @@ pub struct SimulationRequest {
     pub contract_wasm: Option<String>,
     pub enable_optimization_advisor: bool,
     pub profile: Option<bool>,
+    #[allow(dead_code)]
     pub timestamp: String,
 }
 
