@@ -54,7 +54,7 @@ pub struct SimulationResponse {
     pub wasm_offset: Option<u64>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DiagnosticEvent {
     pub event_type: String,
     pub contract_id: Option<String>,
