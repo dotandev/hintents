@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { KmsEd25519Signer } from '../src/audit/signing/kmsSigner';
 
 describe('KMS Ed25519Signer integration', () => {

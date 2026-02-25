@@ -1,3 +1,6 @@
+# Copyright (c) Hintents Authors.
+# SPDX-License-Identifier: Apache-2.0
+
 #!/usr/bin/env bash
 # Copyright (c) 2025 ERST Contributors
 # SPDX-License-Identifier: Apache-2.0
