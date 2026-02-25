@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::source_map_cache::SourceMapCache;
-use gimli::{self, ColumnType, Dwarf, EndianSlice, Reader, RunTimeEndian, SectionId};
+use gimli::{self, ColumnType, Dwarf, DwarfSections, EndianSlice, Reader, RunTimeEndian, SectionId};
 use object::{Object, ObjectSection};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -65,7 +65,7 @@ impl SourceMapper {
             RunTimeEndian::Big
         };
 
-        let dwarf_sections = Dwarf::load(|id: SectionId| -> Result<Cow<'_, [u8]>, gimli::Error> {
+        let dwarf_sections = DwarfSections::load(|id: SectionId| -> Result<Cow<'_, [u8]>, gimli::Error> {
             if let Some(section) = obj_file.section_by_name(id.name()) {
                 match section.uncompressed_data() {
                     Ok(data) => Ok(data),

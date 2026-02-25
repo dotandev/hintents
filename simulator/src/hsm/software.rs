@@ -1,4 +1,4 @@
-// Copyright 2025 Hintents Users
+// Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 //! Software-based signer implementation for testing and development.

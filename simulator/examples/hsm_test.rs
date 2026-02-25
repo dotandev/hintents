@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 //! HSM Integration Test Example
 //!
 //! This example demonstrates the usage of the HSM integration with both
@@ -33,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n4. Testing PKCS#11 Signer");
     test_pkcs11_signer().await?;
 
-    println!("\n✅ All HSM tests completed successfully!");
+    println!("\nAll HSM tests completed successfully!");
     Ok(())
 }
 
@@ -48,21 +51,21 @@ async fn test_software_signer_ed25519() -> Result<(), Box<dyn std::error::Error>
     // Test signing
     let message = b"Hello, HSM!";
     let signature = signer.sign(message).await?;
-    println!("   ✓ Message signed successfully");
-    println!("   ✓ Signature algorithm: {:?}", signature.algorithm);
-    println!("   ✓ Signature length: {} bytes", signature.bytes.len());
+    println!("   Message signed successfully");
+    println!("   Signature algorithm: {:?}", signature.algorithm);
+    println!("   Signature length: {} bytes", signature.bytes.len());
 
     // Test public key retrieval
     let public_key = signer.public_key().await?;
     println!(
-        "   ✓ Public key retrieved: {} bytes",
+        "   Public key retrieved: {} bytes",
         public_key.bytes.len()
     );
 
     // Test verification
     let is_valid = signer.verify(message, &signature).await?;
     assert!(is_valid, "Signature verification failed");
-    println!("   ✓ Signature verified successfully");
+    println!("   Signature verified successfully");
 
     // Test verification with wrong message
     let wrong_message = b"Wrong message";
@@ -71,7 +74,7 @@ async fn test_software_signer_ed25519() -> Result<(), Box<dyn std::error::Error>
         !is_invalid,
         "Signature should not verify with wrong message"
     );
-    println!("   ✓ Invalid signature correctly rejected");
+    println!("   Invalid signature correctly rejected");
 
     Ok(())
 }
@@ -91,21 +94,21 @@ async fn test_software_signer_secp256k1() -> Result<(), Box<dyn std::error::Erro
     // Test signing
     let message = b"Hello, HSM secp256k1!";
     let signature = signer.sign(message).await?;
-    println!("   ✓ Message signed successfully");
-    println!("   ✓ Signature algorithm: {:?}", signature.algorithm);
-    println!("   ✓ Signature length: {} bytes", signature.bytes.len());
+    println!("   Message signed successfully");
+    println!("   Signature algorithm: {:?}", signature.algorithm);
+    println!("   Signature length: {} bytes", signature.bytes.len());
 
     // Test public key retrieval
     let public_key = signer.public_key().await?;
     println!(
-        "   ✓ Public key retrieved: {} bytes",
+        "   Public key retrieved: {} bytes",
         public_key.bytes.len()
     );
 
     // Test verification
     let is_valid = signer.verify(message, &signature).await?;
     assert!(is_valid, "Signature verification failed");
-    println!("   ✓ Signature verified successfully");
+    println!("   Signature verified successfully");
 
     Ok(())
 }
@@ -124,14 +127,14 @@ async fn test_environment_signer() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create signer from environment
     let signer: Box<dyn simulator::hsm::Signer> = SignerFactory::create_from_env().await?;
-    println!("   ✓ Signer created from environment configuration");
+    println!("   Signer created from environment configuration");
 
     // Test basic functionality
     let message = b"Environment test message";
     let signature = signer.sign(message).await?;
     let is_valid = signer.verify(message, &signature).await?;
     assert!(is_valid, "Environment signer verification failed");
-    println!("   ✓ Environment signer works correctly");
+    println!("   Environment signer works correctly");
 
     // Clean up
     std::fs::remove_file(key_file)?;
@@ -158,15 +161,15 @@ async fn test_pkcs11_signer() -> Result<(), Box<dyn std::error::Error>> {
     match result {
         Err(e) => {
             println!(
-                "   ✓ PKCS#11 signer correctly handles missing library: {}",
+                "   PKCS#11 signer correctly handles missing library: {}",
                 e
             );
         }
         Ok(_) => {
-            println!("   ⚠️  Unexpected success with non-existent library");
+            println!("   Unexpected success with non-existent library");
         }
     }
 
-    println!("   ✓ PKCS#11 interface tested (error path)");
+    println!("   PKCS#11 interface tested (error path)");
     Ok(())
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 Hintents Users
+// Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 //! Hardware Security Module (HSM) integration for cryptographic operations.
@@ -36,8 +36,7 @@
 //! let signature = signer.sign(data).await?;
 //!
 //! // Verify signature
-//! let public_key = signer.public_key().await?;
-//! let is_valid = signer.verify(data, &signature, &public_key).await?;
+//! let is_valid = signer.verify(data, &signature).await?;
 //! ```
 
 use std::fmt;

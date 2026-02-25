@@ -27,32 +27,8 @@ impl SimHost {
 
         if let Some(_calib) = calibration {
             // TODO: Update budget model configuration for newer soroban-env-host API
-            // The CostModel and set_model methods appear to have changed
-            /*
-            use soroban_env_host::budget::CostModel;
-            use soroban_env_host::xdr::ContractCostType;
-
-            // SHA256
-            let sha256_model = CostModel {
-                const_term: calib.sha256_fixed as i64,
-                linear_term: calib.sha256_per_byte as i64,
-            };
-            let _ = budget.set_model(ContractCostType::ComputeSha256Hash, sha256_model);
-
-            // Keccak256
-            let keccak256_model = CostModel {
-                const_term: calib.keccak256_fixed as i64,
-                linear_term: calib.keccak256_per_byte as i64,
-            };
-            let _ = budget.set_model(ContractCostType::ComputeKeccak256Hash, keccak256_model);
-
-            // Ed25519
-            let ed25519_model = CostModel {
-                const_term: calib.ed25519_fixed as i64,
-                linear_term: 0,
-            };
-            let _ = budget.set_model(ContractCostType::VerifyEd25519Sig, ed25519_model);
-            */
+            // The budget model API has changed in newer versions
+            // For now, we'll skip custom budget configuration
         }
 
         if let Some((_cpu, _mem)) = budget_limits {
