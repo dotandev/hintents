@@ -1,0 +1,26 @@
+name: License Header Audit
+
+on:
+  push:
+    branches:
+      - main
+      - "feature-*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-licenses:
+    name: Audit license headers
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make script executable
+        run: chmod +x ./fix_all_licenses.sh
+
+      - name: Check license headers
+        run: ./fix_all_licenses.sh --check

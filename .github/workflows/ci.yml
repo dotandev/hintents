@@ -71,7 +71,17 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          args: --config=.golangci.yml --timeout=5m
+          args: --config=.golangci.yml --timeout=5m --max-issues-per-linter=0 --max-same-issues=0
+
+      - name: Check for unused variables
+        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.23'
+        run: |
+          echo "Checking for unused variables and code..."
+          go vet ./... || {
+            echo "[FAIL] go vet found issues"
+            exit 1
+          }
+          echo " No unused variables detected"
 
       - name: Run tests
         run: go test -v -race ./...
@@ -113,7 +123,7 @@ jobs:
     needs: license-headers
     strategy:
       matrix:
-        rust-version: [stable, "1.78"]
+        rust-version: [stable, "1.85.0"]
     defaults:
       run:
         working-directory: simulator
@@ -151,9 +161,24 @@ jobs:
           }
           echo " All Rust files are properly formatted"
 
-      - name: Run Clippy
+      - name: Run Clippy (strict mode)
         if: matrix.rust-version == 'stable'
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: |
+          echo "Running Clippy with strict warnings..."
+          cargo clippy --all-targets --all-features -- \
+            -D warnings \
+            -D clippy::all \
+            -D unused-variables \
+            -D unused-imports \
+            -D unused-mut \
+            -D dead-code \
+            -D unused-assignments \
+            -W clippy::pedantic \
+            -W clippy::nursery || {
+            echo "[FAIL] Clippy found issues that must be fixed"
+            exit 1
+          }
+          echo " Clippy checks passed"
 
       - name: Run tests
         run: cargo test --verbose

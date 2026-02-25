@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/dotandev/hintents/internal/cache"
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -65,12 +66,12 @@ var cacheStatusCmd = &cobra.Command{
 
 		size, err := manager.GetCacheSize()
 		if err != nil {
-			return fmt.Errorf("Error: failed to calculate cache size: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to calculate cache size: %v", err))
 		}
 
 		files, err := manager.ListCachedFiles()
 		if err != nil {
-			return fmt.Errorf("Error: failed to list cache files: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to list cache files: %v", err))
 		}
 
 		fmt.Printf("Cache directory: %s\n", cacheDir)
@@ -109,7 +110,7 @@ Use --force to skip the confirmation prompt.`,
 
 		status, err := manager.Clean(cacheForceFlag)
 		if err != nil {
-			return fmt.Errorf("Error: cache cleanup failed: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("cache cleanup failed: %v", err))
 		}
 
 		if status.FilesDeleted == 0 && status.OriginalSize > 0 {
@@ -147,7 +148,7 @@ var cacheClearCmd = &cobra.Command{
 			fmt.Print("Are you sure? (yes/no): ")
 			var response string
 			if _, err := fmt.Scanln(&response); err != nil {
-				return fmt.Errorf("Error: failed to read confirmation input: %w", err)
+				return errors.WrapValidationError(fmt.Sprintf("failed to read confirmation input: %v", err))
 			}
 			if response != "yes" && response != "y" {
 				fmt.Println("Cache clear cancelled")
@@ -157,7 +158,7 @@ var cacheClearCmd = &cobra.Command{
 
 		err := os.RemoveAll(cacheDir)
 		if err != nil {
-			return fmt.Errorf("Error: failed to clear cache directory: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to clear cache directory: %v", err))
 		}
 
 		fmt.Println("Cache cleared successfully")

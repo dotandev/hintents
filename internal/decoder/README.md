@@ -111,7 +111,7 @@ $ erst debug abc123...def789
 Transaction Result: Insufficient Balance (tx_insufficient_balance)
 Explanation: Fee would bring account below minimum reserve. Account needs more XLM
 
-💡 Tip: Add more XLM to your account to cover the transaction fee and maintain the minimum balance.
+[INFO] Tip: Add more XLM to your account to cover the transaction fee and maintain the minimum balance.
 ```
 
 ## Architecture

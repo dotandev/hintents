@@ -4,7 +4,11 @@
 package simulator
 
 import (
+	"errors"
+	"strings"
 	"testing"
+
+	internalErrors "github.com/dotandev/hintents/internal/errors"
 )
 
 func TestSimulationRequestBuilder_Basic(t *testing.T) {
@@ -98,13 +102,13 @@ func TestSimulationRequestBuilder_MissingEnvelopeXDR(t *testing.T) {
 		WithResultMetaXDR("result").
 		Build()
 
-	if err == nil {
-		t.Fatal("expected error for missing envelope XDR, got nil")
+	if !errors.Is(err, internalErrors.ErrValidationFailed) {
+		t.Errorf("expected ErrValidationFailed, got: %v", err)
 	}
 
-	expectedError := "envelope XDR is required"
-	if err.Error() != expectedError {
-		t.Errorf("expected error '%s', got: %v", expectedError, err)
+	expectedSubError := "envelope XDR is required"
+	if !strings.Contains(err.Error(), expectedSubError) {
+		t.Errorf("expected error to contain '%s', got: %v", expectedSubError, err)
 	}
 }
 
@@ -119,9 +123,13 @@ func TestSimulationRequestBuilder_MissingResultMetaXDR(t *testing.T) {
 		t.Fatal("expected error for missing result meta XDR, got nil")
 	}
 
-	expectedError := "result meta XDR is required"
-	if err.Error() != expectedError {
-		t.Errorf("expected error '%s', got: %v", expectedError, err)
+	if !errors.Is(err, internalErrors.ErrValidationFailed) {
+		t.Errorf("expected ErrValidationFailed, got: %v", err)
+	}
+
+	expectedSubError := "result meta XDR is required"
+	if !strings.Contains(err.Error(), expectedSubError) {
+		t.Errorf("expected error to contain '%s', got: %v", expectedSubError, err)
 	}
 }
 

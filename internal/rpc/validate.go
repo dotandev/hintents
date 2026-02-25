@@ -6,28 +6,30 @@ package rpc
 import (
 	"fmt"
 	"net/url"
+
+	"github.com/dotandev/hintents/internal/errors"
 )
 
 func isValidURL(urlStr string) error {
 	if urlStr == "" {
-		return fmt.Errorf("URL cannot be empty")
+		return errors.WrapValidationError("URL cannot be empty")
 	}
 
 	parsed, err := url.Parse(urlStr)
 	if err != nil {
-		return fmt.Errorf("invalid URL format: %w", err)
+		return errors.WrapValidationError(fmt.Sprintf("invalid URL format: %v", err))
 	}
 
 	if parsed.Scheme == "" {
-		return fmt.Errorf("URL must include scheme (http:// or https://)")
+		return errors.WrapValidationError("URL must include scheme (http:// or https://)")
 	}
 
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("URL scheme must be http or https, got %q", parsed.Scheme)
+		return errors.WrapValidationError(fmt.Sprintf("URL scheme must be http or https, got %q", parsed.Scheme))
 	}
 
 	if parsed.Host == "" {
-		return fmt.Errorf("URL must include a host")
+		return errors.WrapValidationError("URL must include a host")
 	}
 
 	return nil
@@ -35,35 +37,35 @@ func isValidURL(urlStr string) error {
 
 func ValidateNetworkConfig(config NetworkConfig) error {
 	if config.Name == "" {
-		return fmt.Errorf("network name is required")
+		return errors.WrapValidationError("network name is required")
 	}
 
 	if config.NetworkPassphrase == "" {
-		return fmt.Errorf("network passphrase is required")
+		return errors.WrapValidationError("network passphrase is required")
 	}
 
 	if config.HorizonURL == "" && config.SorobanRPCURL == "" {
-		return fmt.Errorf("at least one of HorizonURL or SorobanRPCURL is required")
+		return errors.WrapValidationError("at least one of HorizonURL or SorobanRPCURL is required")
 	}
 
 	if config.HorizonURL != "" {
 		if err := isValidURL(config.HorizonURL); err != nil {
-			return fmt.Errorf("invalid HorizonURL: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("invalid HorizonURL: %v", err))
 		}
 	}
 
 	if config.SorobanRPCURL != "" {
 		if err := isValidURL(config.SorobanRPCURL); err != nil {
-			return fmt.Errorf("invalid SorobanRPCURL: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("invalid SorobanRPCURL: %v", err))
 		}
 	}
 
 	if config.HorizonURL == "" && config.SorobanRPCURL == "" {
-		return fmt.Errorf("at least one of HorizonURL or SorobanRPCURL must be provided")
+		return errors.WrapValidationError("at least one of HorizonURL or SorobanRPCURL must be provided")
 	}
 
 	if config.NetworkPassphrase == "" {
-		return fmt.Errorf("network passphrase is required")
+		return errors.WrapValidationError("network passphrase is required")
 	}
 
 	return nil

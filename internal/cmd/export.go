@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -20,19 +21,19 @@ var exportCmd = &cobra.Command{
 	Long:  `Export debugging data, such as state snapshots, from the currently active session.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if exportSnapshotFlag == "" {
-			return fmt.Errorf("must specify --snapshot <file>")
+			return errors.WrapCliArgumentRequired("snapshot")
 		}
 
 		// Get current session
 		data := GetCurrentSession()
 		if data == nil {
-			return fmt.Errorf("no active session. Run 'erst debug <tx-hash>' first")
+			return errors.WrapSimulationLogicError("no active session. Run 'erst debug <tx-hash>' first")
 		}
 
 		// Unwrap simulation request to get ledger entries
 		var simReq simulator.SimulationRequest
 		if err := json.Unmarshal([]byte(data.SimRequestJSON), &simReq); err != nil {
-			return fmt.Errorf("failed to parse session data: %w", err)
+			return errors.WrapUnmarshalFailed(err, "session data")
 		}
 
 		if len(simReq.LedgerEntries) == 0 {
@@ -44,7 +45,7 @@ var exportCmd = &cobra.Command{
 
 		// Save
 		if err := snapshot.Save(exportSnapshotFlag, snap); err != nil {
-			return fmt.Errorf("failed to save snapshot: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to save snapshot: %v", err))
 		}
 
 		fmt.Printf("Snapshot exported to %s (%d entries)\n", exportSnapshotFlag, len(snap.LedgerEntries))

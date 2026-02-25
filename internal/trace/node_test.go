@@ -166,3 +166,49 @@ func TestTraceNode_Depth(t *testing.T) {
 	assert.Equal(t, 1, child1.Depth)
 	assert.Equal(t, 2, grandchild1.Depth)
 }
+
+func TestTraceNode_ApplyHeuristics(t *testing.T) {
+	root := NewTraceNode("root", "simulation")
+
+	// Add 15 similar children
+	for i := 0; i < 15; i++ {
+		child := NewTraceNode(fmt.Sprintf("child-%d", i), "contract_call")
+		child.ContractID = "CONTRACT"
+		child.Function = "func"
+		root.AddChild(child)
+	}
+
+	root.ApplyHeuristics()
+
+	// Should have 5 original children + 1 collapsed child
+	assert.Equal(t, 6, len(root.Children))
+	assert.Equal(t, "child-0", root.Children[0].ID)
+	assert.Equal(t, "child-4", root.Children[4].ID)
+	assert.Equal(t, "collapsed", root.Children[5].Type)
+	assert.Equal(t, "Show 10 more elements", root.Children[5].EventData)
+	assert.False(t, root.Children[5].Expanded)
+
+	// Collapsed node should have 10 children
+	assert.Equal(t, 10, len(root.Children[5].Children))
+	assert.Equal(t, "child-5", root.Children[5].Children[0].ID)
+	assert.Equal(t, "child-14", root.Children[5].Children[9].ID)
+func TestTraceNode_IsCrossContractCall(t *testing.T) {
+	parent := NewTraceNode("parent", "contract_call")
+	parent.ContractID = "CABC"
+
+	sameContract := NewTraceNode("same", "contract_call")
+	sameContract.ContractID = "CABC"
+	parent.AddChild(sameContract)
+
+	diffContract := NewTraceNode("diff", "contract_call")
+	diffContract.ContractID = "CXYZ"
+	parent.AddChild(diffContract)
+
+	noContract := NewTraceNode("none", "host_fn")
+	parent.AddChild(noContract)
+
+	assert.False(t, parent.IsCrossContractCall(), "root has no parent")
+	assert.False(t, sameContract.IsCrossContractCall(), "same contract as parent")
+	assert.True(t, diffContract.IsCrossContractCall(), "different contract from parent")
+	assert.False(t, noContract.IsCrossContractCall(), "no contract ID")
+}

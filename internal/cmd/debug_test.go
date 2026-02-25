@@ -179,6 +179,51 @@ func TestDebugCommand_Setup(t *testing.T) {
 
 	rpcURLFlag := debugCmd.Flags().Lookup("rpc-url")
 	assert.NotNil(t, rpcURLFlag)
+
+	mockBaseFee := debugCmd.Flags().Lookup("mock-base-fee")
+	assert.NotNil(t, mockBaseFee)
+
+	mockGasPrice := debugCmd.Flags().Lookup("mock-gas-price")
+	assert.NotNil(t, mockGasPrice)
+}
+
+func TestApplySimulationFeeMocks(t *testing.T) {
+	prevBaseFee := mockBaseFeeFlag
+	prevGasPrice := mockGasPriceFlag
+	t.Cleanup(func() {
+		mockBaseFeeFlag = prevBaseFee
+		mockGasPriceFlag = prevGasPrice
+	})
+
+	mockBaseFeeFlag = 321
+	mockGasPriceFlag = 99
+
+	req := &simulator.SimulationRequest{}
+	applySimulationFeeMocks(req)
+
+	if assert.NotNil(t, req.MockBaseFee) {
+		assert.Equal(t, uint32(321), *req.MockBaseFee)
+	}
+	if assert.NotNil(t, req.MockGasPrice) {
+		assert.Equal(t, uint64(99), *req.MockGasPrice)
+	}
+}
+
+func TestDeprecatedHostFunctionDetection(t *testing.T) {
+	name, ok := findDeprecatedHostFunction(`topic: Symbol("vec_unpack_to_linear_memory")`)
+	assert.True(t, ok)
+	assert.Equal(t, "vec_unpack_to_linear_memory", name)
+
+	_, ok = findDeprecatedHostFunction(`topic: Symbol("require_auth")`)
+	assert.False(t, ok)
+
+	event := simulator.DiagnosticEvent{
+		Topics: []string{`Symbol("fn_call")`},
+		Data:   `Symbol("bytes_copy_to_linear_memory")`,
+	}
+	name, ok = deprecatedHostFunctionInDiagnosticEvent(event)
+	assert.True(t, ok)
+	assert.Equal(t, "bytes_copy_to_linear_memory", name)
 }
 
 func TestMockRunner_ImplementsInterface(t *testing.T) {

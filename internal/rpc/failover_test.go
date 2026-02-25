@@ -43,5 +43,8 @@ func TestClient_GetTransaction_Failover_Logic(t *testing.T) {
 	_, err := client.GetTransaction(ctx, "abc")
 
 	assert.Error(t, err)
+	fallbackErr, ok := err.(*AllNodesFailedError)
+	assert.True(t, ok, "Error should be of type *AllNodesFailedError")
+	assert.Equal(t, 2, len(fallbackErr.Failures), "Should have recorded 2 failures")
 	assert.Contains(t, err.Error(), "all RPC endpoints failed")
 }

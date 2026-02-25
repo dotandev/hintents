@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/spf13/cobra"
@@ -43,10 +44,8 @@ Example:
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Validate network flag
 		switch rpc.Network(dryRunNetworkFlag) {
-		case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
-			return nil
 		default:
-			return fmt.Errorf("invalid network: %s. Must be one of: testnet, mainnet, futurenet", dryRunNetworkFlag)
+			return errors.WrapInvalidNetwork(dryRunNetworkFlag)
 		}
 	},
 	RunE: runDryRun,
@@ -64,21 +63,21 @@ func runDryRun(cmd *cobra.Command, args []string) error {
 	path := args[0]
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("failed to read tx file: %w", err)
+		return errors.WrapValidationError(fmt.Sprintf("failed to read tx file: %v", err))
 	}
 	envXdrB64 := string(bytesTrimSpace(b))
 	if envXdrB64 == "" {
-		return fmt.Errorf("tx file is empty")
+		return errors.WrapValidationError("tx file is empty")
 	}
 
 	// Validate envelope is parseable
 	envBytes, err := base64.StdEncoding.DecodeString(envXdrB64)
 	if err != nil {
-		return fmt.Errorf("failed to decode envelope base64: %w", err)
+		return errors.WrapUnmarshalFailed(err, "envelope base64")
 	}
 	var envelope xdr.TransactionEnvelope
 	if err := xdr.SafeUnmarshal(envBytes, &envelope); err != nil {
-		return fmt.Errorf("failed to unmarshal TransactionEnvelope: %w", err)
+		return errors.WrapUnmarshalFailed(err, "TransactionEnvelope")
 	}
 
 	// Create RPC client
@@ -92,7 +91,7 @@ func runDryRun(cmd *cobra.Command, args []string) error {
 
 	client, err := rpc.NewClient(opts...)
 	if err != nil {
-		return fmt.Errorf("failed to create client: %w", err)
+		return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
 	}
 
 	ctx := cmd.Context()
@@ -119,16 +118,16 @@ func runDryRun(cmd *cobra.Command, args []string) error {
 	// Fallback: local simulator heuristic (best-effort)
 	keys, err := extractLedgerKeysFromEnvelope(&envelope)
 	if err != nil {
-		return fmt.Errorf("failed to extract ledger keys from envelope: %w", err)
+		return errors.WrapSimulationLogicError(fmt.Sprintf("failed to extract ledger keys from envelope: %v", err))
 	}
 	ledgerEntries, err := client.GetLedgerEntries(ctx, keys)
 	if err != nil {
-		return fmt.Errorf("failed to fetch ledger entries: %w", err)
+		return errors.WrapRPCConnectionFailed(err)
 	}
 
 	runner, err := simulator.NewRunner("", false)
 	if err != nil {
-		return fmt.Errorf("failed to initialize simulator: %w", err)
+		return errors.WrapSimulatorNotFound(err.Error())
 	}
 
 	// The current Rust simulator requires a non-empty result_meta_xdr.
@@ -141,11 +140,11 @@ func runDryRun(cmd *cobra.Command, args []string) error {
 
 	resp, err := runner.Run(simReq)
 	if err != nil {
-		return fmt.Errorf("simulation failed: %w", err)
+		return errors.WrapSimulationFailed(err, "")
 	}
 
 	if resp.BudgetUsage == nil {
-		return fmt.Errorf("simulator did not return budget usage")
+		return errors.WrapSimulationLogicError("simulator did not return budget usage")
 	}
 
 	est, err := estimateFeeFromBudget(*resp.BudgetUsage)
@@ -167,7 +166,7 @@ func estimateFeeFromBudget(b simulator.BudgetUsage) (int64, error) {
 	cpu := int64(b.CPUInstructions / 10000)   // 1 stroop per 10k insns
 	mem := int64(b.MemoryBytes / (64 * 1024)) // 1 stroop per 64KiB
 	if cpu < 0 || mem < 0 {
-		return 0, fmt.Errorf("invalid budget usage")
+		return 0, errors.WrapSimulationLogicError("invalid budget usage")
 	}
 	return base + cpu + mem, nil
 }

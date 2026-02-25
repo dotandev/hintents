@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { xdr } from '@stellar/stellar-sdk';
 
 export interface LedgerKey {

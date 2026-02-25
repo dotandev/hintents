@@ -14,6 +14,7 @@ func TestBuilderCreateDefaultClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("expected non-nil client")
+		return
 	}
 	if client.Network != Mainnet {
 		t.Errorf("expected default network Mainnet, got %v", client.Network)
@@ -149,6 +150,7 @@ func TestDeprecatedNewClientDefault(t *testing.T) {
 	client := NewClientDefault(Testnet, "")
 	if client == nil {
 		t.Fatal("expected non-nil client")
+		return
 	}
 	if client.Network != Testnet {
 		t.Errorf("expected network Testnet, got %v", client.Network)
@@ -160,6 +162,7 @@ func TestDeprecatedNewClientWithURLOption(t *testing.T) {
 	client := NewClientWithURLOption(url, Testnet, "")
 	if client == nil {
 		t.Fatal("expected non-nil client")
+		return
 	}
 	if client.HorizonURL != url {
 		t.Errorf("expected HorizonURL %s, got %s", url, client.HorizonURL)
@@ -171,6 +174,7 @@ func TestDeprecatedNewClientWithURLsOption(t *testing.T) {
 	client := NewClientWithURLsOption(urls, Testnet, "")
 	if client == nil {
 		t.Fatal("expected non-nil client")
+		return
 	}
 	if len(client.AltURLs) != len(urls) {
 		t.Errorf("expected %d AltURLs, got %d", len(urls), len(client.AltURLs))
@@ -185,6 +189,7 @@ func TestDeprecatedNewCustomClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("expected non-nil client")
+		return
 	}
 	if client.Config.Name != config.Name {
 		t.Errorf("expected config name %s, got %s", config.Name, client.Config.Name)

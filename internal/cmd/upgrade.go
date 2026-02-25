@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/spf13/cobra"
@@ -32,13 +33,13 @@ Example:
 		txHash := args[0]
 
 		if newWasmPath == "" {
-			return fmt.Errorf("flag --new-wasm is required")
+			return errors.WrapCliArgumentRequired("new-wasm")
 		}
 
 		// 1. Read New WASM
 		newWasmBytes, err := os.ReadFile(newWasmPath)
 		if err != nil {
-			return fmt.Errorf("failed to read WASM file: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to read WASM file: %v", err))
 		}
 		fmt.Printf("Loaded new WASM code: %d bytes\n", len(newWasmBytes))
 
@@ -52,44 +53,44 @@ Example:
 
 		client, err := rpc.NewClient(opts...)
 		if err != nil {
-			return fmt.Errorf("failed to create client: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
 		}
 
 		// 3. Fetch Transaction
 		fmt.Printf("Fetching transaction: %s from %s\n", txHash, networkFlag)
 		resp, err := client.GetTransaction(cmd.Context(), txHash)
 		if err != nil {
-			return fmt.Errorf("failed to fetch transaction: %w", err)
+			return errors.WrapRPCConnectionFailed(err)
 		}
 
 		// 4. Extract Keys & Fetch State
 		keys, err := extractLedgerKeys(resp.ResultMetaXdr)
 		if err != nil {
-			return fmt.Errorf("failed to extract ledger keys: %w", err)
+			return errors.WrapUnmarshalFailed(err, "result meta")
 		}
 
 		entries, err := client.GetLedgerEntries(cmd.Context(), keys)
 		if err != nil {
-			return fmt.Errorf("failed to fetch ledger entries: %w", err)
+			return errors.WrapRPCConnectionFailed(err)
 		}
 		fmt.Printf("Fetched %d ledger entries\n", len(entries))
 
 		// 5. Identify Contract ID and Inject New Code
 		contractID, err := getContractIDFromEnvelope(resp.EnvelopeXdr)
 		if err != nil {
-			return fmt.Errorf("failed to identify contract from transaction: %w", err)
+			return errors.WrapSimulationLogicError(fmt.Sprintf("failed to identify contract from transaction: %v", err))
 		}
 		fmt.Printf("Identified target contract: %x\n", *contractID)
 
 		if err := injectNewCode(entries, *contractID, newWasmBytes); err != nil {
-			return fmt.Errorf("failed to inject new code: %w", err)
+			return errors.WrapSimulationLogicError(fmt.Sprintf("failed to inject new code: %v", err))
 		}
 		fmt.Println("Injected new WASM code into simulation state.")
 
 		// 6. Run Simulation
 		runner, err := simulator.NewRunner("", false)
 		if err != nil {
-			return fmt.Errorf("failed to initialize simulator runner: %w", err)
+			return errors.WrapSimulatorNotFound(err.Error())
 		}
 
 		simReq := &simulator.SimulationRequest{
@@ -101,7 +102,7 @@ Example:
 		fmt.Println("Running simulation with upgraded code...")
 		result, err := runner.Run(simReq)
 		if err != nil {
-			return fmt.Errorf("simulation failed: %w", err)
+			return errors.WrapSimulationFailed(err, "")
 		}
 
 		printSimulationResult("Upgraded Contract", result)
@@ -152,7 +153,7 @@ func getContractIDFromEnvelope(envelopeXdr string) (*xdr.Hash, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("no InvokeContract operation found in transaction")
+	return nil, errors.WrapSimulationLogicError("no InvokeContract operation found in transaction")
 }
 
 func injectNewCode(entries map[string]string, contractID xdr.Hash, code []byte) error {

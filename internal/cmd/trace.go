@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/trace"
+	"github.com/dotandev/hintents/internal/visualizer"
 	"github.com/spf13/cobra"
 )
 
 var (
-	traceFile string
+	traceFile      string
+	traceThemeFlag string
 )
 
 var traceCmd = &cobra.Command{
@@ -31,29 +34,36 @@ Example:
   erst trace --file debug_trace.json`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Apply theme if specified, otherwise auto-detect
+		if traceThemeFlag != "" {
+			visualizer.SetTheme(visualizer.Theme(traceThemeFlag))
+		} else {
+			visualizer.SetTheme(visualizer.DetectTheme())
+		}
+
 		var filename string
 		if len(args) > 0 {
 			filename = args[0]
 		} else if traceFile != "" {
 			filename = traceFile
 		} else {
-			return fmt.Errorf("trace file required. Use: erst trace <file> or --file <file>")
+			return errors.WrapCliArgumentRequired("file")
 		}
 
 		// Check if file exists
 		if _, err := os.Stat(filename); os.IsNotExist(err) {
-			return fmt.Errorf("trace file not found: %s", filename)
+			return errors.WrapValidationError(fmt.Sprintf("trace file not found: %s", filename))
 		}
 
 		// Load trace from file
 		data, err := os.ReadFile(filename)
 		if err != nil {
-			return fmt.Errorf("failed to read trace file: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to read trace file: %v", err))
 		}
 
 		executionTrace, err := trace.FromJSON(data)
 		if err != nil {
-			return fmt.Errorf("failed to parse trace file: %w", err)
+			return errors.WrapUnmarshalFailed(err, "trace")
 		}
 
 		// Start interactive viewer
@@ -64,5 +74,6 @@ Example:
 
 func init() {
 	traceCmd.Flags().StringVarP(&traceFile, "file", "f", "", "Trace file to load")
+	traceCmd.Flags().StringVar(&traceThemeFlag, "theme", "", "Color theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
 	rootCmd.AddCommand(traceCmd)
 }

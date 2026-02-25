@@ -6,6 +6,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/dotandev/hintents/internal/rpc"
@@ -15,8 +16,13 @@ func TestAddAndGetCustomNetwork(t *testing.T) {
 	// Use a temporary directory for testing
 	tmpDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
+	originalUP := os.Getenv("USERPROFILE")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	os.Setenv("USERPROFILE", tmpDir)
+	defer func() {
+		os.Setenv("HOME", originalHome)
+		os.Setenv("USERPROFILE", originalUP)
+	}()
 
 	testConfig := rpc.NetworkConfig{
 		Name:              "local-dev",
@@ -48,8 +54,13 @@ func TestAddAndGetCustomNetwork(t *testing.T) {
 func TestListCustomNetworks(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
+	originalUP := os.Getenv("USERPROFILE")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	os.Setenv("USERPROFILE", tmpDir)
+	defer func() {
+		os.Setenv("HOME", originalHome)
+		os.Setenv("USERPROFILE", originalUP)
+	}()
 
 	// Add multiple networks
 	networks := []string{"local-dev", "staging", "private-net"}
@@ -78,8 +89,13 @@ func TestListCustomNetworks(t *testing.T) {
 func TestRemoveCustomNetwork(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
+	originalUP := os.Getenv("USERPROFILE")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	os.Setenv("USERPROFILE", tmpDir)
+	defer func() {
+		os.Setenv("HOME", originalHome)
+		os.Setenv("USERPROFILE", originalUP)
+	}()
 
 	testConfig := rpc.NetworkConfig{
 		Name:              "temp-network",
@@ -107,8 +123,13 @@ func TestRemoveCustomNetwork(t *testing.T) {
 func TestConfigFilePermissions(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
+	originalUP := os.Getenv("USERPROFILE")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	os.Setenv("USERPROFILE", tmpDir)
+	defer func() {
+		os.Setenv("HOME", originalHome)
+		os.Setenv("USERPROFILE", originalUP)
+	}()
 
 	testConfig := rpc.NetworkConfig{
 		Name:              "secure-net",
@@ -127,9 +148,12 @@ func TestConfigFilePermissions(t *testing.T) {
 	}
 
 	// Check that file has restrictive permissions (0600)
-	mode := info.Mode().Perm()
-	expected := os.FileMode(0600)
-	if mode != expected {
-		t.Errorf("Expected file permissions %o, got %o", expected, mode)
+	// Skip on Windows as permissions work differently
+	if runtime.GOOS != "windows" {
+		mode := info.Mode().Perm()
+		expected := os.FileMode(0600)
+		if mode != expected {
+			t.Errorf("Expected file permissions %o, got %o", expected, mode)
+		}
 	}
 }

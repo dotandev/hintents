@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
+	"github.com/dotandev/hintents/internal/errors"
 )
 
 // Verify checks the integrity and signature of an AuditLog
@@ -19,33 +21,33 @@ func Verify(log *AuditLog) error {
 	// it should be deterministic for this tool's usage.
 	payloadBytes, err := json.Marshal(log.Payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
+		return errors.WrapMarshalFailed(err)
 	}
 
 	hash := sha256.Sum256(payloadBytes)
 	calculatedHashHex := hex.EncodeToString(hash[:])
 
 	if calculatedHashHex != log.TraceHash {
-		return fmt.Errorf("trace hash mismatch: expected %s, got %s", log.TraceHash, calculatedHashHex)
+		return errors.WrapAuditLogInvalid(fmt.Sprintf("trace hash mismatch: expected %s, got %s", log.TraceHash, calculatedHashHex))
 	}
 
 	// 2. Verify Signature
 	pubKeyBytes, err := hex.DecodeString(log.PublicKey)
 	if err != nil {
-		return fmt.Errorf("invalid public key hex: %w", err)
+		return errors.WrapAuditLogInvalid(fmt.Sprintf("invalid public key hex: %v", err))
 	}
 	if len(pubKeyBytes) != ed25519.PublicKeySize {
-		return fmt.Errorf("invalid public key size")
+		return errors.WrapAuditLogInvalid("invalid public key size")
 	}
 
 	sigBytes, err := hex.DecodeString(log.Signature)
 	if err != nil {
-		return fmt.Errorf("invalid signature hex: %w", err)
+		return errors.WrapAuditLogInvalid(fmt.Sprintf("invalid signature hex: %v", err))
 	}
 
 	// Verify the signature against the hash of the payload
 	if !ed25519.Verify(ed25519.PublicKey(pubKeyBytes), hash[:], sigBytes) {
-		return fmt.Errorf("signature verification failed")
+		return errors.WrapAuditLogInvalid("signature verification failed")
 	}
 
 	return nil

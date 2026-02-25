@@ -41,7 +41,7 @@ export function registerDebugCommand(program: Command): void {
                 const rpcClient = new FallbackRPCClient(config);
 
                 // Standard output
-                logger.info(`\n🔍 Debugging transaction: ${transaction}\n`);
+                logger.info(`\n[SEARCH] Debugging transaction: ${transaction}\n`);
 
                 // Verbose: Show configuration
                 logger.verbose(LogCategory.INFO, 'Configuration');
@@ -100,7 +100,7 @@ export function registerDebugCommand(program: Command): void {
 
                 const status = rpcClient.getHealthStatus();
 
-                console.log('\n📊 RPC Endpoint Status:\n');
+                console.log('\n[STATS] RPC Endpoint Status:\n');
                 status.forEach((ep, idx) => {
                     const statusIcon = ep.healthy ? '' : '[FAIL]';
                     const circuit = ep.circuitOpen ? ' [CIRCUIT OPEN]' : '';

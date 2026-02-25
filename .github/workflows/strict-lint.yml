@@ -1,0 +1,142 @@
+name: Strict Linting
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================
+  # Go Strict Linting
+  # ============================================
+  go-lint:
+    name: Go Strict Linting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "[FAIL] Go files are not formatted. Run 'go fmt ./...' to fix."
+            gofmt -d .
+            exit 1
+          fi
+          echo " All Go files are properly formatted"
+
+      - name: Run go vet
+        run: |
+          go vet ./... || {
+            echo "[FAIL] go vet found issues"
+            exit 1
+          }
+          echo " go vet passed"
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --config=.golangci.yml --timeout=5m --max-issues-per-linter=0 --max-same-issues=0
+
+      - name: Check for unused variables
+        run: |
+          echo "Checking for unused variables and code..."
+          if go vet ./... 2>&1 | grep -i "declared and not used\|unused variable\|unused parameter"; then
+            echo "[FAIL] Unused variables detected"
+            exit 1
+          fi
+          echo " No unused variables detected"
+
+  # ============================================
+  # Rust Strict Linting
+  # ============================================
+  rust-lint:
+    name: Rust Strict Linting
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: simulator
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            simulator/target/
+          key: ${{ runner.os }}-cargo-strict-${{ hashFiles('simulator/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-strict-
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: |
+          cargo fmt --check || {
+            echo "[FAIL] Rust files are not formatted. Run 'cargo fmt' to fix."
+            exit 1
+          }
+          echo " All Rust files are properly formatted"
+
+      - name: Run Clippy (strict mode)
+        run: |
+          echo "Running Clippy with strict warnings..."
+          cargo clippy --all-targets --all-features -- \
+            -D warnings \
+            -D clippy::all \
+            -D unused-variables \
+            -D unused-imports \
+            -D unused-mut \
+            -D dead-code \
+            -D unused-assignments \
+            -W clippy::pedantic \
+            -W clippy::nursery || {
+            echo "[FAIL] Clippy found issues that must be fixed"
+            exit 1
+          }
+          echo " Clippy checks passed"
+
+  # ============================================
+  # Summary
+  # ============================================
+  lint-summary:
+    name: Linting Summary
+    runs-on: ubuntu-latest
+    needs: [go-lint, rust-lint]
+    if: always()
+
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.go-lint.result }}" != "success" ] || [ "${{ needs.rust-lint.result }}" != "success" ]; then
+            echo "[FAIL] Strict linting checks failed"
+            echo "Go linting: ${{ needs.go-lint.result }}"
+            echo "Rust linting: ${{ needs.rust-lint.result }}"
+            exit 1
+          fi
+          echo " All strict linting checks passed!"

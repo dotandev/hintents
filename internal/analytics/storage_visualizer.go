@@ -15,7 +15,7 @@ type StorageGrowthReport struct {
 }
 
 func PrintStorageReport(report *StorageGrowthReport, fee int64) {
-	fmt.Println("📦 Contract Storage Growth Report")
+	fmt.Println("[PKG] Contract Storage Growth Report")
 	fmt.Println("--------------------------------")
 	fmt.Printf("Before: %d bytes\n", report.BeforeBytes)
 	fmt.Printf("After:  %d bytes\n", report.AfterBytes)

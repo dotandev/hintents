@@ -3,8 +3,11 @@
 # Environment variables override these settings
 # CLI flags override everything
 
-# RPC URL for the Stellar network
+# RPC URL for the Stellar network (single URL)
 rpc_url = "https://soroban-testnet.stellar.org"
+
+# Multi-RPC URLs for automatic fallback (array syntax)
+# rpc_urls = ["https://rpc1.stellar.org", "https://rpc2.stellar.org"]
 
 # Network: public, testnet, futurenet, or standalone
 network = "testnet"
@@ -17,3 +20,23 @@ log_level = "info"
 
 # Cache directory for storing traces and snapshots
 # cache_path = "~/.erst/cache"
+
+# Opt-in anonymous crash reporting.
+# When enabled, fatal panics and unhandled errors send a minimal report
+# (error message, stack trace, OS/arch, version) to the maintainer.
+# No transaction data or personal information is ever included.
+# Can also be set via ERST_CRASH_REPORTING=true in the environment.
+# crash_reporting = false
+
+# Sentry DSN for crash reporting (alternative or complement to crash_endpoint).
+# Obtain from your Sentry project settings. Leave commented to disable Sentry.
+# Can also be set via ERST_SENTRY_DSN in the environment.
+# crash_sentry_dsn = "https://<key>@<org>.ingest.sentry.io/<project>"
+
+# Override the crash report collection endpoint (optional).
+# Defaults to https://crash.erst.dev/v1/report when crash_reporting is true
+# and no Sentry DSN is set. Can also be set via ERST_CRASH_ENDPOINT.
+# crash_endpoint = "https://crash.erst.dev/v1/report"
+# Audit HSM Configuration
+# ERST_PKCS11_MODULE = "/usr/lib/softhsm/libsofthsm2.so"
+# ERST_PKCS11_MAX_RPM = 1000 # Max requests per minute to protect HSM

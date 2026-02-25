@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"time"
 
+	"github.com/dotandev/hintents/internal/errors"
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -81,7 +82,7 @@ func FromHorizonLedger(hl hProtocol.Ledger) *LedgerHeaderResponse {
 func EncodeLedgerKey(key xdr.LedgerKey) (string, error) {
 	xdrBytes, err := key.MarshalBinary()
 	if err != nil {
-		return "", err
+		return "", errors.WrapMarshalFailed(err)
 	}
 	return base64.StdEncoding.EncodeToString(xdrBytes), nil
 }
@@ -90,7 +91,7 @@ func EncodeLedgerKey(key xdr.LedgerKey) (string, error) {
 func EncodeLedgerEntry(entry xdr.LedgerEntry) (string, error) {
 	xdrBytes, err := entry.MarshalBinary()
 	if err != nil {
-		return "", err
+		return "", errors.WrapMarshalFailed(err)
 	}
 	return base64.StdEncoding.EncodeToString(xdrBytes), nil
 }
@@ -101,12 +102,12 @@ func ExtractLedgerEntriesFromMeta(resultMetaXDR string) (map[string]string, erro
 	// Decode the result meta XDR
 	metaBytes, err := base64.StdEncoding.DecodeString(resultMetaXDR)
 	if err != nil {
-		return nil, err
+		return nil, errors.WrapUnmarshalFailed(err, "result meta")
 	}
 
 	var resultMeta xdr.TransactionResultMeta
 	if err := resultMeta.UnmarshalBinary(metaBytes); err != nil {
-		return nil, err
+		return nil, errors.WrapUnmarshalFailed(err, "result meta binary")
 	}
 
 	entries := make(map[string]string)

@@ -1,7 +1,10 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(dead_code)]
+
 use crate::gas_optimizer::OptimizationReport;
+use crate::stack_trace::WasmStackTrace;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -12,10 +15,28 @@ pub struct SimulationRequest {
     pub ledger_entries: Option<HashMap<String, String>>,
     pub contract_wasm: Option<String>,
     pub enable_optimization_advisor: Option<bool>,
+    pub wasm_path: Option<String>, // Added for local loading
+    pub enable_optimization_advisor: bool,
     pub profile: Option<bool>,
+    /// RFC 3339 timestamp supplied by the caller.  Preserved for future use
+    /// (e.g. time-locked contract logic); not yet consumed by the simulator.
+    #[allow(dead_code)]
     pub timestamp: String,
     pub analyze_only: Option<bool>,
+    pub mock_base_fee: Option<u32>,
+    pub mock_gas_price: Option<u64>,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ResourceCalibration {
+    pub sha256_fixed: u64,
+    pub sha256_per_byte: u64,
+    pub keccak256_fixed: u64,
+    pub keccak256_per_byte: u64,
+    pub ed25519_fixed: u64,
+}
+
+use crate::source_mapper::SourceLocation;
 
 #[derive(Debug, Serialize)]
 pub struct SimulationResponse {
@@ -46,6 +67,8 @@ pub struct WasmSection {
     pub name: String,
     pub size: usize,
     pub category: String, // "Logic", "Debug", "Data", "Other"
+    pub stack_trace: Option<WasmStackTrace>,
+    pub wasm_offset: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,6 +78,8 @@ pub struct DiagnosticEvent {
     pub topics: Vec<String>,
     pub data: String,
     pub in_successful_contract_call: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wasm_instruction: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

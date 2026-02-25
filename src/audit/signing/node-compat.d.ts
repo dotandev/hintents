@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 // Minimal Node shims for environments where @types/node is not installed.
 // Prefer installing `@types/node` and keeping tsconfig `types: ["node"]`.
 

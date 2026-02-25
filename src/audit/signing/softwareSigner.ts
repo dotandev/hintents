@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { sign, createPublicKey } from 'crypto';
 import type { AuditSigner, PublicKey, Signature } from './types';
 

@@ -114,9 +114,38 @@ cargo test
 
 ## Submitting a Pull Request
 
-1.  Ensure all tests pass.
-2.  Update documentation if you change functionality.
-3.  Submit your PR to the `main` branch.
+1.  **Run strict linting**: Ensure all linting checks pass before submitting.
+    ```bash
+    make lint-all-strict
+    ```
+    See [STRICT_LINTING.md](STRICT_LINTING.md) for details on our linting requirements.
+
+2.  **Ensure all tests pass**: Run the full test suite.
+    ```bash
+    make test
+    make rust-test
+    ```
+
+3.  **Update documentation** if you change functionality.
+
+4.  **Submit your PR** to the `main` branch.
+
+### Code Quality Requirements
+
+All PRs must pass strict linting checks:
+
+- **No unused variables, imports, or functions**
+- **No dead code** (unless explicitly justified)
+- **All warnings treated as errors** in CI
+- **Proper formatting** (gofmt for Go, cargo fmt for Rust)
+
+The CI pipeline will automatically fail if any linting issues are detected. To avoid CI failures:
+
+- Run `make lint-all-strict` locally before pushing
+- Install pre-commit hooks: `pip install pre-commit && pre-commit install`
+- Fix all linting issues before requesting review
+
+For details on suppressing false positives, see [STRICT_LINTING.md](STRICT_LINTING.md).
 
 ## License
 

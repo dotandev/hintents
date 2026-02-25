@@ -21,6 +21,7 @@ func TestSentinelErrors(t *testing.T) {
 	assert.NotNil(t, ErrMarshalFailed)
 	assert.NotNil(t, ErrUnmarshalFailed)
 	assert.NotNil(t, ErrSimulationLogicError)
+	assert.NotNil(t, ErrRPCResponseTooLarge)
 }
 
 func TestErrorWrapping(t *testing.T) {
@@ -80,4 +81,19 @@ func TestErrorComparison(t *testing.T) {
 
 	assert.True(t, errors.Is(err2, ErrRPCConnectionFailed))
 	assert.False(t, errors.Is(err2, ErrTransactionNotFound))
+}
+
+func TestWrapRPCResponseTooLarge(t *testing.T) {
+	url := "https://soroban-testnet.stellar.org"
+	err := WrapRPCResponseTooLarge(url)
+
+	assert.True(t, errors.Is(err, ErrRPCResponseTooLarge))
+	assert.False(t, errors.Is(err, ErrRPCConnectionFailed))
+	assert.Contains(t, err.Error(), url)
+	assert.Contains(t, err.Error(), "exceeded the server's maximum allowed size")
+	assert.Contains(t, err.Error(), "Soroban RPC response limit")
+
+	var rte *ResponseTooLargeError
+	assert.True(t, errors.As(err, &rte))
+	assert.Equal(t, url, rte.URL)
 }

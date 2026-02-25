@@ -61,6 +61,12 @@ This mode is intended for:
 - Invokes contract function
 - Captures diagnostic events and logs
 
+### Soroban Compatibility & Determinism
+- The simulator enforces Soroban VM compatibility by rejecting WASM binaries
+  that contain floating-point instructions. This prevents non-deterministic
+  execution traces during local replay and keeps behavior aligned with on-chain
+  Soroban restrictions.
+
 ## Example Output
 
 ```
@@ -98,5 +104,4 @@ echo "test" > /tmp/test.wasm
 # Run local replay
 ./erst debug --wasm /tmp/test.wasm --args "test1" --args "test2"
 ```
-
 

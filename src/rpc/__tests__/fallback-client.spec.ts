@@ -140,9 +140,9 @@ describe('FallbackRPCClient', () => {
 
     describe('health checks', () => {
         it('should check health of all endpoints', async () => {
-            mock.onGet('https://rpc1.test.com/health').reply(200);
-            mock.onGet('https://rpc2.test.com/health').reply(200);
-            mock.onGet('https://rpc3.test.com/health').reply(500);
+            mock.onPost('https://rpc1.test.com/', { jsonrpc: '2.0', id: 1, method: 'getHealth' }).reply(200, { result: { status: 'healthy' } });
+            mock.onPost('https://rpc2.test.com/', { jsonrpc: '2.0', id: 1, method: 'getHealth' }).reply(200, { result: { status: 'healthy' } });
+            mock.onPost('https://rpc3.test.com/', { jsonrpc: '2.0', id: 1, method: 'getHealth' }).reply(200, { result: { status: 'unhealthy' } });
 
             await client.performHealthChecks();
 

@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Real transaction meta samples for testing
  * These are simplified examples - in production, use actual transaction meta from Horizon/RPC

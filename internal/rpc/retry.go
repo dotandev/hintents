@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 )
 
@@ -60,7 +61,7 @@ func (r *Retrier) Do(ctx context.Context, req *http.Request) (*http.Response, er
 	for attempt := 0; attempt <= r.config.MaxRetries; attempt++ {
 		if attempt > 0 {
 			if err := r.waitWithContext(ctx, backoff); err != nil {
-				return nil, fmt.Errorf("retry cancelled: %w", err)
+				return nil, errors.WrapRPCTimeout(err)
 			}
 		}
 
@@ -72,6 +73,12 @@ func (r *Retrier) Do(ctx context.Context, req *http.Request) (*http.Response, er
 			}
 			backoff = r.nextBackoff(backoff)
 			continue
+		}
+
+		// HTTP 413: response too large -- not retryable
+		if resp.StatusCode == http.StatusRequestEntityTooLarge {
+			resp.Body.Close()
+			return nil, errors.WrapRPCResponseTooLarge(req.URL.String())
 		}
 
 		// Check if response status is retryable
@@ -97,14 +104,14 @@ func (r *Retrier) Do(ctx context.Context, req *http.Request) (*http.Response, er
 				continue
 			}
 			// If we've exhausted retries on a retryable error, return error
-			return nil, lastErr
+			return nil, errors.WrapRPCConnectionFailed(lastErr)
 		}
 
 		// Success or non-retryable error
 		return resp, nil
 	}
 
-	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+	return nil, errors.WrapRPCConnectionFailed(lastErr)
 }
 
 // shouldRetry determines if the response status code warrants a retry
@@ -198,7 +205,7 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	for attempt := 0; attempt <= rt.config.MaxRetries; attempt++ {
 		if attempt > 0 {
 			if err := rt.waitWithContext(req.Context(), backoff); err != nil {
-				return nil, fmt.Errorf("retry cancelled: %w", err)
+				return nil, errors.WrapRPCTimeout(err)
 			}
 		}
 
@@ -210,6 +217,12 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			}
 			backoff = rt.nextBackoff(backoff)
 			continue
+		}
+
+		// HTTP 413: response too large -- not retryable
+		if resp.StatusCode == http.StatusRequestEntityTooLarge {
+			resp.Body.Close()
+			return nil, errors.WrapRPCResponseTooLarge(req.URL.String())
 		}
 
 		// Check if response status is retryable
@@ -235,14 +248,14 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 				continue
 			}
 			// If we've exhausted retries on a retryable error, return error
-			return nil, lastErr
+			return nil, errors.WrapRPCConnectionFailed(lastErr)
 		}
 
 		// Success or non-retryable error
 		return resp, nil
 	}
 
-	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+	return nil, errors.WrapRPCConnectionFailed(lastErr)
 }
 
 // shouldRetry determines if the response status code warrants a retry

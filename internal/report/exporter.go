@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/dotandev/hintents/internal/errors"
 )
 
 type Exporter struct {
@@ -19,7 +21,7 @@ type Exporter struct {
 
 func NewExporter(outputDir string) (*Exporter, error) {
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create output directory: %w", err)
+		return nil, errors.WrapValidationError(fmt.Sprintf("failed to create output directory: %v", err))
 	}
 
 	return &Exporter{outputDir: outputDir}, nil
@@ -42,15 +44,15 @@ func (e *Exporter) Export(report *Report, format string) (string, error) {
 		renderer := NewPDFRenderer()
 		data, err = renderer.Render(report)
 	default:
-		return "", fmt.Errorf("unsupported format: %s", format)
+		return "", errors.WrapValidationError(fmt.Sprintf("unsupported format: %s", format))
 	}
 
 	if err != nil {
-		return "", fmt.Errorf("failed to render report: %w", err)
+		return "", errors.WrapValidationError(fmt.Sprintf("failed to render report: %v", err))
 	}
 
 	if err := os.WriteFile(filepath, data, 0644); err != nil {
-		return "", fmt.Errorf("failed to write file: %w", err)
+		return "", errors.WrapValidationError(fmt.Sprintf("failed to write file: %v", err))
 	}
 
 	return filepath, nil
@@ -62,7 +64,7 @@ func (e *Exporter) ExportMultiple(report *Report, formats []string) (map[string]
 	for _, format := range formats {
 		path, err := e.Export(report, format)
 		if err != nil {
-			return results, fmt.Errorf("failed to export %s: %w", format, err)
+			return results, errors.WrapValidationError(fmt.Sprintf("failed to export %s: %v", format, err))
 		}
 		results[format] = path
 	}
