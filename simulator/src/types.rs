@@ -61,6 +61,8 @@ pub struct DiagnosticEvent {
     pub topics: Vec<String>,
     pub data: String,
     pub in_successful_contract_call: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wasm_instruction: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

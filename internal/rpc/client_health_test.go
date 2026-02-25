@@ -113,6 +113,7 @@ func TestGetHealth_Failover(t *testing.T) {
 
 	resp, err := client.GetHealth(context.Background())
 	assert.NoError(t, err)
-	assert.NotNil(t, resp)
-	assert.Equal(t, "healthy", resp.Result.Status)
+	if assert.NotNil(t, resp) && assert.NotNil(t, resp.Result) {
+		assert.Equal(t, "healthy", resp.Result.Status)
+	}
 }

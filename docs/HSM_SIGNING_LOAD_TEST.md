@@ -144,9 +144,7 @@ Or add to your `.env` file:
 
 ```bash
 # .env (for local development only, never commit this)
-ERST_AUDIT_PRIVATE_KEY_PEM=-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgvEQkJ...
------END PRIVATE KEY-----
+ERST_AUDIT_PRIVATE_KEY_PEM=<your-ed25519-private-key-pem-here>
 ```
 
 ### Quick Start

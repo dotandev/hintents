@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 //! Intentionally faulty contract: triggers an out-of-memory condition.
 //!
 //! This contract allocates progressively larger vectors until the Soroban

@@ -146,7 +146,7 @@ func TestFormatLocation(t *testing.T) {
 		},
 		{
 			name: "stack value",
-			loc:  []byte{dwarf.LocExprStackValue},
+			loc:  []byte{dwOpStackValue},
 			want: "immediate",
 		},
 		{
@@ -169,29 +169,30 @@ func TestFormatLocation(t *testing.T) {
 // TestNameDemangle tests name demangling
 func TestNameDemangle(t *testing.T) {
 	tests := []struct {
-		name string
-		want string
+		name  string
+		input string
+		want  string
 	}{
 		{
-			name: "regular name",
-			name: "balance",
-			want: "balance",
+			name:  "regular name",
+			input: "balance",
+			want:  "balance",
 		},
 		{
-			name: "mangled Rust name",
-			name: "_RNv4token7balance",
-			want: "_RNv4token7balance", // Currently returns as-is
+			name:  "mangled Rust name",
+			input: "_RNv4token7balance",
+			want:  "_RNv4token7balance",
 		},
 		{
-			name: "empty name",
-			name: "",
-			want: "",
+			name:  "empty name",
+			input: "",
+			want:  "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := nameDemangle(tt.name)
+			got := nameDemangle(tt.input)
 			if got != tt.want {
 				t.Errorf("nameDemangle() = %v, want %v", got, tt.want)
 			}

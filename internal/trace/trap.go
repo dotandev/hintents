@@ -93,7 +93,7 @@ func (td *TrapDetector) DetectTrap(state *ExecutionState) *TrapInfo {
 		subprograms, _ := td.dwarfParser.GetSubprograms()
 		for _, sp := range subprograms {
 			if strings.Contains(sp.Name, state.Function) || strings.Contains(sp.DemangledName, state.Function) {
-				trap.SourceLocation = &SourceLocation{
+				trap.SourceLocation = &dwarf.SourceLocation{
 					File: sp.File,
 					Line: sp.Line,
 				}

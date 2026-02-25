@@ -217,6 +217,7 @@ func (b *clientBuilder) build() (*Client, error) {
 		Network:      b.network,
 		SorobanURL:   b.sorobanURL,
 		AltURLs:      b.altURLs,
+		httpClient:   b.httpClient,
 		token:        b.token,
 		Config:       *b.config,
 		CacheEnabled: b.cacheEnabled,
