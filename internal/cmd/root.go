@@ -94,4 +94,5 @@ func init() {
 	)
 
 	// Register commands
+	rootCmd.AddCommand(statsCmd)
 }

@@ -6,9 +6,10 @@ package trace
 import (
 	"testing"
 	"time"
+
+	"github.com/dotandev/hintents/internal/dwarf"
 )
 
-// TestIdentifyTrapType tests trap type identification
 func TestIdentifyTrapType(t *testing.T) {
 	td := &TrapDetector{}
 
@@ -245,7 +246,7 @@ func TestFormatTrapInfo(t *testing.T) {
 		Type:    TrapIndexOutOfBounds,
 		Message: "index out of bounds: len=5, index=10",
 		Function: "transfer",
-		SourceLocation: &SourceLocation{
+		SourceLocation: &dwarf.SourceLocation{
 			File: "token.rs",
 			Line: 45,
 		},
@@ -349,7 +350,7 @@ func TestLocalVarInfo(t *testing.T) {
 		Type:          "i128",
 		Location:     "0x1000",
 		Value:         int64(1000),
-		SourceLocation: &SourceLocation{
+		SourceLocation: &dwarf.SourceLocation{
 			File: "token.rs",
 			Line: 20,
 		},

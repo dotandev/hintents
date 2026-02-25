@@ -10,10 +10,19 @@ import (
 
 // SimulationResponse represents a simulation response (to avoid import cycle)
 type SimulationResponse struct {
-	Status string
-	Error  string
-	Events []string
-	Logs   []string
+	Status           string
+	Error            string
+	Events           []string
+	Logs             []string
+	DiagnosticEvents []DiagnosticEvent
+}
+
+type DiagnosticEvent struct {
+	EventType       string   `json:"event_type"`
+	ContractID      *string  `json:"contract_id,omitempty"`
+	Topics          []string `json:"topics"`
+	Data            string   `json:"data"`
+	WasmInstruction *string  `json:"wasm_instruction,omitempty"`
 }
 
 // ParseSimulationResponse converts a simulation response into a trace tree
@@ -43,6 +52,24 @@ func ParseSimulationResponse(resp *SimulationResponse) (*TraceNode, error) {
 		logNode := NewTraceNode(fmt.Sprintf("log-%d", i), "log")
 		logNode.EventData = log
 		root.AddChild(logNode)
+	}
+
+	// Parse diagnostic events
+	for i, de := range resp.DiagnosticEvents {
+		deNode := NewTraceNode(fmt.Sprintf("diag-%d", i), "diagnostic")
+		deNode.EventData = de.Data
+		if de.ContractID != nil {
+			deNode.ContractID = *de.ContractID
+		}
+
+		// If it's a budget tick with a WASM instruction, add a sub-node
+		if de.WasmInstruction != nil {
+			instrNode := NewTraceNode(fmt.Sprintf("diag-%d-instr", i), "wasm_instruction")
+			instrNode.EventData = fmt.Sprintf("WASM Instruction: %s", *de.WasmInstruction)
+			deNode.AddChild(instrNode)
+		}
+
+		root.AddChild(deNode)
 	}
 
 	root.ApplyHeuristics()

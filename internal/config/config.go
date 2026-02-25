@@ -31,21 +31,6 @@ var validNetworks = map[string]bool{
 
 // Config represents the general configuration for erst
 type Config struct {
-	RpcUrl         string  `json:"rpc_url,omitempty"`
-	Network        Network `json:"network,omitempty"`
-	SimulatorPath  string  `json:"simulator_path,omitempty"`
-	LogLevel       string  `json:"log_level,omitempty"`
-	CachePath      string  `json:"cache_path,omitempty"`
-	RPCToken       string  `json:"rpc_token,omitempty"`
-	// CrashReporting enables opt-in anonymous crash reporting.
-	// Set via crash_reporting = true in config or ERST_CRASH_REPORTING=true.
-	CrashReporting bool   `json:"crash_reporting,omitempty"`
-	// CrashEndpoint is a custom HTTPS URL that receives JSON crash reports.
-	// Set via crash_endpoint in config or ERST_CRASH_ENDPOINT.
-	CrashEndpoint  string `json:"crash_endpoint,omitempty"`
-	// CrashSentryDSN is a Sentry Data Source Name for crash reporting.
-	// Set via crash_sentry_dsn in config or ERST_SENTRY_DSN.
-	CrashSentryDSN string `json:"crash_sentry_dsn,omitempty"`
 	RpcUrl        string   `json:"rpc_url,omitempty"`
 	RpcUrls       []string `json:"rpc_urls,omitempty"`
 	Network       Network  `json:"network,omitempty"`
@@ -53,6 +38,15 @@ type Config struct {
 	LogLevel      string   `json:"log_level,omitempty"`
 	CachePath     string   `json:"cache_path,omitempty"`
 	RPCToken      string   `json:"rpc_token,omitempty"`
+	// CrashReporting enables opt-in anonymous crash reporting.
+	// Set via crash_reporting = true in config or ERST_CRASH_REPORTING=true.
+	CrashReporting bool `json:"crash_reporting,omitempty"`
+	// CrashEndpoint is a custom HTTPS URL that receives JSON crash reports.
+	// Set via crash_endpoint in config or ERST_CRASH_ENDPOINT.
+	CrashEndpoint string `json:"crash_endpoint,omitempty"`
+	// CrashSentryDSN is a Sentry Data Source Name for crash reporting.
+	// Set via crash_sentry_dsn in config or ERST_SENTRY_DSN.
+	CrashSentryDSN string `json:"crash_sentry_dsn,omitempty"`
 }
 
 var defaultConfig = &Config{

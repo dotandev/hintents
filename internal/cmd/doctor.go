@@ -46,7 +46,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	fmt.Println("Erst Environment Diagnostics")
-	fmt.Println("=============================\n")
+	fmt.Println("=============================")
+	fmt.Println()
 
 	dependencies := []DependencyStatus{
 		checkGo(verbose),

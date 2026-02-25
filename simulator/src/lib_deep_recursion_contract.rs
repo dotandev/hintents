@@ -1,3 +1,6 @@
+// Copyright 2025 Erst Users
+// SPDX-License-Identifier: Apache-2.0
+
 //! Intentionally faulty contract: triggers unbounded deep recursion.
 //!
 //! The Soroban host enforces a call-stack depth limit.  This contract

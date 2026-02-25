@@ -31,9 +31,4 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 inferno = "0.11"
 jsonschema = "0.40.2"
 object = "0.38.1"
-wasmparser = "0.208"
-
-[dev-dependencies]
-wat = "1.0"
-gimli = "0.28"
-addr2line = "0.21"
+gimli = "0.31"

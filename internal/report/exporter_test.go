@@ -158,7 +158,7 @@ func TestFilenameGeneration(t *testing.T) {
 }
 
 func TestInvalidOutputDir(t *testing.T) {
-	invalidDir := `C:\INVALID|PATH` // Illegal characters on Windows
+	invalidDir := "/dev/null/impossible" // /dev/null is not a directory
 
 	_, err := NewExporter(invalidDir)
 	if err == nil {

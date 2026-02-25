@@ -29,7 +29,7 @@ func TestDisplaySourceLocation(t *testing.T) {
 	}
 
 	// 2. Mock SourceLocation
-	colEnd := uint32(17)
+	colEnd := uint(17)
 	loc := &simulator.SourceLocation{
 		File:      sourcePath,
 		Line:      3,

@@ -109,7 +109,8 @@ func TestSearchUnicode_Mixed(t *testing.T) {
 		{
 			ID:        "1",
 			Function:  "transfer_资金",
-			EventData: "Événement créé✅",
+
+			EventData: "Événement créé[OK]",
 			EventData: "Événement créé [DEPLOY]",
 		},
 	}

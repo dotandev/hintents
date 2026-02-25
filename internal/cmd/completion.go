@@ -4,9 +4,7 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
-
+        "os"
 	"github.com/spf13/cobra"
 )
 

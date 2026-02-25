@@ -103,6 +103,7 @@ type Client struct {
 	AltURLs      []string
 	currIndex    int
 	mu           sync.RWMutex
+	httpClient   *http.Client
 	token        string // stored for reference, not logged
 	Config       NetworkConfig
 	CacheEnabled bool
@@ -228,13 +229,24 @@ func (c *Client) rotateURL() bool {
 	}
 
 	c.HorizonURL = c.AltURLs[c.currIndex]
+	httpClient := c.httpClient
+	if httpClient == nil {
+		httpClient = createHTTPClient(c.token)
+	}
 	c.Horizon = &horizonclient.Client{
 		HorizonURL: c.HorizonURL,
-		HTTP:       createHTTPClient(c.token),
+		HTTP:       httpClient,
 	}
 
 	logger.Logger.Warn("RPC failover triggered", "new_url", c.HorizonURL)
 	return true
+}
+
+func (c *Client) getHTTPClient() *http.Client {
+	if c.httpClient != nil {
+		return c.httpClient
+	}
+	return http.DefaultClient
 }
 
 // createHTTPClient creates an HTTP client with optional authentication
@@ -265,9 +277,10 @@ func NewCustomClient(config NetworkConfig) (*Client, error) {
 		return nil, err
 	}
 
+	httpClient := createHTTPClient("")
 	horizonClient := &horizonclient.Client{
 		HorizonURL: config.HorizonURL,
-		HTTP:       http.DefaultClient,
+		HTTP:       httpClient,
 	}
 
 	sorobanURL := config.SorobanRPCURL
@@ -281,6 +294,7 @@ func NewCustomClient(config NetworkConfig) (*Client, error) {
 		SorobanURL:   sorobanURL,
 		Config:       config,
 		CacheEnabled: true,
+		httpClient:   httpClient,
 	}, nil
 }
 
@@ -618,7 +632,7 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.getHTTPClient().Do(req)
 	if err != nil {
 		return nil, errors.WrapRPCConnectionFailed(err)
 	}
@@ -786,7 +800,7 @@ func (c *Client) simulateTransactionAttempt(ctx context.Context, envelopeXdr str
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.getHTTPClient().Do(req)
 	if err != nil {
 		return nil, errors.WrapRPCConnectionFailed(err)
 	}
@@ -854,7 +868,7 @@ func (c *Client) getHealthAttempt(ctx context.Context) (*GetHealthResponse, erro
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.getHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request to %s: %w", targetURL, err)
 	}
