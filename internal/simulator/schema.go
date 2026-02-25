@@ -68,6 +68,14 @@ type BudgetUsage struct {
 	MemoryUsagePercent float64 `json:"memory_usage_percent"`
 }
 
+// SourceLocation identifies a location in source code that corresponds to a WASM offset.
+type SourceLocation struct {
+	File      string  `json:"file"`
+	Line      uint32  `json:"line"`
+	Column    uint32  `json:"column"`
+	ColumnEnd *uint32 `json:"column_end,omitempty"`
+}
+
 type SimulationResponse struct {
 	Status            string               `json:"status"` // "success" or "error"
 	Error             string               `json:"error,omitempty"`

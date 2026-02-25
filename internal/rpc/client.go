@@ -229,6 +229,7 @@ func (c *Client) rotateURL() bool {
 	}
 
 	c.HorizonURL = c.AltURLs[c.currIndex]
+	c.SorobanURL = c.AltURLs[c.currIndex]
 	httpClient := c.httpClient
 	if httpClient == nil {
 		httpClient = createHTTPClient(c.token)
@@ -439,7 +440,11 @@ type GetLedgerEntriesResponse struct {
 // GetLedgerHeader fetches ledger header details for a specific sequence with automatic fallback.
 func (c *Client) GetLedgerHeader(ctx context.Context, sequence uint32) (*LedgerHeaderResponse, error) {
 	var failures []NodeFailure
-	for attempt := 0; attempt < len(c.AltURLs); attempt++ {
+	attempts := len(c.AltURLs)
+	if attempts == 0 {
+		attempts = 1
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
 		resp, err := c.getLedgerHeaderAttempt(ctx, sequence)
 		if err == nil {
 			c.markSuccess(c.HorizonURL)
@@ -450,12 +455,15 @@ func (c *Client) GetLedgerHeader(ctx context.Context, sequence uint32) (*LedgerH
 
 		failures = append(failures, NodeFailure{URL: c.HorizonURL, Reason: err})
 
-		if attempt < len(c.AltURLs)-1 {
+		if attempt < attempts-1 {
 			logger.Logger.Warn("Retrying ledger header fetch with fallback RPC...", "error", err)
 			if !c.rotateURL() {
 				break
 			}
 		}
+	}
+	if len(failures) == 1 {
+		return nil, failures[0].Reason
 	}
 	return nil, &AllNodesFailedError{Failures: failures}
 }
@@ -526,16 +534,40 @@ func (c *Client) handleLedgerError(err error, sequence uint32) error {
 
 // IsLedgerNotFound checks if error is a "ledger not found" error
 func IsLedgerNotFound(err error) bool {
+	if allFailed, ok := err.(*AllNodesFailedError); ok {
+		for _, failure := range allFailed.Failures {
+			if errors.Is(failure.Reason, errors.ErrLedgerNotFound) {
+				return true
+			}
+		}
+		return false
+	}
 	return errors.Is(err, errors.ErrLedgerNotFound)
 }
 
 // IsLedgerArchived checks if error is a "ledger archived" error
 func IsLedgerArchived(err error) bool {
+	if allFailed, ok := err.(*AllNodesFailedError); ok {
+		for _, failure := range allFailed.Failures {
+			if errors.Is(failure.Reason, errors.ErrLedgerArchived) {
+				return true
+			}
+		}
+		return false
+	}
 	return errors.Is(err, errors.ErrLedgerArchived)
 }
 
 // IsRateLimitError checks if error is a rate limit error
 func IsRateLimitError(err error) bool {
+	if allFailed, ok := err.(*AllNodesFailedError); ok {
+		for _, failure := range allFailed.Failures {
+			if errors.Is(failure.Reason, errors.ErrRateLimitExceeded) {
+				return true
+			}
+		}
+		return false
+	}
 	return errors.Is(err, errors.ErrRateLimitExceeded)
 }
 
@@ -580,7 +612,11 @@ func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[strin
 
 	logger.Logger.Debug("Fetching ledger entries from RPC", "count", len(keysToFetch), "url", c.SorobanURL)
 	var failures []NodeFailure
-	for attempt := 0; attempt < len(c.AltURLs); attempt++ {
+	attempts := len(c.AltURLs)
+	if attempts == 0 {
+		attempts = 1
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
 		res, err := c.getLedgerEntriesAttempt(ctx, keysToFetch)
 		if err == nil {
 			c.markSuccess(c.HorizonURL)
@@ -594,13 +630,16 @@ func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[strin
 		c.markFailure(c.HorizonURL)
 		failures = append(failures, NodeFailure{URL: c.HorizonURL, Reason: err})
 
-		if attempt < len(c.AltURLs)-1 {
+		if attempt < attempts-1 {
 			logger.Logger.Warn("Retrying with fallback Soroban RPC...", "error", err)
 			if !c.rotateURL() {
 				break
 			}
 			continue
 		}
+	}
+	if len(failures) == 1 {
+		return nil, failures[0].Reason
 	}
 	return nil, &AllNodesFailedError{Failures: failures}
 }

@@ -1,4 +1,5 @@
 import type { AuditSigner, PublicKey, Signature, HardwareAttestation, AttestationCertificate } from './types';
+import { HsmRateLimiter } from './rateLimiter';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const lazyRequire = (name: string): any => {

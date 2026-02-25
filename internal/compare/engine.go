@@ -37,10 +37,10 @@ type EventDiff struct {
 
 // DiagnosticDiff is a positional divergence in the DiagnosticEvents slice.
 type DiagnosticDiff struct {
-	Index        int
-	Local        *simulator.DiagnosticEvent
-	OnChain      *simulator.DiagnosticEvent
-	Divergent    bool
+	Index     int
+	Local     *simulator.DiagnosticEvent
+	OnChain   *simulator.DiagnosticEvent
+	Divergent bool
 	// DivergentPath is true when the contract ID or event type differs,
 	// indicating the execution took a different call path.
 	DivergentPath bool
@@ -52,20 +52,20 @@ type BudgetDiff struct {
 	MemoryDelta int64
 	OpsDelta    int
 
-	LocalCPU    uint64
-	OnChainCPU  uint64
-	LocalMem    uint64
-	OnChainMem  uint64
-	LocalOps    int
-	OnChainOps  int
+	LocalCPU   uint64
+	OnChainCPU uint64
+	LocalMem   uint64
+	OnChainMem uint64
+	LocalOps   int
+	OnChainOps int
 }
 
 // StatusDiff holds the comparison of top-level execution status.
 type StatusDiff struct {
-	Match        bool
-	LocalStatus  string
+	Match         bool
+	LocalStatus   string
 	OnChainStatus string
-	LocalError   string
+	LocalError    string
 	OnChainError  string
 }
 
@@ -90,10 +90,10 @@ type DiffResult struct {
 	CallPathDivergences []CallPathDivergence
 
 	// Summary fields
-	TotalEvents      int
-	DivergentEvents  int
-	IdenticalEvents  int
-	HasDivergence    bool
+	TotalEvents     int
+	DivergentEvents int
+	IdenticalEvents int
+	HasDivergence   bool
 }
 
 // Diff compares two SimulationResponse objects (local vs on-chain) and returns

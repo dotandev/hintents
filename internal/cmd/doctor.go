@@ -46,7 +46,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	fmt.Println("Erst Environment Diagnostics")
-	fmt.Println("=============================\n")
+	fmt.Println("=============================")
+	fmt.Println()
 
 	dependencies := []DependencyStatus{
 		checkGo(verbose),
@@ -95,8 +96,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 func checkGo(verbose bool) DependencyStatus {
 	dep := DependencyStatus{
-		Name:      "Go",
-		FixHint:   "Install Go from https://go.dev/doc/install (requires Go 1.21+)",
+		Name:    "Go",
+		FixHint: "Install Go from https://go.dev/doc/install (requires Go 1.21+)",
 	}
 
 	goPath, err := exec.LookPath("go")
@@ -124,8 +125,8 @@ func checkGo(verbose bool) DependencyStatus {
 
 func checkRust(verbose bool) DependencyStatus {
 	dep := DependencyStatus{
-		Name:      "Rust (rustc)",
-		FixHint:   "Install Rust from https://rustup.rs/ or run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+		Name:    "Rust (rustc)",
+		FixHint: "Install Rust from https://rustup.rs/ or run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
 	}
 
 	rustcPath, err := exec.LookPath("rustc")
@@ -153,8 +154,8 @@ func checkRust(verbose bool) DependencyStatus {
 
 func checkCargo(verbose bool) DependencyStatus {
 	dep := DependencyStatus{
-		Name:      "Cargo",
-		FixHint:   "Cargo is included with Rust. Install from https://rustup.rs/",
+		Name:    "Cargo",
+		FixHint: "Cargo is included with Rust. Install from https://rustup.rs/",
 	}
 
 	cargoPath, err := exec.LookPath("cargo")
@@ -182,8 +183,8 @@ func checkCargo(verbose bool) DependencyStatus {
 
 func checkSimulator(verbose bool) DependencyStatus {
 	dep := DependencyStatus{
-		Name:      "Simulator Binary (erst-sim)",
-		FixHint:   "Build the simulator: cd simulator && cargo build --release",
+		Name:    "Simulator Binary (erst-sim)",
+		FixHint: "Build the simulator: cd simulator && cargo build --release",
 	}
 
 	// Check multiple possible locations

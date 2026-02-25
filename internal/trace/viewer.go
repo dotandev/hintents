@@ -7,11 +7,12 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 
-	"github.com/atotto/clipboard"
 	"github.com/dotandev/hintents/internal/dwarf"
 	"github.com/dotandev/hintents/internal/visualizer"
 )
@@ -84,7 +85,8 @@ func (v *InteractiveViewer) Start() error {
 		if v.trap.SourceLocation != nil {
 			fmt.Printf("Location: %s:%d\n", v.trap.SourceLocation.File, v.trap.SourceLocation.Line)
 		}
-		fmt.Println("  Use 't' or 'trap' command to see local variables\n")
+		fmt.Println("  Use 't' or 'trap' command to see local variables")
+		fmt.Println()
 	}
 
 	// Resize handling: on SIGWINCH (Unix), reflow the current state display.
@@ -533,6 +535,7 @@ func (v *InteractiveViewer) showHelp() {
 	fmt.Println("Display:")
 	fmt.Println("  s, show, state          - Show current state")
 	fmt.Println("  S                       - Toggle hiding/showing Rust core::* traces")
+	fmt.Println("  click [+/-]             - Expand/collapse tree nodes")
 	fmt.Println("  r, reconstruct [step]   - Reconstruct state")
 	fmt.Println("  t, trap                 - Show trap info with local variables")
 	fmt.Println("  l, list [count]         - List steps (default: 10)")
@@ -548,9 +551,8 @@ func (v *InteractiveViewer) showHelp() {
 	fmt.Println("  ESC                     - Clear search / cancel input")
 	fmt.Println()
 	fmt.Println("Other:")
-	fmt.Println("  h, help              - Show this help")
-	fmt.Println("  y, yank <a/r> [idx]  - Copy raw XDR (a: arg, r: return)")
-	fmt.Println("  q, quit, exit        - Exit viewer")
+	fmt.Println("  h, help                 - Show this help")
+	fmt.Println("  y, yank <a/r> [idx]     - Copy raw XDR (a: arg, r: return)")
 	fmt.Println("  ?, h, help              - Show this help")
 	fmt.Println("  q, quit, exit           - Exit viewer")
 }
@@ -597,7 +599,7 @@ func (v *InteractiveViewer) handleYank(args []string) {
 		return
 	}
 
-	if err := clipboard.WriteAll(value); err != nil {
+	if err := writeClipboard(value); err != nil {
 		fmt.Printf("%s Failed to copy to clipboard: %v\n", visualizer.Error(), err)
 		// Fallback: just print it so the user can see it
 		fmt.Printf("Raw XDR: %s\n", value)
@@ -620,4 +622,25 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func writeClipboard(value string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "linux":
+		// xclip is common on Linux desktops.
+		cmd = exec.Command("xclip", "-selection", "clipboard")
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "clip")
+	default:
+		return fmt.Errorf("clipboard unsupported on %s", runtime.GOOS)
+	}
+
+	cmd.Stdin = strings.NewReader(value)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("clipboard command failed: %w", err)
+	}
+	return nil
 }

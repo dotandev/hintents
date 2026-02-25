@@ -16,7 +16,7 @@ import (
 	"github.com/dotandev/hintents/internal/logger"
 )
 
-const wasmTargetPath = "target/wasm32-unknown-unknown/release"
+const wasmResolverTargetPath = "target/wasm32-unknown-unknown/release"
 
 // Resolver coordinates fetching verified source code from a registry,
 // with optional local caching and auto-discovery of local DWARF symbols.
@@ -102,7 +102,7 @@ func (r *Resolver) Resolve(ctx context.Context, contractID string) (*SourceCode,
 // AutoDiscoverLocalSymbols scans the project root for local WASM builds.
 // If a bytecode hash match is found, it merges DWARF debug symbols.
 func (r *Resolver) AutoDiscoverLocalSymbols(projectRoot string, expectedHash string) error {
-	searchDir := filepath.Join(projectRoot, wasmTargetPath)
+	searchDir := filepath.Join(projectRoot, wasmResolverTargetPath)
 
 	// Verify directory exists
 	if _, err := os.Stat(searchDir); os.IsNotExist(err) {
@@ -155,9 +155,9 @@ func (r *Resolver) AutoDiscoverLocalSymbols(projectRoot string, expectedHash str
 		}
 
 		// Integration point: Merge symbols into the resolver session
-		logger.Logger.Info("Automatically merged symbols from local build", 
-            "file", file.Name(), 
-            "count", len(subprograms))
+		logger.Logger.Info("Automatically merged symbols from local build",
+			"file", file.Name(),
+			"count", len(subprograms))
 	}
 
 	return nil

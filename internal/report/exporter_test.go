@@ -6,6 +6,7 @@ package report
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -158,6 +159,9 @@ func TestFilenameGeneration(t *testing.T) {
 }
 
 func TestInvalidOutputDir(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("path validity differs by OS; invalid path assertion is Windows-specific")
+	}
 	invalidDir := `C:\INVALID|PATH` // Illegal characters on Windows
 
 	_, err := NewExporter(invalidDir)

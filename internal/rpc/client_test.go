@@ -301,12 +301,14 @@ func TestGetLedgerEntries_WithVerification(t *testing.T) {
 	// This test verifies that GetLedgerEntries properly validates returned entries
 	// Note: This is a unit test that would require a mock RPC server to fully test
 	// The actual verification logic is tested in verification_test.go
-	
+
 	t.Run("verification is called during fetch", func(t *testing.T) {
 		// This test documents that verification happens in getLedgerEntriesAttempt
 		// The actual verification logic is tested separately in verification_test.go
 		assert.True(t, true, "Verification integration is documented")
 	})
+}
+
 func TestGetLedgerEntries_ResponseTooLarge(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
