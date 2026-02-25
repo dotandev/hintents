@@ -4,8 +4,13 @@
 use soroban_env_host::{
     budget::Budget,
     storage::Storage,
-    xdr::{Hash, ScErrorCode, ScErrorType},
-    DiagnosticLevel, Error as EnvError, Host, HostError, TryIntoVal, Val,
+    xdr::{ Hash, ScErrorCode, ScErrorType },
+    DiagnosticLevel,
+    Error as EnvError,
+    Host,
+    HostError,
+    TryIntoVal,
+    Val,
 };
 
 #[allow(dead_code)]
@@ -14,6 +19,7 @@ pub struct SimHost {
     pub inner: Host,
     pub contract_id: Option<Hash>,
     pub fn_name: Option<String>,
+    pub memory_limit: Option<u64>,
 }
 
 #[allow(dead_code)]
@@ -22,13 +28,34 @@ impl SimHost {
     pub fn new(
         budget_limits: Option<(u64, u64)>,
         calibration: Option<crate::types::ResourceCalibration>,
+        memory_limit: Option<u64>
     ) -> Self {
         let budget = Budget::default();
 
-        if let Some(_calib) = calibration {
-            // TODO: Update budget model configuration for newer soroban-env-host API
-            // The budget model API has changed in newer versions
-            // For now, we'll skip custom budget configuration
+        if let Some(calib) = calibration {
+            use soroban_env_host::budget::CostModel;
+            use soroban_env_host::xdr::ContractCostType;
+
+            // SHA256
+            let sha256_model = CostModel {
+                const_term: calib.sha256_fixed as i64,
+                linear_term: calib.sha256_per_byte as i64,
+            };
+            let _ = budget.set_model(ContractCostType::ComputeSha256Hash, sha256_model);
+
+            // Keccak256
+            let keccak256_model = CostModel {
+                const_term: calib.keccak256_fixed as i64,
+                linear_term: calib.keccak256_per_byte as i64,
+            };
+            let _ = budget.set_model(ContractCostType::ComputeKeccak256Hash, keccak256_model);
+
+            // Ed25519
+            let ed25519_model = CostModel {
+                const_term: calib.ed25519_fixed as i64,
+                linear_term: 0,
+            };
+            let _ = budget.set_model(ContractCostType::VerifyEd25519Sig, ed25519_model);
         }
 
         if let Some((_cpu, _mem)) = budget_limits {
@@ -40,13 +67,13 @@ impl SimHost {
         let host = Host::with_storage_and_budget(Storage::default(), budget);
 
         // Enable debug mode for better diagnostics
-        host.set_diagnostic_level(DiagnosticLevel::Debug)
-            .expect("failed to set diagnostic level");
+        host.set_diagnostic_level(DiagnosticLevel::Debug).expect("failed to set diagnostic level");
 
         Self {
             inner: host,
             contract_id: None,
             fn_name: None,
+            memory_limit,
         }
     }
 
@@ -73,6 +100,17 @@ impl SimHost {
             e.into()
         })
     }
+
+    /// Check memory consumption against limit and panic if exceeded
+    pub fn check_memory_limit(&self) {
+        if let Some(limit) = self.memory_limit {
+            if let Ok(mem_bytes) = self.inner.budget_cloned().get_mem_bytes_consumed() {
+                if mem_bytes > limit {
+                    panic!("Memory limit exceeded: {} bytes > {} bytes limit", mem_bytes, limit);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -81,28 +119,27 @@ mod tests {
 
     #[test]
     fn test_host_initialization() {
-        let host = SimHost::new(None, None);
+        let host = SimHost::new(None, None, None);
         // Basic assertion that host is functional
         assert!(host.inner.budget_cloned().get_cpu_insns_consumed().is_ok());
     }
 
     #[test]
     fn test_configuration() {
-        let mut host = SimHost::new(None, None);
+        let mut host = SimHost::new(None, None, None);
         // Test setting contract ID (dummy hash)
         let hash = Hash([0u8; 32]);
         host.set_contract_id(hash);
         assert!(host.contract_id.is_some());
 
         // Test setting function name
-        host.set_fn_name("add")
-            .expect("failed to set function name");
+        host.set_fn_name("add").expect("failed to set function name");
         assert!(host.fn_name.is_some());
     }
 
     #[test]
     fn test_simple_value_handling() {
-        let host = SimHost::new(None, None);
+        let host = SimHost::new(None, None, None);
 
         let a = 10u32;
         let b = 20u32;

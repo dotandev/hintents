@@ -1,10 +1,8 @@
 name: Release
-
 on:
   push:
     tags:
       - 'v*'
-
 jobs:
   publish-crates-io:
     name: Publish to crates.io
@@ -15,7 +13,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Publish to crates.io
         run: cd simulator && cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
-
   build-go-cli:
     name: Build Go CLI
     strategy:
@@ -24,6 +21,9 @@ jobs:
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
           - os: macos-latest
             goos: darwin
             goarch: amd64
@@ -33,6 +33,12 @@ jobs:
           - os: windows-latest
             goos: windows
             goarch: amd64
+          - os: macos-latest
+            goos: windows
+            goarch: amd64
+          - os: macos-latest
+            goos: windows
+            goarch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -59,9 +65,8 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: erst-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: erst-${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.os }}
           path: bin/*
-
   create-github-release:
     name: Create GitHub Release
     needs: [build-go-cli, publish-crates-io]

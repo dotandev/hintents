@@ -95,9 +95,6 @@ jobs:
   docs-spellcheck:
     name: Docs Spellcheck
     runs-on: ubuntu-latest
-    # Validation:
-    # - Introduce a typo in any .md file to confirm this job fails.
-    # - Ensure allowlist words (Soroban, XDR, ERST) pass.
 
     steps:
       - name: Checkout code
@@ -138,19 +135,24 @@ jobs:
           toolchain: ${{ matrix.rust-version }}
           components: rustfmt, clippy
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Configure sccache
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+
+      - name: Cache Cargo dependencies and build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            simulator/target/
-          key: ${{ runner.os }}-cargo-${{ matrix.rust-version }}-${{ hashFiles('simulator/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.rust-version }}-
-            ${{ runner.os }}-cargo-
+          workspaces: simulator -> target
+          # Cache key includes the toolchain so stable and 1.85.0 don't share
+          # a poisoned cache. Swatinem handles Cargo.lock hashing internally.
+          prefix-key: ${{ runner.os }}-rust-${{ matrix.rust-version }}
+          # sccache handles compilation caching; keeping target/ cached avoids
+          # re-linking even on sccache hits, which alone saves 60-90 seconds.
+          cache-targets: true
 
       - name: Check formatting
         if: matrix.rust-version == 'stable'
@@ -185,3 +187,6 @@ jobs:
 
       - name: Build
         run: cargo build --verbose
+
+      - name: Print sccache stats
+        run: sccache --show-stats

@@ -5,7 +5,7 @@
 
 use crate::gas_optimizer::OptimizationReport;
 use crate::stack_trace::WasmStackTrace;
-use serde::{Deserialize, Serialize};
+use serde::{ Deserialize, Serialize };
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
@@ -23,6 +23,9 @@ pub struct SimulationRequest {
     pub timestamp: String,
     pub mock_base_fee: Option<u32>,
     pub mock_gas_price: Option<u64>,
+    /// Optional hard memory limit in bytes. If set, the simulator will panic
+    /// when memory consumption exceeds this limit, simulating live network constraints.
+    pub memory_limit: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
