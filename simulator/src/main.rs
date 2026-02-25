@@ -6,6 +6,7 @@
 mod config;
 mod gas_optimizer;
 mod runner;
+mod socket;
 mod source_map_cache;
 mod source_mapper;
 mod stack_trace;
@@ -14,6 +15,7 @@ mod types;
 mod wasm;
 
 use crate::gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor, CPU_LIMIT, MEMORY_LIMIT};
+use crate::socket::{SocketStreamer, StreamMessage};
 use crate::source_mapper::SourceMapper;
 use crate::stack_trace::{decode_error, WasmStackTrace};
 use crate::types::*;
@@ -50,6 +52,24 @@ fn init_logger() {
     } else {
         // Output human-readable text
         subscriber.compact().init();
+    }
+}
+
+/// Initialize socket streamer if socket_path is provided in the request
+fn init_streamer(socket_path: &Option<String>) -> Option<SocketStreamer> {
+    if let Some(path) = socket_path {
+        match SocketStreamer::connect(path) {
+            Ok(streamer) => {
+                tracing::info!(event = "socket_connected", path = %path, "Connected to streaming socket");
+                Some(streamer)
+            }
+            Err(e) => {
+                tracing::warn!(event = "socket_connect_failed", error = %e, "Failed to connect to socket, continuing without streaming");
+                None
+            }
+        }
+    } else {
+        None
     }
 }
 
@@ -205,6 +225,9 @@ fn main() {
             return;
         }
     };
+
+    // Initialize socket streamer if requested
+    let mut streamer = init_streamer(&request.socket_path);
 
     // Decode Envelope XDR
     let envelope = match base64::engine::general_purpose::STANDARD.decode(&request.envelope_xdr) {
@@ -452,6 +475,36 @@ fn main() {
                                     }
                                 };
 
+                                let diag_event = DiagnosticEvent {
+                                    event_type,
+                                    contract_id,
+                                    topics,
+                                    data,
+                                    // failed_call=true means the call failed;
+                                    // negate to get "was this a successful call?".
+                                    in_successful_contract_call: !event.failed_call,
+                                };
+
+                                // Stream event in real-time if streamer is available
+                                if let Some(ref mut s) = streamer {
+                                    let _ = s.send_event(diag_event.clone());
+                                }
+
+                                diag_event
+                            })
+                            .collect();
+                        (raw_events, diag_events)
+                    }
+                    Err(_) => (
+                        vec!["Failed to retrieve events".to_string()],
+                        Vec::<DiagnosticEvent>::new(),
+                    ),
+                };
+                                        let data = format!("{:?}", v0.data);
+                                        (topics, data)
+                                    }
+                                };
+
                                 DiagnosticEvent {
                                     event_type,
                                     contract_id,
@@ -512,6 +565,12 @@ fn main() {
                 format!("Memory Bytes Used: {}", mem_bytes),
             ];
             final_logs.extend(exec_logs);
+
+            // Stream budget update if streamer is available
+            if let Some(ref mut s) = streamer {
+                let _ = s.send_budget_update(cpu_insns, mem_bytes);
+                let _ = s.send_complete();
+            }
 
             let response = SimulationResponse {
                 status: "success".to_string(),
@@ -674,6 +733,11 @@ fn main() {
             let error_msg = format!("{:?}", host_error);
             let wasm_offset = extract_wasm_offset(&error_msg);
 
+            // Stream error if streamer is available
+            if let Some(ref mut s) = streamer {
+                let _ = s.send_error(error_msg.clone());
+            }
+
             let response = SimulationResponse {
                 status: "error".to_string(),
                 error: Some(serde_json::to_string(&structured_error).unwrap()),
@@ -704,6 +768,11 @@ fn main() {
             };
 
             let wasm_trace = WasmStackTrace::from_panic(&panic_msg);
+
+            // Stream panic error if streamer is available
+            if let Some(ref mut s) = streamer {
+                let _ = s.send_error(format!("Simulator panicked: {}", panic_msg));
+            }
 
             let response = SimulationResponse {
                 status: "error".to_string(),

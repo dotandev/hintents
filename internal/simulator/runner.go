@@ -17,9 +17,10 @@ import (
 
 // Runner handles the execution of the Rust simulator binary
 type Runner struct {
-	BinaryPath string
-	Debug      bool
-	MockTime   int64 // non-zero overrides Timestamp in every SimulationRequest
+	BinaryPath      string
+	Debug           bool
+	MockTime        int64 // non-zero overrides Timestamp in every SimulationRequest
+	EnableStreaming bool  // Enable real-time event streaming via Unix socket
 }
 
 // Compile-time check to ensure Runner implements RunnerInterface
@@ -157,6 +158,25 @@ func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
 		req.Timestamp = r.MockTime
 	}
 
+	// Set up streaming if enabled
+	var listener *SocketListener
+	var handler *DefaultStreamHandler
+	if r.EnableStreaming {
+		handler = NewDefaultStreamHandler()
+		var err error
+		listener, err = NewSocketListener(handler)
+		if err != nil {
+			logger.Logger.Warn("Failed to create socket listener, falling back to non-streaming", "error", err)
+		} else {
+			listener.Start()
+			defer listener.Close()
+			
+			socketPath := listener.GetSocketPath()
+			req.SocketPath = &socketPath
+			logger.Logger.Debug("Streaming enabled", "socket", socketPath)
+		}
+	}
+
 	inputBytes, err := json.Marshal(req)
 	if err != nil {
 		logger.Logger.Error("Failed to marshal simulation request", "error", err)
@@ -179,6 +199,40 @@ func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
 	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
 		logger.Logger.Error("Failed to unmarshal response", "error", err)
 		return nil, errors.WrapUnmarshalFailed(err, stdout.String())
+	}
+
+	// If streaming was enabled, merge streamed data with final response
+	if listener != nil && handler != nil {
+		events, logs, cpu, mem, completed, streamErr := handler.GetResults()
+		
+		if len(events) > 0 {
+			// Prefer streamed events over buffered ones
+			resp.DiagnosticEvents = events
+			logger.Logger.Debug("Using streamed events", "count", len(events))
+		}
+		
+		if len(logs) > 0 {
+			// Append streamed logs to response logs
+			resp.Logs = append(resp.Logs, logs...)
+		}
+		
+		// Update budget usage if we got streaming updates
+		if cpu > 0 || mem > 0 {
+			if resp.BudgetUsage == nil {
+				resp.BudgetUsage = &BudgetUsage{}
+			}
+			resp.BudgetUsage.CPUInstructions = cpu
+			resp.BudgetUsage.MemoryBytes = mem
+		}
+		
+		if streamErr != "" && resp.Error == "" {
+			resp.Error = streamErr
+			resp.Status = "error"
+		}
+		
+		if completed {
+			logger.Logger.Debug("Simulation completed via streaming")
+		}
 	}
 
 	resp.ProtocolVersion = &proto.Version

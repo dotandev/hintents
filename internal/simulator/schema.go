@@ -24,6 +24,7 @@ type SimulationRequest struct {
 	MockArgs        *[]string         `json:"mock_args,omitempty"`
 	Profile         bool              `json:"profile,omitempty"`
 	ProtocolVersion *uint32           `json:"protocol_version,omitempty"`
+	SocketPath      *string           `json:"socket_path,omitempty"` // Unix socket for streaming events
 
 	AuthTraceOpts       *AuthTraceOptions      `json:"auth_trace_opts,omitempty"`
 	CustomAuthCfg       map[string]interface{} `json:"custom_auth_config,omitempty"`
