@@ -1,10 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Copyright 2025 Erst Users
 # SPDX-License-Identifier: Apache-2.0
 
 # Check for license headers in Go and Rust files
-# This script can be executed with: bash scripts/check-license-headers.sh
+# This script is designed to work in all environments including CI
 # Exit with status 1 if any files are missing headers
+
+# Ensure we're running with bash, not sh
+if [ -z "$BASH_VERSION" ]; then
+    if command -v bash >/dev/null 2>&1; then
+        exec bash "$0" "$@"
+    else
+        echo "ERROR: This script requires bash"
+        exit 1
+    fi
+fi
 
 set -e
 
