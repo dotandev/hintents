@@ -15,7 +15,9 @@ echo "Checking for license headers in Go and Rust files..."
 echo ""
 echo "Checking Go files (.go)..."
 while IFS= read -r file; do
-    if ! head -1 "$file" | grep -q "$EXPECTED_HEADER"; then
+    # Skip build directives and find first actual content line
+    first_line=$(awk '!/^\/\/go:build/ && !/^\/\/ \+build/ && NF {print; exit}' "$file")
+    if ! echo "$first_line" | grep -q "$EXPECTED_HEADER"; then
         echo "  [FAIL] Missing license header: $file"
         MISSING_HEADERS=$((MISSING_HEADERS + 1))
     else
