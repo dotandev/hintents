@@ -18,9 +18,36 @@ pub struct SimHost {
 
 #[allow(dead_code)]
 impl SimHost {
-    /// Initialize a new Host with optional budget settings.
-    pub fn new(budget_limits: Option<(u64, u64)>) -> Self {
+    /// Initialize a new Host with optional budget settings and resource calibration.
+    pub fn new(budget_limits: Option<(u64, u64)>, calibration: Option<crate::types::ResourceCalibration>) -> Self {
         let budget = Budget::default();
+        
+        if let Some(calib) = calibration {
+            use soroban_env_host::budget::CostModel;
+            use soroban_env_host::xdr::ContractCostType;
+
+            // SHA256
+            let sha256_model = CostModel {
+                const_term: calib.sha256_fixed as i64,
+                linear_term: calib.sha256_per_byte as i64,
+            };
+            let _ = budget.set_model(ContractCostType::ComputeSha256Hash, sha256_model);
+
+            // Keccak256
+            let keccak256_model = CostModel {
+                const_term: calib.keccak256_fixed as i64,
+                linear_term: calib.keccak256_per_byte as i64,
+            };
+            let _ = budget.set_model(ContractCostType::ComputeKeccak256Hash, keccak256_model);
+
+            // Ed25519
+            let ed25519_model = CostModel {
+                const_term: calib.ed25519_fixed as i64,
+                linear_term: 0,
+            };
+            let _ = budget.set_model(ContractCostType::VerifyEd25519Sig, ed25519_model);
+        }
+
         if let Some((_cpu, _mem)) = budget_limits {
             // Budget customization requires testutils feature or extended API
             // Using default mainnet budget settings
@@ -71,14 +98,14 @@ mod tests {
 
     #[test]
     fn test_host_initialization() {
-        let host = SimHost::new(None);
+        let host = SimHost::new(None, None);
         // Basic assertion that host is functional
         assert!(host.inner.budget_cloned().get_cpu_insns_consumed().is_ok());
     }
 
     #[test]
     fn test_configuration() {
-        let mut host = SimHost::new(None);
+        let mut host = SimHost::new(None, None);
         // Test setting contract ID (dummy hash)
         let hash = Hash([0u8; 32]);
         host.set_contract_id(hash);
@@ -92,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_simple_value_handling() {
-        let host = SimHost::new(None);
+        let host = SimHost::new(None, None);
 
         let a = 10u32;
         let b = 20u32;

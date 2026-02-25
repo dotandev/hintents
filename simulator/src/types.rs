@@ -13,8 +13,17 @@ pub struct SimulationRequest {
     pub contract_wasm: Option<String>,
     pub enable_optimization_advisor: bool,
     pub profile: Option<bool>,
-    #[allow(dead_code)]
-    pub timestamp: String,
+    pub timestamp: Option<i64>,
+    pub resource_calibration: Option<ResourceCalibration>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ResourceCalibration {
+    pub sha256_fixed: u64,
+    pub sha256_per_byte: u64,
+    pub keccak256_fixed: u64,
+    pub keccak256_per_byte: u64,
+    pub ed25519_fixed: u64,
 }
 
 #[derive(Debug, Serialize)]

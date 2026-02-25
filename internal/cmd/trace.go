@@ -9,11 +9,13 @@ import (
 
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/trace"
+	"github.com/dotandev/hintents/internal/visualizer"
 	"github.com/spf13/cobra"
 )
 
 var (
-	traceFile string
+	traceFile      string
+	traceThemeFlag string
 )
 
 var traceCmd = &cobra.Command{
@@ -32,6 +34,13 @@ Example:
   erst trace --file debug_trace.json`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Apply theme if specified, otherwise auto-detect
+		if traceThemeFlag != "" {
+			visualizer.SetTheme(visualizer.Theme(traceThemeFlag))
+		} else {
+			visualizer.SetTheme(visualizer.DetectTheme())
+		}
+
 		var filename string
 		if len(args) > 0 {
 			filename = args[0]
@@ -65,5 +74,6 @@ Example:
 
 func init() {
 	traceCmd.Flags().StringVarP(&traceFile, "file", "f", "", "Trace file to load")
+	traceCmd.Flags().StringVar(&traceThemeFlag, "theme", "", "Color theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
 	rootCmd.AddCommand(traceCmd)
 }

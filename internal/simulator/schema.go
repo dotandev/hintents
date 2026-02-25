@@ -25,8 +25,17 @@ type SimulationRequest struct {
 	Profile         bool              `json:"profile,omitempty"`
 	ProtocolVersion *uint32           `json:"protocol_version,omitempty"`
 
-	AuthTraceOpts *AuthTraceOptions      `json:"auth_trace_opts,omitempty"`
-	CustomAuthCfg map[string]interface{} `json:"custom_auth_config,omitempty"`
+	AuthTraceOpts       *AuthTraceOptions      `json:"auth_trace_opts,omitempty"`
+	CustomAuthCfg       map[string]interface{} `json:"custom_auth_config,omitempty"`
+	ResourceCalibration *ResourceCalibration   `json:"resource_calibration,omitempty"`
+}
+
+type ResourceCalibration struct {
+	SHA256Fixed      uint64 `json:"sha256_fixed"`
+	SHA256PerByte    uint64 `json:"sha256_per_byte"`
+	Keccak256Fixed   uint64 `json:"keccak256_fixed"`
+	Keccak256PerByte uint64 `json:"keccak256_per_byte"`
+	Ed25519Fixed     uint64 `json:"ed25519_fixed"`
 }
 
 type AuthTraceOptions struct {

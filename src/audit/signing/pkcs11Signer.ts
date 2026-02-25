@@ -1,4 +1,5 @@
 import type { AuditSigner, PublicKey, Signature } from './types';
+import { HsmRateLimiter } from './rateLimiter';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const lazyRequire = (name: string): any => {
@@ -67,6 +68,9 @@ export class Pkcs11Ed25519Signer implements AuditSigner {
   }
 
   async sign(payload: Uint8Array): Promise<Signature> {
+    // Guard against HSM abuse during loops
+    await HsmRateLimiter.checkAndRecordCall();
+
     // Minimal skeleton that surfaces errors clearly.
     // Implementing full PKCS#11 key discovery + Ed25519 mechanisms depends on token capabilities.
     // We keep this as a real provider module but require ERST_PKCS11_PUBLIC_KEY_PEM for verification.

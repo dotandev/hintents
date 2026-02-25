@@ -194,5 +194,9 @@ func (r *Runner) applyProtocolConfig(req *SimulationRequest, proto *Protocol) er
 		req.CustomAuthCfg["supported_opcodes"] = opcodes
 	}
 
+	if calib, ok := proto.Features["resource_calibration"].(*ResourceCalibration); ok {
+		req.ResourceCalibration = calib
+	}
+
 	return nil
 }

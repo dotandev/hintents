@@ -141,3 +141,22 @@ func TestMergeFeatures(t *testing.T) {
 		t.Errorf("expected base feature optimized_storage true, got %v", merged["optimized_storage"])
 	}
 }
+
+func TestResourceCalibration(t *testing.T) {
+	val, err := Feature(22, "resource_calibration")
+	if err != nil {
+		t.Fatalf("failed to get resource_calibration: %v", err)
+	}
+
+	calib, ok := val.(*ResourceCalibration)
+	if !ok {
+		t.Fatalf("expected *ResourceCalibration, got %T", val)
+	}
+
+	if calib.SHA256Fixed != 3738 {
+		t.Errorf("expected SHA256Fixed 3738, got %d", calib.SHA256Fixed)
+	}
+	if calib.Ed25519Fixed != 377524 {
+		t.Errorf("expected Ed25519Fixed 377524, got %d", calib.Ed25519Fixed)
+	}
+}

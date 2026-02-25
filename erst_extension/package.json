@@ -1,60 +1,60 @@
 {
-  "name": "erst-vscode",
-  "displayName": "ERST Tracer",
-  "description": "",
-  "version": "0.0.1",
-  "engines": {
-    "vscode": "^1.90.0"
-  },
-  "categories": [
-    "Debuggers"
-  ],
-  "activationEvents": [],
-  "main": "./out/extension.js",
-  "contributes": {
-    "commands": [
-      {
-        "command": "erst.triggerDebug",
-        "title": "ERST: Trigger Debug",
-        "category": "ERST"
-      }
-    ],
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "erst-explorer",
-          "title": "ERST",
-          "icon": "$(debug-console)"
-        }
-      ]
+    "name": "erst-vscode",
+    "displayName": "ERST Tracer",
+    "description": "",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.90.0"
     },
-    "views": {
-      "erst-explorer": [
-        {
-          "id": "erst-traces",
-          "name": "Traces"
+    "categories": [
+        "Debuggers"
+    ],
+    "activationEvents": [],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "erst.triggerDebug",
+                "title": "ERST: Trigger Debug",
+                "category": "ERST"
+            }
+        ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "erst-explorer",
+                    "title": "ERST",
+                    "icon": "$(debug-console)"
+                }
+            ]
+        },
+        "views": {
+            "erst-explorer": [
+                {
+                    "id": "erst-traces",
+                    "name": "Traces"
+                }
+            ]
         }
-      ]
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "eslint src --ext ts",
+        "test": "node ./out/test/runTest.js"
+    },
+    "dependencies": {
+        "vscode-jsonrpc": "^8.2.1"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.90.0",
+        "@types/node": "^20.0.0",
+        "@typescript-eslint/eslint-plugin": "^7.0.0",
+        "@typescript-eslint/parser": "^7.0.0",
+        "eslint": "^8.0.0",
+        "typescript": "^5.4.0",
+        "@vscode/test-electron": "^2.4.0"
     }
-  },
-  "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
-  },
-  "dependencies": {
-    "vscode-jsonrpc": "^8.2.1"
-  },
-  "devDependencies": {
-    "@types/vscode": "^1.90.0",
-    "@types/node": "^20.0.0",
-    "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
-    "eslint": "^8.0.0",
-    "typescript": "^5.4.0",
-    "@vscode/test-electron": "^2.4.0"
-  }
 }

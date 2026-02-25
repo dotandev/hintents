@@ -104,6 +104,7 @@ The command prints the signed audit log JSON to stdout so it can be redirected t
 - **[Project Proposal](docs/proposal.md)**: Detailed project proposal and roadmap.
 - **[Source Mapping](docs/source-mapping.md)**: Implementation details for mapping WASM failures to Rust source code.
 - **[Debug Symbols Guide](docs/debug-symbols-guide.md)**: How to compile Soroban contracts with debug symbols.
+- **[Interactive Trace Showcase](docs/showcase/README.md)**: Try out the interactive trace explorer online.
 
 ## Technical Analysis
 

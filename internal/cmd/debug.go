@@ -50,6 +50,7 @@ var (
 	watchFlag           bool
 	watchTimeoutFlag    int
 	protocolVersionFlag uint32
+	themeFlag           string
 )
 
 // DebugCommand holds dependencies for the debug command
@@ -219,6 +220,13 @@ Local WASM Replay Mode:
 			logger.SetLevel(slog.LevelInfo)
 		} else {
 			logger.SetLevel(slog.LevelWarn)
+		}
+
+		// Apply theme if specified, otherwise auto-detect
+		if themeFlag != "" {
+			visualizer.SetTheme(visualizer.Theme(themeFlag))
+		} else {
+			visualizer.SetTheme(visualizer.DetectTheme())
 		}
 
 		// Demo mode: print sample output for testing color detection (no network)
@@ -956,6 +964,7 @@ func init() {
 	debugCmd.Flags().BoolVar(&watchFlag, "watch", false, "Poll for transaction on-chain before debugging")
 	debugCmd.Flags().IntVar(&watchTimeoutFlag, "watch-timeout", 30, "Timeout in seconds for watch mode")
 	debugCmd.Flags().Uint32Var(&protocolVersionFlag, "protocol-version", 0, "Override protocol version for simulation (20, 21, 22, etc)")
+	debugCmd.Flags().StringVar(&themeFlag, "theme", "", "Color theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
 
 	rootCmd.AddCommand(debugCmd)
 }

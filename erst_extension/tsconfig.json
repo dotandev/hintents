@@ -9,7 +9,10 @@
         "sourceMap": true,
         "rootDir": "src",
         "strict": true,
-        "moduleResolution": "NodeNext"
+        "moduleResolution": "NodeNext",
+        "types": [
+            "vscode"
+        ]
     },
     "exclude": [
         "node_modules",

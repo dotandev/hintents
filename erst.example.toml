@@ -20,3 +20,7 @@ log_level = "info"
 
 # Cache directory for storing traces and snapshots
 # cache_path = "~/.erst/cache"
+
+# Audit HSM Configuration
+# ERST_PKCS11_MODULE = "/usr/lib/softhsm/libsofthsm2.so"
+# ERST_PKCS11_MAX_RPM = 1000 # Max requests per minute to protect HSM

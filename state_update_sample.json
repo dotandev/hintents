@@ -1,0 +1,29 @@
+{
+  "transaction_hash": "state-update-demo-123",
+  "start_time": "2026-02-23T18:10:48Z",
+  "states": [
+    {
+      "step": 0,
+      "operation": "contract_call",
+      "function": "init",
+      "host_state": {}
+    },
+    {
+      "step": 1,
+      "operation": "StateUpdate",
+      "host_state": {
+        "before": "AAAAAQAAA... (Before XDR)",
+        "after": "AAAAAQAAA... (After XDR)",
+        "key": "ledger-key-1"
+      }
+    },
+    {
+      "step": 2,
+      "operation": "LedgerState",
+      "host_state": {
+        "before": "CAFEBASE... (Previous State)",
+        "after": "DEADBEEF... (New State)"
+      }
+    }
+  ]
+}
