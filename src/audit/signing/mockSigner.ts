@@ -47,6 +47,10 @@ export class MockAuditSigner implements AuditSigner {
     return;
   }
 
+  async preflight(): Promise<void> {
+    return;
+  }
+
   async sign(payload: Uint8Array): Promise<Signature> {
     return nodeSign(null, Buffer.from(payload), this.privateKeyPem);
   }
