@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/report"
 	"github.com/dotandev/hintents/internal/trace"
 	"github.com/spf13/cobra"
@@ -41,11 +42,11 @@ Examples:
 
 func reportExec(cmd *cobra.Command, args []string) error {
 	if reportFile == "" {
-		return fmt.Errorf("trace file required. Use: erst report --file <file>")
+		return errors.WrapCliArgumentRequired("file")
 	}
 
 	if _, err := os.Stat(reportFile); os.IsNotExist(err) {
-		return fmt.Errorf("trace file not found: %s", reportFile)
+		return errors.WrapValidationError(fmt.Sprintf("trace file not found: %s", reportFile))
 	}
 
 	if reportOutput == "" {
@@ -54,12 +55,12 @@ func reportExec(cmd *cobra.Command, args []string) error {
 
 	traceData, err := os.ReadFile(reportFile)
 	if err != nil {
-		return fmt.Errorf("failed to read trace file: %w", err)
+		return errors.WrapValidationError(fmt.Sprintf("failed to read trace file: %v", err))
 	}
 
 	executionTrace, err := trace.FromJSON(traceData)
 	if err != nil {
-		return fmt.Errorf("failed to parse trace: %w", err)
+		return errors.WrapUnmarshalFailed(err, "trace")
 	}
 
 	builder := report.NewBuilder("Execution Trace Report")
@@ -110,7 +111,7 @@ func reportExec(cmd *cobra.Command, args []string) error {
 
 	exporter, err := report.NewExporter(reportOutput)
 	if err != nil {
-		return fmt.Errorf("failed to create exporter: %w", err)
+		return errors.WrapValidationError(fmt.Sprintf("failed to create exporter: %v", err))
 	}
 
 	var formats []string
@@ -130,12 +131,12 @@ func reportExec(cmd *cobra.Command, args []string) error {
 	if reportFormat == "json" {
 		jsonData, err := json.MarshalIndent(generatedReport, "", "  ")
 		if err != nil {
-			return fmt.Errorf("failed to marshal JSON: %w", err)
+			return errors.WrapMarshalFailed(err)
 		}
 
 		filename := reportOutput + "/report.json"
 		if err := os.WriteFile(filename, jsonData, 0644); err != nil {
-			return fmt.Errorf("failed to write JSON report: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to write JSON report: %v", err))
 		}
 
 		fmt.Printf("[OK] Report generated: %s\n", filename)
@@ -144,7 +145,7 @@ func reportExec(cmd *cobra.Command, args []string) error {
 
 	results, err := exporter.ExportMultiple(generatedReport, formats)
 	if err != nil {
-		return fmt.Errorf("failed to export report: %w", err)
+		return errors.WrapValidationError(fmt.Sprintf("failed to export report: %v", err))
 	}
 
 	for format, path := range results {

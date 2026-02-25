@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"github.com/dotandev/hintents/internal/localization"
+	"github.com/dotandev/hintents/internal/updater"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +40,15 @@ Examples:
 
 Get started with 'erst debug --help' or visit the documentation.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return localization.LoadTranslations()
+		// Load localizations
+		if err := localization.LoadTranslations(); err != nil {
+			return err
+		}
+
+		// Check for updates asynchronously (non-blocking)
+		checkForUpdatesAsync()
+
+		return nil
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -49,6 +58,16 @@ Get started with 'erst debug --help' or visit the documentation.`,
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
 	return rootCmd.Execute()
+}
+
+// checkForUpdatesAsync runs the update check in a goroutine to not block CLI startup
+func checkForUpdatesAsync() {
+	// Run update check in background goroutine
+	go func() {
+		// Use the Version variable from version.go
+		checker := updater.NewChecker(Version)
+		checker.CheckForUpdates()
+	}()
 }
 
 func init() {

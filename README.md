@@ -123,13 +123,14 @@ For a detailed explanation of the architecture, see [docs/architecture.md](docs/
 
 ## How to Contribute
 
-We are building this open-source to help the entire Stellar community.
+We are building this open-source to help the entire Stellar community. All contributions, from bug reports to new features, are welcome. Please follow our guidelines to ensure code quality and consistency.
 
 ### Prerequisites
 
-- Go 1.21+
-- Rust (for building the simulator binary)
+- Go 1.24.0+
+- Rust 1.70+ (for building the simulator binary)
 - Stellar CLI (for comparing results)
+- `make` (for running standard development tasks)
 
 ### Getting Started
 
@@ -138,16 +139,214 @@ We are building this open-source to help the entire Stellar community.
     git clone https://github.com/dotandev/hintents.git
     cd hintents
     ```
-2.  Build the Rust simulator:
+
+2.  Install dependencies:
+    ```bash
+    go mod download
+    cd simulator && cargo fetch && cd ..
+    ```
+
+3.  Build the Rust simulator:
     ```bash
     cd simulator
     cargo build --release
     cd ..
     ```
-3.  Run tests:
+
+4.  Run tests:
     ```bash
     go test ./...
+    cargo test --release -p erst-sim
     ```
+
+### Code Standards
+
+#### Go Code Style
+
+- **Formatting**: Run `go fmt ./...` before committing
+- **Linting**: Must pass `golangci-lint` without errors:
+  ```bash
+  golangci-lint run ./...
+  ```
+- **Naming Conventions**:
+  - Use `PascalCase` for exported identifiers (types, functions, constants)
+  - Use `camelCase` for unexported identifiers
+  - Use `UPPER_SNAKE_CASE` for constants
+  - Interface names should end with `-er`: `Reader`, `Writer`, `Logger`
+- **Error Handling**:
+  - Always check and handle errors explicitly
+  - Wrap errors with context using `fmt.Errorf`: `fmt.Errorf("operation failed: %w", err)`
+  - Never use bare `panic()` in production code
+- **Documentation**:
+  - All exported functions and types must have documentation comments
+  - Comments should be complete sentences starting with the name
+  - Example: `// Logger provides structured logging for diagnostic events.`
+
+#### Rust Code Style
+
+- **Formatting**: Run `cargo fmt --all` before committing
+- **Linting**: Must pass `cargo clippy`:
+  ```bash
+  cargo clippy --all-targets --release -- -D warnings
+  ```
+- **Naming Conventions**:
+  - Use `snake_case` for functions and variables
+  - Use `PascalCase` for types and traits
+  - Use `UPPER_SNAKE_CASE` for constants
+- **Error Handling**:
+  - Prefer `Result<T, E>` over panics
+  - Use custom error types for domain-specific errors
+  - Avoid unwrapping in production code except for obvious invariants
+- **Documentation**:
+  - Document all public functions with doc comments (`///`)
+  - Include examples for complex functions
+  - Use `cargo doc --open` to review generated documentation
+
+### Commit Message Convention
+
+Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+**Types**:
+- `feat`: A new feature
+- `fix`: A bug fix
+- `test`: Adding or improving tests
+- `docs`: Documentation changes
+- `refactor`: Code refactoring without feature changes
+- `perf`: Performance improvements
+- `chore`: Build, CI, or dependency updates
+- `ci`: CI/CD configuration changes
+
+**Scopes**: Use specific areas like `sim`, `cli`, `updater`, `trace`, `analyzer`, etc.
+
+**Examples**:
+```
+feat(sim): Add protocol version spoofing for harness
+test(sim): Add 1000+ transaction regression suite
+fix(updater): Handle network timeouts gracefully
+docs: Add comprehensive contribution guidelines
+```
+
+**Rules**:
+- Keep subject line under 50 characters
+- Use imperative mood ("add", not "added" or "adds")
+- No period at the end of the subject
+- Provide detailed explanation in the body if the change is non-obvious
+- Reference related issues: `Closes #350, refs #343`
+
+### Pull Request Structure
+
+1. **Title**: Follow commit message convention (this becomes the squashed commit)
+2. **Description**:
+   - Brief summary of changes
+   - Link to related issues: `Closes #XXX`
+   - Explain the "why" behind the changes
+   - Highlight any breaking changes
+3. **PR Checks**:
+   - All CI checks must pass
+   - Code coverage must not decrease
+   - All tests must pass locally before submitting
+4. **Format**:
+   ```markdown
+   ## Description
+   Brief explanation of the changes.
+
+   ## Related Issues
+   Closes #350, relates to #343
+
+   ## Testing
+   How was this tested? Include specific test cases.
+
+   ## Checklist
+   - [ ] Code follows style guidelines
+   - [ ] Tests added/updated
+   - [ ] Documentation updated
+   - [ ] No new warnings or errors
+   ```
+
+### Testing Requirements
+
+- **Unit Tests**: All new functions must have unit tests
+- **Coverage**: Aim for 80%+ coverage. Critical paths should have 90%+ coverage
+- **Integration Tests**: Include tests that verify feature interactions
+- **Running Tests**:
+  ```bash
+  # Go tests
+  go test -v -race ./...
+  go test -v -race -cover ./...
+
+  # Rust tests
+  cargo test --all
+  cargo test --all --release
+  ```
+- **Bench Tests**: For performance-critical code, include benchmarks
+  ```bash
+  go test -bench=. -benchmem ./...
+  ```
+
+### Development Workflow
+
+1. **Create a branch**:
+   ```bash
+   git checkout -b feat/my-feature
+   # or for bug fixes:
+   git checkout -b fix/issue-description
+   ```
+
+2. **Make changes** and test locally:
+   ```bash
+   go test ./...
+   go fmt ./...
+   golangci-lint run ./...
+   cargo clippy --all-targets -- -D warnings
+   cargo fmt --all
+   ```
+
+3. **Commit with conventional messages**:
+   ```bash
+   git add .
+   git commit -m "feat(scope): description"
+   ```
+
+4. **Push and create PR**:
+   ```bash
+   git push origin feat/my-feature
+   # Then create PR on GitHub with detailed description
+   ```
+
+5. **Address feedback**:
+   - Make requested changes
+   - Commit with descriptive messages
+   - Force-push if necessary: `git push -f origin feat/my-feature`
+
+### Linting and Formatting
+
+Run the provided scripts before submitting:
+
+```bash
+# Format Go code
+go fmt ./...
+
+# Run linters
+golangci-lint run ./...
+
+# Format Rust code
+cargo fmt --all
+
+# Check Rust with clippy
+cargo clippy --all-targets --release -- -D warnings
+
+# Run all checks
+make lint
+make format
+```
 
 ### Development Roadmap
 
@@ -157,6 +356,58 @@ See [docs/proposal.md](docs/proposal.md) for the detailed proposal.
 2.  [x] **Phase 2**: Build a basic "Replay Harness" that can execute a loaded WASM file.
 3.  [x] **Phase 3**: Connect the harness to live mainnet data.
 4.  [ ] **Phase 4**: Advanced Diagnostics & Source Mapping (Current Focus).
+
+### Common Development Tasks
+
+#### Running a single test
+```bash
+go test -run TestName ./package
+```
+
+#### Profiling a test
+```bash
+go test -cpuprofile=cpu.prof -memprofile=mem.prof ./...
+go tool pprof cpu.prof
+```
+
+#### Building for a specific OS
+```bash
+GOOS=linux GOARCH=amd64 go build -o erst-linux-amd64 ./cmd/erst
+```
+
+#### Cleaning build artifacts
+```bash
+go clean
+cargo clean
+make clean
+```
+
+### Code Review Checklist
+
+When reviewing PRs, ensure:
+- [ ] Code follows naming and style conventions
+- [ ] Error handling is appropriate
+- [ ] Tests are adequate and pass
+- [ ] Documentation is clear and complete
+- [ ] No unnecessary dependencies added
+- [ ] Performance implications considered
+- [ ] Security implications reviewed
+- [ ] Commit messages follow convention
+
+### Getting Help
+
+- **Questions?** Open a GitHub Discussion
+- **Found a bug?** Create an Issue with reproduction steps
+- **Have an idea?** Start a Discussion before implementing
+- **Documentation issue?** Create an Issue with details
+
+### Important Guidelines
+
+- **No Emojis**: Commit messages and PR titles should not contain emojis
+- **No "Slops"**: Avoid vague language like "fixes stuff" or "updates things"
+- **Clear Messages**: Every commit should have a clear, descriptive message
+- **Lint-Free**: Only suppress linting errors if they are objectively false positives. Always explain suppression with `// nolint:rule-name` comments
+- **Assume Bad Faith in Code**: Write code defensively, validate inputs, handle edge cases
 
 ## Contributors
 

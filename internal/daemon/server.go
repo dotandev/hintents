@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	stellarrpc "github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/simulator"
@@ -70,12 +71,12 @@ func NewServer(config Config) (*Server, error) {
 
 	client, err := stellarrpc.NewClient(opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create RPC client: %w", err)
+		return nil, errors.WrapValidationError(fmt.Sprintf("failed to create RPC client: %v", err))
 	}
 
 	sim, err := simulator.NewRunner("", false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create simulator: %w", err)
+		return nil, errors.WrapSimulatorNotFound(err.Error())
 	}
 
 	return &Server{
@@ -108,7 +109,7 @@ func (s *Server) authenticate(r *http.Request) bool {
 // DebugTransaction handles debug_transaction RPC calls
 func (s *Server) DebugTransaction(r *http.Request, req *DebugTransactionRequest, resp *DebugTransactionResponse) error {
 	if !s.authenticate(r) {
-		return fmt.Errorf("unauthorized")
+		return errors.WrapUnauthorized("")
 	}
 
 	ctx := r.Context()
@@ -123,7 +124,7 @@ func (s *Server) DebugTransaction(r *http.Request, req *DebugTransactionRequest,
 	txResp, err := s.rpcClient.GetTransaction(ctx, req.Hash)
 	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to fetch transaction: %w", err)
+		return errors.WrapRPCConnectionFailed(err)
 	}
 
 	*resp = DebugTransactionResponse{
@@ -139,7 +140,7 @@ func (s *Server) DebugTransaction(r *http.Request, req *DebugTransactionRequest,
 // GetTrace handles get_trace RPC calls
 func (s *Server) GetTrace(r *http.Request, req *GetTraceRequest, resp *GetTraceResponse) error {
 	if !s.authenticate(r) {
-		return fmt.Errorf("unauthorized")
+		return errors.WrapUnauthorized("")
 	}
 
 	ctx := r.Context()
@@ -174,7 +175,7 @@ func (s *Server) Start(ctx context.Context, port string) error {
 	server.RegisterCodec(json2.NewCodec(), "application/json;charset=UTF-8")
 
 	if err := server.RegisterService(s, ""); err != nil {
-		return fmt.Errorf("failed to register service: %w", err)
+		return errors.WrapValidationError(fmt.Sprintf("failed to register service: %v", err))
 	}
 
 	http.Handle("/rpc", server)

@@ -175,6 +175,22 @@ cache_path = "/custom/cache"`,
 				CachePath:     "/custom/cache",
 			},
 		},
+		{
+			"TOML with rpc_urls array",
+			`rpc_urls = ["https://rpc1.com", "https://rpc2.com"]
+network = "testnet"`,
+			&Config{
+				RpcUrls: []string{"https://rpc1.com", "https://rpc2.com"},
+				Network: NetworkTestnet,
+			},
+		},
+		{
+			"TOML with rpc_urls comma string",
+			`rpc_urls = "https://rpc1.com,https://rpc2.com"`,
+			&Config{
+				RpcUrls: []string{"https://rpc1.com", "https://rpc2.com"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -187,6 +203,16 @@ cache_path = "/custom/cache"`,
 
 			if cfg.RpcUrl != tt.want.RpcUrl {
 				t.Errorf("RpcUrl: expected %s, got %s", tt.want.RpcUrl, cfg.RpcUrl)
+			}
+
+			if len(cfg.RpcUrls) != len(tt.want.RpcUrls) {
+				t.Errorf("RpcUrls count: expected %d, got %d", len(tt.want.RpcUrls), len(cfg.RpcUrls))
+			} else {
+				for i := range cfg.RpcUrls {
+					if cfg.RpcUrls[i] != tt.want.RpcUrls[i] {
+						t.Errorf("RpcUrls[%d]: expected %s, got %s", i, tt.want.RpcUrls[i], cfg.RpcUrls[i])
+					}
+				}
 			}
 
 			if cfg.Network != tt.want.Network {

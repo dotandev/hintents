@@ -6,6 +6,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/wizard"
 	"github.com/spf13/cobra"
@@ -20,12 +21,12 @@ var wizardCmd = &cobra.Command{
 		network, _ := cmd.Flags().GetString("network")
 
 		if account == "" {
-			return fmt.Errorf("account flag required: erst wizard --account <address>")
+			return errors.WrapCliArgumentRequired("account")
 		}
 
 		client, err := rpc.NewClient(rpc.WithNetwork(rpc.Network(network)))
 		if err != nil {
-			return fmt.Errorf("failed to create client: %w", err)
+			return errors.WrapValidationError(err.Error())
 		}
 
 		w := wizard.New(client)

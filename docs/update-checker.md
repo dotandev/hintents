@@ -51,7 +51,7 @@ The cache contains:
 When an update is available, you'll see:
 
 ```
-💡 A new version (v1.2.3) is available! Run 'go install github.com/dotandev/hintents/cmd/erst@latest' to update.
+[INFO] A new version (v1.2.3) is available! Run 'go install github.com/dotandev/hintents/cmd/erst@latest' to update.
 ```
 
 ## Building with Version Information

@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -78,7 +79,7 @@ The session ID can be auto-generated or specified with --id flag.`,
 		// Check if we have an active session
 		data := GetCurrentSession()
 		if data == nil {
-			return fmt.Errorf("Error: no active session to save. Run 'erst debug <tx-hash>' first")
+			return errors.WrapSimulationLogicError("no active session to save. Run 'erst debug <tx-hash>' first")
 		}
 
 		// Generate or use provided ID
@@ -94,7 +95,7 @@ The session ID can be auto-generated or specified with --id flag.`,
 		// Open session store
 		store, err := session.NewStore()
 		if err != nil {
-			return fmt.Errorf("failed to open session store: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to open session store: %v", err))
 		}
 		defer store.Close()
 
@@ -106,7 +107,7 @@ The session ID can be auto-generated or specified with --id flag.`,
 
 		// Save session
 		if err := store.Save(ctx, data); err != nil {
-			return fmt.Errorf("Error: failed to save session: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to save session: %v", err))
 		}
 
 		fmt.Printf("Session saved: %s\n", data.ID)
@@ -139,7 +140,7 @@ Use 'erst session list' to see available sessions.`,
 		// Open session store
 		store, err := session.NewStore()
 		if err != nil {
-			return fmt.Errorf("Error: failed to open session store: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to open session store: %v", err))
 		}
 		defer store.Close()
 
@@ -151,12 +152,12 @@ Use 'erst session list' to see available sessions.`,
 		// Load session
 		data, err := store.Load(ctx, sessionID)
 		if err != nil {
-			return fmt.Errorf("Error: session '%s' not found or failed to load: %w", sessionID, err)
+			return errors.WrapSessionNotFound(sessionID)
 		}
 
 		// Check schema version compatibility
 		if data.SchemaVersion > session.SchemaVersion {
-			return fmt.Errorf("Error: session was created with a newer version of erst (schema v%d > v%d). Please upgrade erst", data.SchemaVersion, session.SchemaVersion)
+			return errors.WrapProtocolUnsupported(uint32(data.SchemaVersion))
 		}
 
 		// Update status and make it current
@@ -213,7 +214,7 @@ Displays session ID, network, last access time, and transaction hash.`,
 		// Open session store
 		store, err := session.NewStore()
 		if err != nil {
-			return fmt.Errorf("Error: failed to open session store: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to open session store: %v", err))
 		}
 		defer store.Close()
 
@@ -225,7 +226,7 @@ Displays session ID, network, last access time, and transaction hash.`,
 		// List sessions
 		sessions, err := store.List(ctx, 50)
 		if err != nil {
-			return fmt.Errorf("Error: failed to list sessions: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to list sessions: %v", err))
 		}
 
 		if len(sessions) == 0 {
@@ -266,13 +267,13 @@ Use 'erst session list' to see available sessions.`,
 		// Open session store
 		store, err := session.NewStore()
 		if err != nil {
-			return fmt.Errorf("Error: failed to open session store: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to open session store: %v", err))
 		}
 		defer store.Close()
 
 		// Delete session
 		if err := store.Delete(ctx, sessionID); err != nil {
-			return fmt.Errorf("Error: failed to delete session '%s': %w", sessionID, err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to delete session '%s': %v", sessionID, err))
 		}
 
 		fmt.Printf("Session deleted: %s\n", sessionID)

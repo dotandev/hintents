@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/dotandev/hintents/internal/authtrace"
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/spf13/cobra"
@@ -33,7 +34,7 @@ Examples:
 		switch rpc.Network(authNetworkFlag) {
 		case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
 		default:
-			return fmt.Errorf("invalid network: %s", authNetworkFlag)
+			return errors.WrapInvalidNetwork(authNetworkFlag)
 		}
 		return nil
 	},
@@ -49,14 +50,14 @@ Examples:
 
 		client, err := rpc.NewClient(opts...)
 		if err != nil {
-			return fmt.Errorf("failed to create client: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
 		}
 
 		logger.Logger.Info("Fetching transaction for auth analysis", "tx_hash", txHash)
 
 		resp, err := client.GetTransaction(cmd.Context(), txHash)
 		if err != nil {
-			return fmt.Errorf("failed to fetch transaction: %w", err)
+			return errors.WrapRPCConnectionFailed(err)
 		}
 
 		fmt.Printf("Transaction Envelope: %d bytes\n", len(resp.EnvelopeXdr))

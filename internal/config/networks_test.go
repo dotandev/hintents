@@ -16,8 +16,13 @@ func TestAddAndGetCustomNetwork(t *testing.T) {
 	// Use a temporary directory for testing
 	tmpDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
+	originalUP := os.Getenv("USERPROFILE")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	os.Setenv("USERPROFILE", tmpDir)
+	defer func() {
+		os.Setenv("HOME", originalHome)
+		os.Setenv("USERPROFILE", originalUP)
+	}()
 
 	testConfig := rpc.NetworkConfig{
 		Name:              "local-dev",
@@ -49,8 +54,13 @@ func TestAddAndGetCustomNetwork(t *testing.T) {
 func TestListCustomNetworks(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
+	originalUP := os.Getenv("USERPROFILE")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	os.Setenv("USERPROFILE", tmpDir)
+	defer func() {
+		os.Setenv("HOME", originalHome)
+		os.Setenv("USERPROFILE", originalUP)
+	}()
 
 	// Add multiple networks
 	networks := []string{"local-dev", "staging", "private-net"}
@@ -79,8 +89,13 @@ func TestListCustomNetworks(t *testing.T) {
 func TestRemoveCustomNetwork(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
+	originalUP := os.Getenv("USERPROFILE")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	os.Setenv("USERPROFILE", tmpDir)
+	defer func() {
+		os.Setenv("HOME", originalHome)
+		os.Setenv("USERPROFILE", originalUP)
+	}()
 
 	testConfig := rpc.NetworkConfig{
 		Name:              "temp-network",
@@ -108,12 +123,12 @@ func TestRemoveCustomNetwork(t *testing.T) {
 func TestConfigFilePermissions(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
-	originalProfile := os.Getenv("USERPROFILE")
+	originalUP := os.Getenv("USERPROFILE")
 	os.Setenv("HOME", tmpDir)
 	os.Setenv("USERPROFILE", tmpDir)
 	defer func() {
 		os.Setenv("HOME", originalHome)
-		os.Setenv("USERPROFILE", originalProfile)
+		os.Setenv("USERPROFILE", originalUP)
 	}()
 
 	testConfig := rpc.NetworkConfig{
@@ -132,8 +147,8 @@ func TestConfigFilePermissions(t *testing.T) {
 		t.Fatalf("Failed to stat config file: %v", err)
 	}
 
-	// Check file permissions only on Unix-like systems
-	// Windows doesn't support Unix-style permission bits reliably
+	// Check that file has restrictive permissions (0600)
+	// Skip on Windows as permissions work differently
 	if runtime.GOOS != "windows" {
 		mode := info.Mode().Perm()
 		expected := os.FileMode(0600)

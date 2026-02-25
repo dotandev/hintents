@@ -33,7 +33,7 @@
 -  `var _ RunnerInterface = (*Runner)(nil)` ensures implementation
 -  Interface contract enforced at compile time
 
-## 🧪 **Test Coverage**
+## [TEST] **Test Coverage**
 
 ### **Mock Implementation**
 ```go

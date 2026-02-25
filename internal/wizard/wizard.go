@@ -31,16 +31,16 @@ func New(client *rpc.Client) *Wizard {
 
 func (w *Wizard) SelectTransaction(ctx context.Context, account string) (*SelectionResult, error) {
 	if account == "" {
-		return nil, fmt.Errorf("%w: account address required", errors.ErrInvalidNetwork)
+		return nil, errors.WrapValidationError("account address required")
 	}
 
 	txs, err := w.client.GetAccountTransactions(ctx, account, defaultLimit)
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", errors.ErrRPCConnectionFailed, err)
+		return nil, errors.WrapRPCConnectionFailed(err)
 	}
 
 	if len(txs) == 0 {
-		return nil, fmt.Errorf("%w: no transactions found for account", errors.ErrTransactionNotFound)
+		return nil, errors.WrapTransactionNotFound(fmt.Errorf("no transactions found for account"))
 	}
 
 	failed := filter(txs, isFailed)
@@ -51,7 +51,7 @@ func (w *Wizard) SelectTransaction(ctx context.Context, account string) (*Select
 
 	selected := selectFromList(failed)
 	if selected == nil {
-		return nil, fmt.Errorf("transaction selection cancelled")
+		return nil, errors.WrapValidationError("transaction selection cancelled")
 	}
 
 	logger.Logger.Info("Transaction selected", "hash", selected.Hash, "status", selected.Status)
@@ -112,7 +112,7 @@ func readUserChoice(max int) (int, error) {
 	fmt.Print("Select transaction (number): ")
 	_, err := fmt.Scanln(&choice)
 	if err != nil || choice < 1 || choice > max {
-		return 0, fmt.Errorf("invalid selection")
+		return 0, errors.WrapValidationError("invalid selection")
 	}
 	return choice, nil
 }

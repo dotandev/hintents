@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -21,7 +22,7 @@ import (
 func HashLedgerKey(key xdr.LedgerKey) (string, error) {
 	xdrBytes, err := key.MarshalBinary()
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal LedgerKey to XDR: %w", err)
+		return "", errors.WrapMarshalFailed(err)
 	}
 	hash := sha256.Sum256(xdrBytes)
 	return hex.EncodeToString(hash[:]), nil
@@ -46,12 +47,12 @@ type CachedEntry struct {
 func GetCachePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to get user home directory: %w", err)
+		return "", errors.WrapValidationError(fmt.Sprintf("failed to get user home directory: %v", err))
 	}
 
 	path := filepath.Join(home, CacheDirName)
 	if err := os.MkdirAll(path, DirPerm); err != nil {
-		return "", fmt.Errorf("failed to create cache directory: %w", err)
+		return "", errors.WrapValidationError(fmt.Sprintf("failed to create cache directory: %v", err))
 	}
 
 	return path, nil
@@ -77,7 +78,7 @@ func Get(key string) (string, bool, error) {
 
 	data, err := os.ReadFile(filename)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to read cache file: %w", err)
+		return "", false, errors.WrapValidationError(fmt.Sprintf("failed to read cache file: %v", err))
 	}
 
 	var entry CachedEntry
@@ -116,12 +117,12 @@ func SetWithTTL(key string, value string, ttl time.Duration) error {
 
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("failed to marshal cache entry: %w", err)
+		return errors.WrapMarshalFailed(err)
 	}
 
 	filename := filepath.Join(cachePath, getCacheKey(key)+".json")
 	if err := os.WriteFile(filename, data, FilePerm); err != nil {
-		return fmt.Errorf("failed to write cache file: %w", err)
+		return errors.WrapValidationError(fmt.Sprintf("failed to write cache file: %v", err))
 	}
 
 	return nil

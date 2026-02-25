@@ -41,7 +41,7 @@ The updated CI pipeline will now:
 - **No false positives**: Test files excluded from unused checks
 - **Fast execution**: 5-minute timeout prevents hanging
 
-## 🧪 Local Testing
+## [TEST] Local Testing
 
 To test locally (once Go toolchain is fixed):
 ```bash

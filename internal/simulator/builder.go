@@ -5,6 +5,8 @@ package simulator
 
 import (
 	"fmt"
+
+	"github.com/dotandev/hintents/internal/errors"
 )
 
 // SimulationRequestBuilder provides a fluent interface for building SimulationRequest objects.
@@ -90,16 +92,16 @@ func (b *SimulationRequestBuilder) WithLedgerEntries(entries map[string]string) 
 func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 	// Check for any errors collected during building
 	if len(b.errors) > 0 {
-		return nil, fmt.Errorf("validation errors: %v", b.errors)
+		return nil, errors.WrapValidationError(fmt.Sprintf("%v", b.errors))
 	}
 
 	// Validate required fields
 	if b.envelopeXdr == "" {
-		return nil, fmt.Errorf("envelope XDR is required")
+		return nil, errors.WrapValidationError("envelope XDR is required")
 	}
 
 	if b.resultMetaXdr == "" {
-		return nil, fmt.Errorf("result meta XDR is required")
+		return nil, errors.WrapValidationError("result meta XDR is required")
 	}
 
 	// Build the request

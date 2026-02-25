@@ -6,6 +6,8 @@ package rpc
 import (
 	"encoding/hex"
 	"fmt"
+
+	"github.com/dotandev/hintents/internal/errors"
 )
 
 // ValidateTransactionHash checks if the provided string is a valid Stellar transaction hash.
@@ -13,11 +15,11 @@ import (
 // The check is case-insensitive.
 func ValidateTransactionHash(hash string) error {
 	if len(hash) != 64 {
-		return fmt.Errorf("transaction hash must be exactly 64 characters long, got %d", len(hash))
+		return errors.WrapValidationError(fmt.Sprintf("transaction hash must be exactly 64 characters long, got %d", len(hash)))
 	}
 	_, err := hex.DecodeString(hash)
 	if err != nil {
-		return fmt.Errorf("transaction hash must contain only valid hexadecimal characters")
+		return errors.WrapValidationError("transaction hash must contain only valid hexadecimal characters")
 	}
 	return nil
 }

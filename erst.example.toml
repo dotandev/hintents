@@ -3,8 +3,11 @@
 # Environment variables override these settings
 # CLI flags override everything
 
-# RPC URL for the Stellar network
+# RPC URL for the Stellar network (single URL)
 rpc_url = "https://soroban-testnet.stellar.org"
+
+# Multi-RPC URLs for automatic fallback (array syntax)
+# rpc_urls = ["https://rpc1.stellar.org", "https://rpc2.stellar.org"]
 
 # Network: public, testnet, futurenet, or standalone
 network = "testnet"

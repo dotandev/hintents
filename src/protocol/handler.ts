@@ -130,7 +130,7 @@ export class ProtocolHandler {
      * Initialize and start a new debug session
      */
     private async startDebugSession(parsed: ParsedURI): Promise<void> {
-        console.log('🔍 Initiating debug session from dashboard link...');
+        console.log('[SEARCH] Initiating debug session from dashboard link...');
         console.log(`  └─ Transaction: ${parsed.transactionHash}`);
         console.log(`  └─ Network:     ${parsed.network}`);
 

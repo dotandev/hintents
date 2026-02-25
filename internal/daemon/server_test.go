@@ -6,7 +6,7 @@ package daemon
 import (
 	"context"
 	"net/http/httptest"
-	"runtime"
+	"os"
 	"testing"
 	"time"
 
@@ -26,7 +26,7 @@ func TestServer_DebugTransaction(t *testing.T) {
 		t.Skip("Skipping simulator-dependent test")
 	}
 	// Set mock simulator path for testing
-	t.Setenv("ERST_SIM_PATH", getTestSimulatorPath())
+	t.Setenv("ERST_SIM_PATH", os.Args[0])
 
 	server, err := NewServer(Config{
 		Network: string(stellarrpc.Testnet),
@@ -52,7 +52,7 @@ func TestServer_GetTrace(t *testing.T) {
 		t.Skip("Skipping simulator-dependent test")
 	}
 	// Set mock simulator path for testing
-	t.Setenv("ERST_SIM_PATH", getTestSimulatorPath())
+	t.Setenv("ERST_SIM_PATH", os.Args[0])
 
 	server, err := NewServer(Config{
 		Network: string(stellarrpc.Testnet),
@@ -83,7 +83,7 @@ func TestServer_Authentication(t *testing.T) {
 		t.Skip("Skipping simulator-dependent test")
 	}
 	// Set mock simulator path for testing
-	t.Setenv("ERST_SIM_PATH", getTestSimulatorPath())
+	t.Setenv("ERST_SIM_PATH", os.Args[0])
 
 	server, err := NewServer(Config{
 		Network:   string(stellarrpc.Testnet),
@@ -123,7 +123,7 @@ func TestServer_StartStop(t *testing.T) {
 		t.Skip("Skipping simulator-dependent test")
 	}
 	// Set mock simulator path for testing
-	t.Setenv("ERST_SIM_PATH", getTestSimulatorPath())
+	t.Setenv("ERST_SIM_PATH", os.Args[0])
 
 	server, err := NewServer(Config{
 		Network: string(stellarrpc.Testnet),

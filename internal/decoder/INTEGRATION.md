@@ -19,7 +19,7 @@ Operation Results:
   Operation 0: Insufficient Funds (payment_underfunded)
     Source account doesn't have enough of the asset to send
 
-💡 Tip: Check your account balance and ensure you have enough of the asset to complete this payment.
+[INFO] Tip: Check your account balance and ensure you have enough of the asset to complete this payment.
 ```
 
 ## Integration Code Example
@@ -50,7 +50,7 @@ func displayTransactionResult(resultXDR string) error {
     
     // Optionally add helpful tips based on the error
     if result.Result.Code == xdr.TransactionResultCodeTxInsufficientBalance {
-        fmt.Println("\n💡 Tip: Add more XLM to your account to cover fees and maintain minimum balance.")
+        fmt.Println("\n[INFO] Tip: Add more XLM to your account to cover fees and maintain minimum balance.")
     }
     
     return nil

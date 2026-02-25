@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/trace"
 	"github.com/spf13/cobra"
 )
@@ -37,23 +38,23 @@ Example:
 		} else if traceFile != "" {
 			filename = traceFile
 		} else {
-			return fmt.Errorf("trace file required. Use: erst trace <file> or --file <file>")
+			return errors.WrapCliArgumentRequired("file")
 		}
 
 		// Check if file exists
 		if _, err := os.Stat(filename); os.IsNotExist(err) {
-			return fmt.Errorf("trace file not found: %s", filename)
+			return errors.WrapValidationError(fmt.Sprintf("trace file not found: %s", filename))
 		}
 
 		// Load trace from file
 		data, err := os.ReadFile(filename)
 		if err != nil {
-			return fmt.Errorf("failed to read trace file: %w", err)
+			return errors.WrapValidationError(fmt.Sprintf("failed to read trace file: %v", err))
 		}
 
 		executionTrace, err := trace.FromJSON(data)
 		if err != nil {
-			return fmt.Errorf("failed to parse trace file: %w", err)
+			return errors.WrapUnmarshalFailed(err, "trace")
 		}
 
 		// Start interactive viewer

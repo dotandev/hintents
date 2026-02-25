@@ -75,7 +75,7 @@ func ExampleSimulationRequestBuilder_validation() {
 	if err != nil {
 		fmt.Println("Validation error:", err)
 	}
-	// Output: Validation error: result meta XDR is required
+	// Output: Validation error: validation failed: result meta XDR is required
 }
 
 // ExampleSimulationRequestBuilder_reuse demonstrates builder reuse with Reset().

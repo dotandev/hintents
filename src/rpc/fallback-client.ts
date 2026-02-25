@@ -100,7 +100,7 @@ export class FallbackRPCClient {
                 this.markSuccess(endpoint);
                 this.currentIndex = 0; // Return to primary
 
-                const responseSize = JSON.stringify(response.data).length;
+                const responseSize = response.data ? JSON.stringify(response.data).length : 0;
                 logger.verbose(LogCategory.RPC, `← Response received (${duration}ms)`);
                 logger.verboseIndent(LogCategory.RPC, `Status: ${response.status} ${response.statusText}`);
                 logger.verboseIndent(LogCategory.RPC, `Response size: ${logger.formatBytes(responseSize)}`);
@@ -238,7 +238,7 @@ export class FallbackRPCClient {
 
         // Open circuit breaker if threshold exceeded
         if (endpoint.failureCount >= this.config.circuitBreakerThreshold) {
-            console.warn(`⚡ Circuit breaker opened for: ${endpoint.url}`);
+            console.warn(`[READY] Circuit breaker opened for: ${endpoint.url}`);
             endpoint.circuitOpen = true;
         }
     }
@@ -319,7 +319,7 @@ export class FallbackRPCClient {
      * Perform health check on all endpoints
      */
     async performHealthChecks(): Promise<void> {
-        console.log('🏥 Performing health checks on all RPC endpoints...');
+        console.log('[HEALTH] Performing health checks on all RPC endpoints...');
 
         const checks = this.endpoints.map(async (endpoint) => {
             try {

@@ -1,0 +1,125 @@
+time=2026-02-24T20:27:57.536+01:00 level=INFO source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:317 msg="Transaction fetched" hash=abc123 envelope_size=12 url=https://horizon-testnet.stellar.org
+time=2026-02-24T20:27:57.536+01:00 level=ERROR source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:307 msg="Failed to fetch transaction" hash=fail error="not found" url=https://horizon-testnet.stellar.org
+time=2026-02-24T20:27:57.547+01:00 level=ERROR source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:307 msg="Failed to fetch transaction" hash=timeout error="context deadline exceeded" url=https://horizon-testnet.stellar.org
+time=2026-02-24T20:27:57.547+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:215 msg="RPC failover triggered" new_url=http://success2.com
+time=2026-02-24T20:27:57.547+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:215 msg="RPC failover triggered" new_url=http://fail1.com
+time=2026-02-24T20:28:56.339+01:00 level=ERROR source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:307 msg="Failed to fetch transaction" hash=abc error="Get \"http://fail1.com/transactions/abc\": RPC connection failed: dial tcp: lookup fail1.com: no such host" url=http://fail1.com
+time=2026-02-24T20:28:56.340+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:282 msg="Retrying with fallback RPC..." error="RPC connection failed: Get \"http://fail1.com/transactions/abc\": RPC connection failed: dial tcp: lookup fail1.com: no such host"
+time=2026-02-24T20:28:56.340+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:215 msg="RPC failover triggered" new_url=http://fail2.com
+time=2026-02-24T20:28:56.892+01:00 level=ERROR source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:307 msg="Failed to fetch transaction" hash=abc error="invalid character '<' looking for beginning of value\nerror decoding response\ngithub.com/stellar/go-stellar-sdk/support/errors.Wrap\n\tC:/Users/owner/go/pkg/mod/github.com/stellar/go-stellar-sdk@v0.1.0/support/errors/main.go:43\ngithub.com/stellar/go-stellar-sdk/clients/horizonclient.decodeResponse\n\tC:/Users/owner/go/pkg/mod/github.com/stellar/go-stellar-sdk@v0.1.0/clients/horizonclient/internal.go:49\ngithub.com/stellar/go-stellar-sdk/clients/horizonclient.(*Client).sendHTTPRequest\n\tC:/Users/owner/go/pkg/mod/github.com/stellar/go-stellar-sdk@v0.1.0/clients/horizonclient/client.go:125\ngithub.com/stellar/go-stellar-sdk/clients/horizonclient.(*Client).sendRequest\n\tC:/Users/owner/go/pkg/mod/github.com/stellar/go-stellar-sdk@v0.1.0/clients/horizonclient/client.go:34\ngithub.com/stellar/go-stellar-sdk/clients/horizonclient.(*Client).TransactionDetail\n\tC:/Users/owner/go/pkg/mod/github.com/stellar/go-stellar-sdk@v0.1.0/clients/horizonclient/client.go:639\ngithub.com/dotandev/hintents/internal/rpc.(*Client).getTransactionAttempt\n\tC:/Users/owner/Projects/hintents/internal/rpc/client.go:304\ngithub.com/dotandev/hintents/internal/rpc.(*Client).GetTransaction\n\tC:/Users/owner/Projects/hintents/internal/rpc/client.go:270\ngithub.com/dotandev/hintents/internal/rpc.TestClient_GetTransaction_Failover_Logic\n\tC:/Users/owner/Projects/hintents/internal/rpc/failover_test.go:44\ntesting.tRunner\n\tC:/Program Files/Go/src/testing/testing.go:1934\nruntime.goexit\n\tC:/Program Files/Go/src/runtime/asm_amd64.s:1693" url=http://fail2.com
+time=2026-02-24T20:28:57.931+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:450 msg="Ledger not found" sequence=3000000 status=404
+--- FAIL: TestGetLedgerHeader_Integration_Testnet (1.04s)
+    ledger_integration_test.go:41: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_integration_test.go:41
+        	Error:      	Received unexpected error:
+        	            	all RPC endpoints failed: [https://horizon-testnet.stellar.org/: ledger not found: ledger 3000000 not found (may be archived or not yet created)]
+        	Test:       	TestGetLedgerHeader_Integration_Testnet
+        	Messages:   	unexpected error fetching ledger
+time=2026-02-24T20:28:58.185+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:450 msg="Ledger not found" sequence=999999999 status=404
+--- FAIL: TestGetLedgerHeader_Integration_FutureLedger (0.25s)
+    ledger_integration_test.go:82: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_integration_test.go:82
+        	Error:      	Should be true
+        	Test:       	TestGetLedgerHeader_Integration_FutureLedger
+        	Messages:   	should be ledger not found error
+    ledger_integration_test.go:84: Correctly handled future ledger request: all RPC endpoints failed: [https://horizon-testnet.stellar.org/: ledger not found: ledger 999999999 not found (may be archived or not yet created)]
+time=2026-02-24T20:28:58.539+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:450 msg="Ledger not found" sequence=3000000 status=404
+--- FAIL: TestGetLedgerHeader_Integration_MultipleNetworks (0.35s)
+    --- FAIL: TestGetLedgerHeader_Integration_MultipleNetworks/testnet (0.35s)
+        ledger_integration_test.go:120: 
+            	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_integration_test.go:120
+            	Error:      	Received unexpected error:
+            	            	all RPC endpoints failed: [https://horizon-testnet.stellar.org/: ledger not found: ledger 3000000 not found (may be archived or not yet created)]
+            	Test:       	TestGetLedgerHeader_Integration_MultipleNetworks/testnet
+time=2026-02-24T20:28:58.782+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/client.go:450 msg="Ledger not found" sequence=10000000 status=404
+--- FAIL: TestGetLedgerHeader_Integration_RecentLedger (0.24s)
+    ledger_integration_test.go:154: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_integration_test.go:154
+        	Error:      	Received unexpected error:
+        	            	all RPC endpoints failed: [https://horizon-testnet.stellar.org/: ledger not found: ledger 10000000 not found (may be archived or not yet created)]
+        	Test:       	TestGetLedgerHeader_Integration_RecentLedger
+--- FAIL: TestGetLedgerHeader_Success (0.00s)
+    ledger_test.go:336: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:336
+        	Error:      	Received unexpected error:
+        	            	all RPC endpoints failed: []
+        	Test:       	TestGetLedgerHeader_Success
+--- FAIL: TestGetLedgerHeader_NotFound (0.00s)
+    ledger_test.go:378: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:378
+        	Error:      	Should be true
+        	Test:       	TestGetLedgerHeader_NotFound
+        	Messages:   	should be ledger not found error
+    ledger_test.go:381: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:381
+        	Error:      	Should be true
+        	Test:       	TestGetLedgerHeader_NotFound
+--- FAIL: TestGetLedgerHeader_Archived (0.00s)
+    ledger_test.go:408: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:408
+        	Error:      	Should be true
+        	Test:       	TestGetLedgerHeader_Archived
+        	Messages:   	should be ledger archived error
+    ledger_test.go:411: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:411
+        	Error:      	Should be true
+        	Test:       	TestGetLedgerHeader_Archived
+--- FAIL: TestGetLedgerHeader_RateLimit (0.00s)
+    ledger_test.go:438: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:438
+        	Error:      	Should be true
+        	Test:       	TestGetLedgerHeader_RateLimit
+        	Messages:   	should be rate limit error
+    ledger_test.go:441: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:441
+        	Error:      	Should be true
+        	Test:       	TestGetLedgerHeader_RateLimit
+--- FAIL: TestGetLedgerHeader_GenericError (0.00s)
+    ledger_test.go:492: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:492
+        	Error:      	"all RPC endpoints failed: []" does not contain "RPC connection failed"
+        	Test:       	TestGetLedgerHeader_GenericError
+--- FAIL: TestGetLedgerHeader_DifferentNetworks (0.00s)
+    --- FAIL: TestGetLedgerHeader_DifferentNetworks/testnet (0.00s)
+        ledger_test.go:607: 
+            	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:607
+            	Error:      	Received unexpected error:
+            	            	all RPC endpoints failed: []
+            	Test:       	TestGetLedgerHeader_DifferentNetworks/testnet
+    --- FAIL: TestGetLedgerHeader_DifferentNetworks/mainnet (0.00s)
+        ledger_test.go:607: 
+            	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:607
+            	Error:      	Received unexpected error:
+            	            	all RPC endpoints failed: []
+            	Test:       	TestGetLedgerHeader_DifferentNetworks/mainnet
+    --- FAIL: TestGetLedgerHeader_DifferentNetworks/futurenet (0.00s)
+        ledger_test.go:607: 
+            	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:607
+            	Error:      	Received unexpected error:
+            	            	all RPC endpoints failed: []
+            	Test:       	TestGetLedgerHeader_DifferentNetworks/futurenet
+--- FAIL: TestGetLedgerHeader_ContextWithDeadline (0.00s)
+    ledger_test.go:636: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:636
+        	Error:      	Received unexpected error:
+        	            	all RPC endpoints failed: []
+        	Test:       	TestGetLedgerHeader_ContextWithDeadline
+--- FAIL: TestGetLedgerHeader_ContextWithoutDeadline (0.00s)
+    ledger_test.go:661: 
+        	Error Trace:	C:/Users/owner/Projects/hintents/internal/rpc/ledger_test.go:661
+        	Error:      	Received unexpected error:
+        	            	all RPC endpoints failed: []
+        	Test:       	TestGetLedgerHeader_ContextWithoutDeadline
+time=2026-02-24T20:28:58.846+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/retry.go:83 msg="Rate limited or temporary failure, will retry" attempt=1 status_code=429 retry_after=0s
+time=2026-02-24T20:28:58.868+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/retry.go:83 msg="Rate limited or temporary failure, will retry" attempt=1 status_code=429 retry_after=0s
+time=2026-02-24T20:28:58.888+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/retry.go:83 msg="Rate limited or temporary failure, will retry" attempt=2 status_code=429 retry_after=0s
+time=2026-02-24T20:28:58.924+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/retry.go:83 msg="Rate limited or temporary failure, will retry" attempt=3 status_code=429 retry_after=0s
+time=2026-02-24T20:28:58.926+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/retry.go:83 msg="Rate limited or temporary failure, will retry" attempt=1 status_code=429 retry_after=0s
+time=2026-02-24T20:28:58.937+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/retry.go:83 msg="Rate limited or temporary failure, will retry" attempt=1 status_code=503 retry_after=1s
+time=2026-02-24T20:28:59.939+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/retry.go:83 msg="Rate limited or temporary failure, will retry" attempt=2 status_code=503 retry_after=1s
+time=2026-02-24T20:28:59.942+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/retry.go:221 msg="Rate limited or temporary failure, will retry" attempt=1 status_code=503 retry_after=0s
+time=2026-02-24T20:28:59.966+01:00 level=WARN source=C:/Users/owner/Projects/hintents/internal/rpc/retry.go:83 msg="Rate limited or temporary failure, will retry" attempt=1 status_code=429 retry_after=0s
+FAIL
+FAIL	github.com/dotandev/hintents/internal/rpc	63.627s
+ok  	github.com/dotandev/hintents/internal/errors	(cached)
+FAIL

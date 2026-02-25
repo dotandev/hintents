@@ -6,9 +6,10 @@ package rpc
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/dotandev/hintents/internal/errors"
 
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
@@ -376,7 +377,7 @@ func TestGetLedgerHeader_NotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, IsLedgerNotFound(err), "should be ledger not found error")
 
-	notFoundErr, ok := err.(*LedgerNotFoundError)
+	notFoundErr, ok := err.(*errors.LedgerNotFoundError)
 	require.True(t, ok)
 	assert.Equal(t, uint32(999999999), notFoundErr.Sequence)
 	assert.Contains(t, notFoundErr.Message, "not found")
@@ -406,7 +407,7 @@ func TestGetLedgerHeader_Archived(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, IsLedgerArchived(err), "should be ledger archived error")
 
-	archivedErr, ok := err.(*LedgerArchivedError)
+	archivedErr, ok := err.(*errors.LedgerArchivedError)
 	require.True(t, ok)
 	assert.Equal(t, uint32(1), archivedErr.Sequence)
 	assert.Contains(t, archivedErr.Message, "archived")
@@ -436,7 +437,7 @@ func TestGetLedgerHeader_RateLimit(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, IsRateLimitError(err), "should be rate limit error")
 
-	rateLimitErr, ok := err.(*RateLimitError)
+	rateLimitErr, ok := err.(*errors.RateLimitError)
 	require.True(t, ok)
 	assert.Contains(t, rateLimitErr.Message, "rate limit")
 }
@@ -488,7 +489,7 @@ func TestGetLedgerHeader_GenericError(t *testing.T) {
 	assert.False(t, IsLedgerNotFound(err))
 	assert.False(t, IsLedgerArchived(err))
 	assert.False(t, IsRateLimitError(err))
-	assert.Contains(t, err.Error(), "failed to fetch ledger")
+	assert.Contains(t, err.Error(), "RPC connection failed")
 }
 
 // TestFromHorizonLedger tests the conversion from Horizon ledger to our structure
@@ -533,9 +534,9 @@ func TestFromHorizonLedger(t *testing.T) {
 
 // TestErrorTypes tests the error type checking functions
 func TestErrorTypes(t *testing.T) {
-	notFoundErr := &LedgerNotFoundError{Sequence: 123, Message: "not found"}
-	archivedErr := &LedgerArchivedError{Sequence: 456, Message: "archived"}
-	rateLimitErr := &RateLimitError{Message: "rate limited"}
+	notFoundErr := &errors.LedgerNotFoundError{Sequence: 123, Message: "not found"}
+	archivedErr := &errors.LedgerArchivedError{Sequence: 456, Message: "archived"}
+	rateLimitErr := &errors.RateLimitError{Message: "rate limited"}
 	genericErr := errors.New("generic error")
 
 	// Test IsLedgerNotFound
@@ -559,21 +560,21 @@ func TestErrorTypes(t *testing.T) {
 
 // TestErrorMessages tests that error messages are descriptive
 func TestErrorMessages(t *testing.T) {
-	notFoundErr := &LedgerNotFoundError{
+	notFoundErr := &errors.LedgerNotFoundError{
 		Sequence: 123,
 		Message:  "ledger 123 not found (may be archived or not yet created)",
 	}
 	assert.Contains(t, notFoundErr.Error(), "123")
 	assert.Contains(t, notFoundErr.Error(), "not found")
 
-	archivedErr := &LedgerArchivedError{
+	archivedErr := &errors.LedgerArchivedError{
 		Sequence: 456,
 		Message:  "ledger 456 has been archived and is no longer available",
 	}
 	assert.Contains(t, archivedErr.Error(), "456")
 	assert.Contains(t, archivedErr.Error(), "archived")
 
-	rateLimitErr := &RateLimitError{
+	rateLimitErr := &errors.RateLimitError{
 		Message: "rate limit exceeded, please try again later",
 	}
 	assert.Contains(t, rateLimitErr.Error(), "rate limit")

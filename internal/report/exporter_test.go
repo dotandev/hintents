@@ -158,12 +158,7 @@ func TestFilenameGeneration(t *testing.T) {
 }
 
 func TestInvalidOutputDir(t *testing.T) {
-	var invalidDir string
-	if runtime.GOOS == "windows" {
-		invalidDir = "Z:\\invalid\\path\\that\\does\\not\\exist\\12345"
-	} else {
-		invalidDir = "/root/invalid/path/that/cannot/be/created"
-	}
+	invalidDir := `C:\INVALID|PATH` // Illegal characters on Windows
 
 	_, err := NewExporter(invalidDir)
 	if err == nil {
