@@ -152,4 +152,52 @@ describe('FallbackRPCClient', () => {
             expect(status[2].healthy).toBe(false);
         });
     });
+
+    describe('deployWasmPathsChunked', () => {
+        it('should send one request when paths fit in one chunk', async () => {
+            mock.onPost('https://rpc1.test.com/deploy').reply(200, { ok: true });
+
+            const result = await client.deployWasmPathsChunked(
+                '/deploy',
+                ['a.wasm', 'b.wasm'],
+                { network: 'testnet' },
+                { chunkSize: 10 },
+            );
+
+            expect(result).toEqual([{ ok: true }]);
+            expect(mock.history.post.length).toBe(1);
+
+            const body = JSON.parse(mock.history.post[0].data);
+            expect(body.network).toBe('testnet');
+            expect(body.wasm_paths).toEqual(['a.wasm', 'b.wasm']);
+        });
+
+        it('should chunk wasm paths across multiple requests and preserve order', async () => {
+            mock.onPost('https://rpc1.test.com/deploy').reply(200, { ok: true });
+
+            const wasmPaths = ['1.wasm', '2.wasm', '3.wasm', '4.wasm', '5.wasm'];
+            const result = await client.deployWasmPathsChunked(
+                '/deploy',
+                wasmPaths,
+                { project: 'massive' },
+                { chunkSize: 2, pathsField: 'wasm_file_paths' },
+            );
+
+            expect(result).toEqual([{ ok: true }, { ok: true }, { ok: true }]);
+            expect(mock.history.post.length).toBe(3);
+
+            const sentChunks = mock.history.post.map((req) => JSON.parse(req.data).wasm_file_paths);
+            expect(sentChunks).toEqual([
+                ['1.wasm', '2.wasm'],
+                ['3.wasm', '4.wasm'],
+                ['5.wasm'],
+            ]);
+        });
+
+        it('should return no requests for empty wasm path lists', async () => {
+            const result = await client.deployWasmPathsChunked('/deploy', [], {}, { chunkSize: 2 });
+            expect(result).toEqual([]);
+            expect(mock.history.post.length).toBe(0);
+        });
+    });
 });

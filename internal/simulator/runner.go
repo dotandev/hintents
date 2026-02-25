@@ -13,6 +13,7 @@ import (
 	"runtime"
 
 	"github.com/dotandev/hintents/internal/errors"
+	"github.com/dotandev/hintents/internal/ipc"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -52,6 +53,7 @@ func NewRunner(simPathOverride string, debug bool) (*Runner, error) {
 	return &Runner{
 		BinaryPath: path,
 		Debug:      debug,
+		Validator:  NewValidator(false),
 	}, nil
 }
 
@@ -151,6 +153,14 @@ func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
 	)
 	defer endTiming()
 
+	// Validate request before processing
+	if r.Validator != nil {
+		if err := r.Validator.ValidateRequest(req); err != nil {
+			logger.Logger.Error("Request validation failed", "error", err)
+			return nil, err
+		}
+	}
+
 	proto := GetOrDefault(req.ProtocolVersion)
 
 	if req.ProtocolVersion != nil {
@@ -189,6 +199,17 @@ func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
 	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
 		logger.Logger.Error("Failed to unmarshal response", "error", err)
 		return nil, errors.WrapUnmarshalFailed(err, stdout.String())
+	}
+
+	// If the simulator returned a logical error inside the response payload,
+	// classify it into a unified ErstError before returning to the caller.
+	if resp.Error != "" {
+		classified := ipc.Error{Message: resp.Error}.ToErstError()
+		logger.Logger.Error("Simulator returned error",
+			"code", classified.Code,
+			"original", classified.OriginalError,
+		)
+		return nil, classified
 	}
 
 	resp.ProtocolVersion = &proto.Version
