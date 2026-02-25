@@ -39,11 +39,11 @@ func DefaultRetryConfig() RetryConfig {
 // Retrier handles HTTP request retries with exponential backoff and jitter
 type Retrier struct {
 	config RetryConfig
-	client *http.Client
+	client httpclient.HTTPClient
 }
 
 // NewRetrier creates a new Retrier with the given config and HTTP client
-func NewRetrier(config RetryConfig, client *http.Client) *Retrier {
+func NewRetrier(config RetryConfig, client httpclient.HTTPClient) *Retrier {
 	if client == nil {
 		client = http.DefaultClient
 	}

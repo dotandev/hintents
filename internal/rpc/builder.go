@@ -23,7 +23,7 @@ type clientBuilder struct {
 	altURLs        []string
 	cacheEnabled   bool
 	config         *NetworkConfig
-	httpClient     *http.Client
+	httpClient     httpclient.HTTPClient
 	requestTimeout time.Duration
 }
 
@@ -124,7 +124,7 @@ func WithRequestTimeout(d time.Duration) ClientOption {
 	}
 }
 
-func WithHTTPClient(client *http.Client) ClientOption {
+func WithHTTPClient(client httpclient.HTTPClient) ClientOption {
 	return func(b *clientBuilder) error {
 		b.httpClient = client
 		return nil

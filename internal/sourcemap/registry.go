@@ -75,7 +75,7 @@ type WasmCode struct {
 // RegistryClient fetches verified contract information and source code
 // from public registries like stellar.expert.
 type RegistryClient struct {
-	httpClient *http.Client
+	httpClient httpclient.HTTPClient
 	baseURL    string
 	network    NetworkID
 }
@@ -84,7 +84,7 @@ type RegistryClient struct {
 type RegistryOption func(*RegistryClient)
 
 // WithHTTPClient sets a custom HTTP client for the registry.
-func WithHTTPClient(client *http.Client) RegistryOption {
+func WithHTTPClient(client httpclient.HTTPClient) RegistryOption {
 	return func(rc *RegistryClient) {
 		rc.httpClient = client
 	}

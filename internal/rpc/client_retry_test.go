@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func newRetryHTTPClient() *http.Client {
+func newRetryHTTPClient() httpclient.HTTPClient {
 	cfg := RetryConfig{
 		MaxRetries:         2,
 		InitialBackoff:     1 * time.Millisecond,

@@ -92,7 +92,7 @@ type Config struct {
 // Reporter dispatches crash reports to all configured sinks.
 type Reporter struct {
 	cfg          Config
-	client       *http.Client
+	client      httpclient.HTTPClient
 	sentryActive bool
 }
 

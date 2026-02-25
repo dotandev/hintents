@@ -34,11 +34,11 @@ type Config struct {
 // Client handles webhook delivery
 type Client struct {
 	config     Config
-	httpClient *http.Client
+	httpClient HTTPClient
 }
 
 // NewClient creates a new webhook client with validation
-func NewClient(config Config) (*Client, error) {
+func NewClient(config Config, httpClient HTTPClient) (*Client, error) {
 	if config.URL == "" {
 		return nil, fmt.Errorf("webhook URL cannot be empty")
 	}
@@ -55,11 +55,16 @@ func NewClient(config Config) (*Client, error) {
 		config.Retries = 3
 	}
 
-	return &Client{
-		config: config,
-		httpClient: &http.Client{
+	// Default to standard http.Client if none provided
+	if httpClient == nil {
+		httpClient = &http.Client{
 			Timeout: config.Timeout,
-		},
+		}
+	}
+
+	return &Client{
+		config:     config,
+		httpClient: httpClient,
 	}, nil
 }
 
