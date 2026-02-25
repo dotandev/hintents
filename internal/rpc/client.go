@@ -129,13 +129,6 @@ func (e *AllNodesFailedError) Error() string {
 	return fmt.Sprintf("all RPC endpoints failed: [%s]", strings.Join(reasons, ", "))
 }
 
-// isHealthy checks if an endpoint is currently healthy or if circuit is open
-func (c *Client) isHealthy(url string) bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.isHealthyLocked(url)
-}
-
 func (c *Client) isHealthyLocked(url string) bool {
 	fails := c.failures[url]
 	if fails < 5 {

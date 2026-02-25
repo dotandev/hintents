@@ -14,14 +14,6 @@ import (
 	stellarrpc "github.com/dotandev/hintents/internal/rpc"
 )
 
-// getTestSimulatorPath returns a platform-specific executable path for testing
-func getTestSimulatorPath() string {
-	if runtime.GOOS == "windows" {
-		return "cmd.exe"
-	}
-	return "/bin/echo"
-}
-
 func TestServer_DebugTransaction(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping simulator-dependent test")

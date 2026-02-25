@@ -13,7 +13,6 @@ import (
 
 var (
 	fuzzIterations     uint64
-	fuzzSeed           uint64
 	fuzzTimeout        uint64
 	fuzzMaxSize        int
 	fuzzInputXDR       string
