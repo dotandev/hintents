@@ -5,6 +5,7 @@ package simulator
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
+	"github.com/dotandev/hintents/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Runner handles the execution of the Rust simulator binary
@@ -141,6 +144,13 @@ func abs(path string) string {
 // -------------------- Execution --------------------
 
 func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
+	methodTelemetry := telemetry.GetMethodTelemetry()
+	ctx, endTiming := methodTelemetry.WithMethodTiming(context.Background(), "simulator_run",
+		attribute.String("simulator.binary_path", r.BinaryPath),
+		attribute.Bool("simulator.debug", r.Debug),
+	)
+	defer endTiming()
+
 	proto := GetOrDefault(req.ProtocolVersion)
 
 	if req.ProtocolVersion != nil {

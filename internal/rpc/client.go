@@ -345,6 +345,14 @@ func (c *Client) GetTransaction(ctx context.Context, hash string) (*TransactionR
 }
 
 func (c *Client) getTransactionAttempt(ctx context.Context, hash string) (*TransactionResponse, error) {
+	methodTelemetry := telemetry.GetMethodTelemetry()
+	ctx, endTiming := methodTelemetry.WithMethodTiming(ctx, "rpc_get_transaction",
+		attribute.String("transaction.hash", hash),
+		attribute.String("network", string(c.Network)),
+		attribute.String("rpc.url", c.HorizonURL),
+	)
+	defer endTiming()
+
 	tracer := telemetry.GetTracer()
 	_, span := tracer.Start(ctx, "rpc_get_transaction")
 	span.SetAttributes(
@@ -461,6 +469,14 @@ func (c *Client) GetLedgerHeader(ctx context.Context, sequence uint32) (*LedgerH
 }
 
 func (c *Client) getLedgerHeaderAttempt(ctx context.Context, sequence uint32) (*LedgerHeaderResponse, error) {
+	methodTelemetry := telemetry.GetMethodTelemetry()
+	ctx, endTiming := methodTelemetry.WithMethodTiming(ctx, "rpc_get_ledger_header",
+		attribute.String("network", string(c.Network)),
+		attribute.Int("ledger.sequence", int(sequence)),
+		attribute.String("rpc.url", c.HorizonURL),
+	)
+	defer endTiming()
+
 	tracer := telemetry.GetTracer()
 	_, span := tracer.Start(ctx, "rpc_get_ledger_header")
 	span.SetAttributes(
@@ -606,6 +622,13 @@ func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[strin
 }
 
 func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []string) (map[string]string, error) {
+	methodTelemetry := telemetry.GetMethodTelemetry()
+	ctx, endTiming := methodTelemetry.WithMethodTiming(ctx, "rpc_get_ledger_entries",
+		attribute.Int("keys.count", len(keysToFetch)),
+		attribute.String("rpc.url", c.HorizonURL),
+	)
+	defer endTiming()
+
 	logger.Logger.Debug("Fetching ledger entries", "count", len(keysToFetch), "url", c.HorizonURL)
 	reqBody := GetLedgerEntriesRequest{
 		Jsonrpc: "2.0",
@@ -780,6 +803,13 @@ func (c *Client) SimulateTransaction(ctx context.Context, envelopeXdr string) (*
 }
 
 func (c *Client) simulateTransactionAttempt(ctx context.Context, envelopeXdr string) (*SimulateTransactionResponse, error) {
+	methodTelemetry := telemetry.GetMethodTelemetry()
+	ctx, endTiming := methodTelemetry.WithMethodTiming(ctx, "rpc_simulate_transaction",
+		attribute.Int("envelope.size_bytes", len(envelopeXdr)),
+		attribute.String("rpc.url", c.HorizonURL),
+	)
+	defer endTiming()
+
 	logger.Logger.Debug("Simulating transaction (preflight)", "url", c.HorizonURL)
 
 	reqBody := SimulateTransactionRequest{

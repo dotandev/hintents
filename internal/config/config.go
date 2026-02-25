@@ -47,6 +47,15 @@ type Config struct {
 	// CrashSentryDSN is a Sentry Data Source Name for crash reporting.
 	// Set via crash_sentry_dsn in config or ERST_SENTRY_DSN.
 	CrashSentryDSN string `json:"crash_sentry_dsn,omitempty"`
+	// TelemetryEnabled enables OpenTelemetry for performance monitoring.
+	// Set via telemetry_enabled = true in config or ERST_TELEMETRY_ENABLED=true.
+	TelemetryEnabled bool `json:"telemetry_enabled,omitempty"`
+	// TelemetryExporterURL is the OTLP endpoint for telemetry data.
+	// Set via telemetry_exporter_url in config or ERST_TELEMETRY_EXPORTER_URL.
+	TelemetryExporterURL string `json:"telemetry_exporter_url,omitempty"`
+	// TelemetryServiceName is the service name used in telemetry.
+	// Set via telemetry_service_name in config or ERST_TELEMETRY_SERVICE_NAME.
+	TelemetryServiceName string `json:"telemetry_service_name,omitempty"`
 }
 
 var defaultConfig = &Config{
@@ -102,12 +111,20 @@ func Load() (*Config, error) {
 		RPCToken:       getEnv("ERST_RPC_TOKEN", ""),
 		CrashEndpoint:  getEnv("ERST_CRASH_ENDPOINT", ""),
 		CrashSentryDSN: getEnv("ERST_SENTRY_DSN", ""),
+		TelemetryExporterURL: getEnv("ERST_TELEMETRY_EXPORTER_URL", ""),
+		TelemetryServiceName: getEnv("ERST_TELEMETRY_SERVICE_NAME", "erst"),
 	}
 
 	// ERST_CRASH_REPORTING is a boolean env var; parse it explicitly.
 	switch strings.ToLower(os.Getenv("ERST_CRASH_REPORTING")) {
 	case "1", "true", "yes":
 		cfg.CrashReporting = true
+	}
+
+	// ERST_TELEMETRY_ENABLED is a boolean env var; parse it explicitly.
+	switch strings.ToLower(os.Getenv("ERST_TELEMETRY_ENABLED")) {
+	case "1", "true", "yes":
+		cfg.TelemetryEnabled = true
 	}
 
 	if urlsEnv := os.Getenv("ERST_RPC_URLS"); urlsEnv != "" {
@@ -218,6 +235,12 @@ func (c *Config) parseTOML(content string) error {
 			c.CrashEndpoint = value
 		case "crash_sentry_dsn":
 			c.CrashSentryDSN = value
+		case "telemetry_enabled":
+			c.TelemetryEnabled = value == "true" || value == "1" || value == "yes"
+		case "telemetry_exporter_url":
+			c.TelemetryExporterURL = value
+		case "telemetry_service_name":
+			c.TelemetryServiceName = value
 		}
 	}
 
