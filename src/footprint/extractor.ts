@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { xdr } from '@stellar/stellar-sdk';
 import { XDRDecoder, TransactionMetaVersion } from '../xdr/decoder';
 import { LedgerKey, FootprintResult } from '../xdr/types';
@@ -28,18 +31,22 @@ export class FootprintExtractor {
                 throw new Error(`Unsupported meta version: ${version}`);
         }
 
+        // Build a hash → isReadOnly map in O(n); first-seen semantics are
+        // preserved because we skip hashes already recorded.
+        const readOnlyByHash = new Map<string, boolean>();
+        for (const { key, isReadOnly } of allKeysWithType) {
+            if (key.hash && !readOnlyByHash.has(key.hash)) {
+                readOnlyByHash.set(key.hash, isReadOnly);
+            }
+        }
+
         const allKeys = allKeysWithType.map(k => k.key);
         const deduplicated = this.deduplicateKeys(allKeys);
 
-        const readOnly = deduplicated.filter(key => {
-            const match = allKeysWithType.find(k => k.key.hash === key.hash);
-            return match?.isReadOnly === true;
-        });
-
-        const readWrite = deduplicated.filter(key => {
-            const match = allKeysWithType.find(k => k.key.hash === key.hash);
-            return match?.isReadOnly !== true;
-        });
+        // O(n) single-pass classification using the pre-built Map — avoids the
+        // O(n²) Array.find() that caused UI freezes on >100 MB trace footprints.
+        const readOnly = deduplicated.filter(key => readOnlyByHash.get(key.hash) === true);
+        const readWrite = deduplicated.filter(key => readOnlyByHash.get(key.hash) !== true);
 
         return {
             readOnly,

@@ -268,6 +268,7 @@ func TestDeprecatedNewClient(t *testing.T) {
 	client := NewClientDefault(Testnet, "token")
 	if client == nil {
 		t.Fatal("expected client, got nil")
+		return
 	}
 	if client.Network != Testnet {
 		t.Errorf("expected Testnet network")
@@ -278,6 +279,7 @@ func TestDeprecatedNewClientWithURL(t *testing.T) {
 	client := NewClientWithURLOption(TestnetHorizonURL, Testnet, "token")
 	if client == nil {
 		t.Fatal("expected client, got nil")
+		return
 	}
 	if client.HorizonURL != TestnetHorizonURL {
 		t.Errorf("expected HorizonURL to match")
@@ -289,6 +291,7 @@ func TestDeprecatedNewClientWithURLs(t *testing.T) {
 	client := NewClientWithURLsOption(urls, Testnet, "token")
 	if client == nil {
 		t.Fatal("expected client, got nil")
+		return
 	}
 	if len(client.AltURLs) != len(urls) {
 		t.Errorf("expected %d URLs", len(urls))

@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import * as rpc from 'vscode-jsonrpc/node';
 import * as net from 'net';
 
@@ -12,6 +15,8 @@ export interface TraceStep {
     error?: string;
     host_state?: any;
     memory?: any;
+    cpu_delta?: number;
+    memory_delta?: number;
 }
 
 export interface Trace {

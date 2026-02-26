@@ -1,26 +1,96 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# fix_all_licenses.sh
+# Audits .go, .rs, .sh, .js/.ts files for license headers.
+# Usage:
+#   ./fix_all_licenses.sh           # fix mode (adds headers in-place)
+#   ./fix_all_licenses.sh --check   # check mode (fails CI if missing, no changes)
 
-HEADER="// Copyright (c) 2026 dotandev
-//
-// Licensed under the Apache License, Version 2.0 (the \"License\");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an \"AS IS\" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License."
+set -euo pipefail
 
-echo "Scanning ALL .go and .rs files for missing headers..."
+CHECK_MODE=false
+if [[ "${1:-}" == "--check" ]]; then
+  CHECK_MODE=true
+fi
 
-# Find all .go and .rs files, ignoring hidden folders
-find . -type f \( -name "*.go" -o -name "*.rs" \) -not -path "*/.*" | while read -r FILE; do
-    if ! grep -q "Licensed under the Apache License" "$FILE"; then
-        echo "Fixing: $FILE"
-        echo -e "$HEADER\n\n$(cat "$FILE")" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
-    fi
-done
-echo "Done."
+# License headers
+GO_RS_HEADER="// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0"
+
+SH_HEADER="# Copyright (c) Hintents Authors.
+# SPDX-License-Identifier: Apache-2.0"
+
+JS_TS_HEADER="// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0"
+
+# Helper: check or fix one file
+check_or_fix() {
+  local file="$1"
+  local header="$2"
+  local first_line_pat="$3"
+
+  if head -n 1 "$file" | grep -qF "$first_line_pat"; then
+    return 0
+  fi
+
+  if [[ $CHECK_MODE == true ]]; then
+    echo "[missing] $file"
+    return 1
+  else
+    echo "[fixed] $file"
+    printf '%s\n\n' "$header" | cat - "$file" > "$file.tmp"
+    mv "$file.tmp" "$file"
+    return 0
+  fi
+}
+
+# Find files (respects .gitignore when possible)
+list_files() {
+  local ext="$1"
+  if git rev-parse --is-inside-work-tree &>/dev/null; then
+    git ls-files "*.$ext" "**/*.$ext" 2>/dev/null || true
+  else
+    find . -type f -name "*.$ext" \
+      -not -path "*/.*" \
+      -not -path "*/target/*" \
+      -not -path "*/node_modules/*" \
+      -not -path "*/vendor/*"
+  fi
+}
+
+MISSING=0
+
+echo "=== License Header Audit ==="
+
+echo "Go & Rust files:"
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  check_or_fix "$f" "$GO_RS_HEADER" "// Copyright" || MISSING=$((MISSING + 1))
+done < <(list_files go; list_files rs)
+
+echo ""
+echo "Shell scripts:"
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  # Skip this script itself
+  [[ "$(realpath "$f")" == "$(realpath "$0")" ]] && continue
+  check_or_fix "$f" "$SH_HEADER" "# Copyright" || MISSING=$((MISSING + 1))
+done < <(list_files sh)
+
+echo ""
+echo "JavaScript/TypeScript files:"
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  check_or_fix "$f" "$JS_TS_HEADER" "// Copyright" || MISSING=$((MISSING + 1))
+done < <({ list_files js; list_files ts; list_files mjs; list_files cjs; })
+
+echo ""
+echo "=== Summary ==="
+if [[ $MISSING -gt 0 ]]; then
+  echo "FAIL: $MISSING file(s) missing license headers."
+  if [[ $CHECK_MODE == true ]]; then
+    echo "Run './fix_all_licenses.sh' to fix them locally."
+  fi
+  exit 1
+else
+  echo "OK: All audited files have proper headers."
+fi

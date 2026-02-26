@@ -227,6 +227,7 @@ graph TD
 
 **Responsibilities:**
 - Locate and execute the `erst-sim` Rust binary
+- Validate simulation requests before processing
 - Manage subprocess lifecycle
 - Handle IPC communication via stdin/stdout
 - Deserialize simulation results
@@ -237,14 +238,27 @@ graph TD
 // Runner manages simulator subprocess execution
 type Runner struct {
     BinaryPath string
+    Debug      bool
+    Validator  *Validator
 }
 
 // NewRunner creates runner with binary discovery
 func NewRunner() (*Runner, error)
 
-// Run executes simulation with request
+// Run executes simulation with request (includes validation)
 func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error)
 ```
+
+**Validation Integration:**
+
+The Runner now includes a `Validator` that performs comprehensive schema validation before processing:
+- Validates all required fields (envelope_xdr, result_meta_xdr)
+- Checks base64 encoding for XDR fields
+- Validates ledger entries, protocol versions, timestamps
+- Provides structured error codes for debugging
+- Supports strict mode for enhanced validation
+
+See `internal/simulator/validator.go` for detailed validation logic.
 
 **Binary Discovery Priority:**
 

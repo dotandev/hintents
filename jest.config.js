@@ -8,4 +8,9 @@ module.exports = {
     collectCoverage: true,
     coverageDirectory: 'coverage',
     coveragePathIgnorePatterns: ['/node_modules/'],
+    globals: {
+        'ts-jest': {
+            tsconfig: 'tsconfig.test.json',
+        },
+    },
 };

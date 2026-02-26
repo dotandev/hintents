@@ -1,0 +1,7 @@
+# Clippy configuration for strict linting
+# Fail on all warnings and unused code
+
+# Warn on missing documentation
+warn-on-all-wildcard-imports = true
+
+# Enforce strict unused variable checks

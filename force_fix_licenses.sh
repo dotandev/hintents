@@ -1,3 +1,6 @@
+# Copyright (c) Hintents Authors.
+# SPDX-License-Identifier: Apache-2.0
+
 #!/bin/bash
 
 # The Correct Header (Standard Apache 2.0 with (c))

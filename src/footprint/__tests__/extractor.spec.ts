@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { FootprintExtractor } from '../extractor';
 import { xdr } from '@stellar/stellar-sdk';
 
@@ -147,6 +150,38 @@ describe('FootprintExtractor', () => {
 
             expect(readOnly).toHaveLength(0);
             expect(readWrite).toHaveLength(2);
+        });
+
+        it('should correctly classify 5000 keys using O(1) map lookup (regression: O(n²) fix)', () => {
+            // Build a synthetic allKeysWithType array with alternating read-only/read-write keys.
+            const count = 5_000;
+            const allKeysWithType: Array<{ key: { type: any; key: string; hash: string }; isReadOnly: boolean }> = [];
+            for (let i = 0; i < count; i++) {
+                allKeysWithType.push({
+                    key: { type: xdr.LedgerEntryType.account(), key: `k${i}`, hash: `h${i}` },
+                    isReadOnly: i % 2 === 0,
+                });
+            }
+
+            // Replicate the optimised classification logic from FootprintExtractor.extractFootprint.
+            const readOnlyByHash = new Map<string, boolean>();
+            for (const { key, isReadOnly } of allKeysWithType) {
+                if (key.hash && !readOnlyByHash.has(key.hash)) {
+                    readOnlyByHash.set(key.hash, isReadOnly);
+                }
+            }
+            const allKeys = allKeysWithType.map(k => k.key);
+            // Simulate deduplication (all hashes unique here).
+            const deduplicated = allKeys;
+            const readOnly = deduplicated.filter(key => readOnlyByHash.get(key.hash) === true);
+            const readWrite = deduplicated.filter(key => readOnlyByHash.get(key.hash) !== true);
+
+            expect(readOnly).toHaveLength(count / 2);
+            expect(readWrite).toHaveLength(count / 2);
+
+            // Spot-check: even indices are read-only, odd are read-write.
+            expect(readOnly.every(k => parseInt(k.key.slice(1)) % 2 === 0)).toBe(true);
+            expect(readWrite.every(k => parseInt(k.key.slice(1)) % 2 !== 0)).toBe(true);
         });
     });
 

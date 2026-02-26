@@ -1,3 +1,6 @@
+# Copyright (c) Hintents Authors.
+# SPDX-License-Identifier: Apache-2.0
+
 #!/bin/bash
 # Integration test for Issue #95 - Sandbox Mode
 

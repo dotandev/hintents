@@ -1,0 +1,44 @@
+# Pre-commit hooks for strict linting
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v1.61.0
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint (strict)
+        args:
+          - --config=.golangci.yml
+          - --max-issues-per-linter=0
+          - --max-same-issues=0
+
+  - repo: local
+    hooks:
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        pass_filenames: false
+        files: \.go$
+
+      - id: rust-clippy
+        name: cargo clippy (strict)
+        entry: bash -c 'cd simulator && cargo clippy --all-targets --all-features -- -D warnings -D clippy::all -D unused-variables -D unused-imports -D unused-mut -D dead-code -D unused-assignments -W clippy::pedantic -W clippy::nursery'
+        language: system
+        pass_filenames: false
+        files: \.rs$
+
+      - id: rust-fmt
+        name: cargo fmt
+        entry: bash -c 'cd simulator && cargo fmt --check'
+        language: system
+        pass_filenames: false
+        files: \.rs$
+
+      - id: go-fmt
+        name: go fmt
+        entry: bash -c 'test -z "$(gofmt -l .)"'
+        language: system
+        pass_filenames: false
+        files: \.go$

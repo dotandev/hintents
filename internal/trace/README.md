@@ -81,6 +81,7 @@ The interactive trace viewer provides a powerful search and navigation interface
 | Key            | Action      |
 | -------------- | ----------- |
 | `q` / `Ctrl+C` | Quit viewer |
+| `?` / `h`      | Show shortcuts help |
 
 ## Search Examples
 

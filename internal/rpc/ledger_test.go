@@ -111,6 +111,7 @@ func TestLedgerKeyFromEntry_Account(t *testing.T) {
 	key := ledgerKeyFromEntry(entry)
 	if key == nil {
 		t.Fatal("Expected non-nil key")
+		return
 	}
 
 	if key.Type != xdr.LedgerEntryTypeAccount {
@@ -172,6 +173,7 @@ func TestLedgerKeyFromEntry_ContractCodeLedger(t *testing.T) {
 	key := ledgerKeyFromEntry(entry)
 	if key == nil {
 		t.Fatal("Expected non-nil key")
+		return
 	}
 
 	if key.Type != xdr.LedgerEntryTypeContractCode {

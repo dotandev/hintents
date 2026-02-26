@@ -3,10 +3,6 @@
 
 package trace
 
-import (
-	"strings"
-)
-
 // SearchEngine handles searching through trace nodes
 type SearchEngine struct {
 	query         string
@@ -109,40 +105,26 @@ func (s *SearchEngine) searchNode(node *TraceNode, index int) TraceNodeMatch {
 	return match
 }
 
-// findInString finds all occurrences of query in the given string
+// findInString finds all occurrences of query in the given string using fuzzy matching
 func (s *SearchEngine) findInString(text, field string) []MatchRange {
 	if text == "" {
 		return nil
 	}
 
-	searchText := text
-	searchQuery := s.query
-
-	if !s.caseSensitive {
-		searchText = strings.ToLower(text)
-		searchQuery = strings.ToLower(s.query)
+	score, positions := FuzzyMatch(s.query, text, s.caseSensitive)
+	if score == -1 {
+		return nil
 	}
 
-	var ranges []MatchRange
-	offset := 0
-
-	for {
-		index := strings.Index(searchText[offset:], searchQuery)
-		if index == -1 {
-			break
-		}
-
-		actualIndex := offset + index
-		ranges = append(ranges, MatchRange{
-			Start: actualIndex,
-			End:   actualIndex + len(s.query),
-			Field: field,
-		})
-
-		offset = actualIndex + len(s.query)
+	if len(positions) == 0 {
+		return nil
 	}
 
-	return ranges
+	return []MatchRange{{
+		Start: positions[0],
+		End:   positions[len(positions)-1] + 1,
+		Field: field,
+	}}
 }
 
 // NextMatch moves to the next search match

@@ -9,6 +9,13 @@ linters:
     - errcheck
     - staticcheck
     - unused
+    - ineffassign
+    - govet
+    - gosimple
+    - typecheck
+    - deadcode
+    - varcheck
+    - structcheck
 
 linters-settings:
   gocyclo:
@@ -16,11 +23,17 @@ linters-settings:
   errcheck:
     check-type-assertions: false
     check-blank: false
+  govet:
+    enable-all: true
+    settings:
+      shadow:
+        strict: true
 
 issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  # Fail CI on any issue - no exclusions for unused variables
   exclude-rules:
     # Exclude errcheck for test files
     - path: _test\.go
@@ -30,7 +43,3 @@ issues:
     - linters:
         - errcheck
       text: "Error return value of `.*(Close|Setenv|Unsetenv).*` is not checked"
-    # Exclude unused for parser.go (kept for future use)
-    - path: internal/rpc/parser\.go
-      linters:
-        - unused

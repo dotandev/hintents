@@ -11,12 +11,14 @@ import (
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/rpc"
+	"github.com/dotandev/hintents/internal/terminal"
 )
 
 const defaultLimit = 10
 
 type Wizard struct {
-	client *rpc.Client
+	client   *rpc.Client
+	renderer terminal.Renderer
 }
 
 type SelectionResult struct {
@@ -26,7 +28,15 @@ type SelectionResult struct {
 }
 
 func New(client *rpc.Client) *Wizard {
-	return &Wizard{client: client}
+	return &Wizard{
+		client:   client,
+		renderer: terminal.NewANSIRenderer(),
+	}
+}
+
+func (w *Wizard) WithRenderer(r terminal.Renderer) *Wizard {
+	w.renderer = r
+	return w
 }
 
 func (w *Wizard) SelectTransaction(ctx context.Context, account string) (*SelectionResult, error) {
@@ -45,11 +55,11 @@ func (w *Wizard) SelectTransaction(ctx context.Context, account string) (*Select
 
 	failed := filter(txs, isFailed)
 	if len(failed) == 0 {
-		fmt.Println("No failed transactions found. Showing all recent transactions:")
+		w.renderer.Println("No failed transactions found. Showing all recent transactions:")
 		failed = txs
 	}
 
-	selected := selectFromList(failed)
+	selected := w.selectFromList(failed)
 	if selected == nil {
 		return nil, errors.WrapValidationError("transaction selection cancelled")
 	}
@@ -72,13 +82,13 @@ func filter(txs []rpc.TransactionSummary, predicate func(rpc.TransactionSummary)
 	return result
 }
 
-func selectFromList(txs []rpc.TransactionSummary) *SelectionResult {
+func (w *Wizard) selectFromList(txs []rpc.TransactionSummary) *SelectionResult {
 	if len(txs) == 0 {
 		return nil
 	}
 
-	displayTransactions(txs)
-	choice, err := readUserChoice(len(txs))
+	w.displayTransactions(txs)
+	choice, err := w.readUserChoice(len(txs))
 	if err != nil {
 		return nil
 	}
@@ -91,13 +101,13 @@ func selectFromList(txs []rpc.TransactionSummary) *SelectionResult {
 	}
 }
 
-func displayTransactions(txs []rpc.TransactionSummary) {
-	fmt.Println("\nRecent Transactions:")
-	fmt.Println("────────────────────────────────────────────────────")
+func (w *Wizard) displayTransactions(txs []rpc.TransactionSummary) {
+	w.renderer.Println("\nRecent Transactions:")
+	w.renderer.Println("────────────────────────────────────────────────────")
 	for i, tx := range txs {
-		fmt.Printf("[%d] %s | %s | %s\n", i+1, tx.Status, truncateHash(tx.Hash), tx.CreatedAt)
+		w.renderer.Printf("[%d] %s | %s | %s\n", i+1, tx.Status, truncateHash(tx.Hash), tx.CreatedAt)
 	}
-	fmt.Println("────────────────────────────────────────────────────")
+	w.renderer.Println("────────────────────────────────────────────────────")
 }
 
 func truncateHash(hash string) string {
@@ -107,10 +117,10 @@ func truncateHash(hash string) string {
 	return hash
 }
 
-func readUserChoice(max int) (int, error) {
+func (w *Wizard) readUserChoice(max int) (int, error) {
 	var choice int
-	fmt.Print("Select transaction (number): ")
-	_, err := fmt.Scanln(&choice)
+	w.renderer.Print("Select transaction (number): ")
+	_, err := w.renderer.Scanln(&choice)
 	if err != nil || choice < 1 || choice > max {
 		return 0, errors.WrapValidationError("invalid selection")
 	}

@@ -1,3 +1,6 @@
+# Copyright (c) Hintents Authors.
+# SPDX-License-Identifier: Apache-2.0
+
 #!/bin/bash
 # Copyright 2025 Erst Users
 # SPDX-License-Identifier: Apache-2.0

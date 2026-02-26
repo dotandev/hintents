@@ -12,6 +12,7 @@ import (
 	"runtime"
 
 	"github.com/dotandev/hintents/internal/errors"
+	"github.com/dotandev/hintents/internal/ipc"
 	"github.com/dotandev/hintents/internal/logger"
 )
 
@@ -19,6 +20,7 @@ import (
 type Runner struct {
 	BinaryPath string
 	Debug      bool
+	MockTime   int64 // non-zero overrides Timestamp in every SimulationRequest
 }
 
 // Compile-time check to ensure Runner implements RunnerInterface
@@ -48,8 +50,21 @@ func NewRunner(simPathOverride string, debug bool) (*Runner, error) {
 	return &Runner{
 		BinaryPath: path,
 		Debug:      debug,
+		Validator:  NewValidator(false),
 	}, nil
 }
+
+// NewRunnerWithMockTime creates a Runner that overrides the ledger timestamp on
+// every request with the provided Unix epoch value. Pass 0 to disable the override.
+func NewRunnerWithMockTime(simPathOverride string, debug bool, mockTime int64) (*Runner, error) {
+	r, err := NewRunner(simPathOverride, debug)
+	if err != nil {
+		return nil, err
+	}
+	r.MockTime = mockTime
+	return r, nil
+}
+
 
 // -------------------- Binary Discovery --------------------
 
@@ -128,6 +143,14 @@ func abs(path string) string {
 // -------------------- Execution --------------------
 
 func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
+	// Validate request before processing
+	if r.Validator != nil {
+		if err := r.Validator.ValidateRequest(req); err != nil {
+			logger.Logger.Error("Request validation failed", "error", err)
+			return nil, err
+		}
+	}
+
 	proto := GetOrDefault(req.ProtocolVersion)
 
 	if req.ProtocolVersion != nil {
@@ -138,6 +161,10 @@ func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
 
 	if err := r.applyProtocolConfig(req, proto); err != nil {
 		return nil, err
+	}
+
+	if r.MockTime != 0 {
+		req.Timestamp = r.MockTime
 	}
 
 	inputBytes, err := json.Marshal(req)
@@ -164,11 +191,18 @@ func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
 		return nil, errors.WrapUnmarshalFailed(err, stdout.String())
 	}
 
-	resp.ProtocolVersion = &proto.Version
-
-	if resp.Status == "error" {
-		return nil, errors.WrapSimulationLogicError(resp.Error)
+	// If the simulator returned a logical error inside the response payload,
+	// classify it into a unified ErstError before returning to the caller.
+	if resp.Error != "" {
+		classified := ipc.Error{Message: resp.Error}.ToErstError()
+		logger.Logger.Error("Simulator returned error",
+			"code", classified.Code,
+			"original", classified.OriginalError,
+		)
+		return nil, classified
 	}
+
+	resp.ProtocolVersion = &proto.Version
 
 	return &resp, nil
 }

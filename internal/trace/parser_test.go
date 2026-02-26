@@ -143,3 +143,36 @@ func TestCreateMockTrace_SearchableContent(t *testing.T) {
 	matches = engine.Search(allNodes)
 	assert.Greater(t, len(matches), 0, "Should find error messages")
 }
+func TestParseSimulationResponse_DiagnosticEvents(t *testing.T) {
+	instr := "i32.add"
+	contractID := "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE"
+	resp := &SimulationResponse{
+		Status: "success",
+		DiagnosticEvents: []DiagnosticEvent{
+			{
+				EventType:       "diagnostic",
+				ContractID:      &contractID,
+				Topics:          []string{"budget", "tick"},
+				Data:            "Instruction: i32.add",
+				WasmInstruction: &instr,
+			},
+		},
+	}
+
+	root, err := ParseSimulationResponse(resp)
+
+	require.NoError(t, err)
+	assert.NotNil(t, root)
+
+	// Should have 1 diagnostic node
+	assert.Equal(t, 1, len(root.Children))
+	diagNode := root.Children[0]
+	assert.Equal(t, "diagnostic", diagNode.Type)
+	assert.Equal(t, contractID, diagNode.ContractID)
+
+	// Should have 1 wasm_instruction child node
+	assert.Equal(t, 1, len(diagNode.Children))
+	instrNode := diagNode.Children[0]
+	assert.Equal(t, "wasm_instruction", instrNode.Type)
+	assert.Contains(t, instrNode.EventData, "i32.add")
+}

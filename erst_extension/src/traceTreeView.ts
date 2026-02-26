@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import * as vscode from 'vscode';
 import { Trace, TraceStep } from './erstClient';
 
@@ -46,16 +49,20 @@ export class TraceTreeDataProvider implements vscode.TreeDataProvider<vscode.Tre
             }
             return Promise.resolve([]);
         } else {
+            const states = this.currentTrace.states;
             return Promise.resolve(
-                this.currentTrace.states.map(step => new TraceItem(step))
+                states.map((step, idx) => new TraceItem(step, idx > 0 ? states[idx - 1] : undefined))
             );
         }
     }
 }
 
 export class TraceItem extends vscode.TreeItem {
+    public isCrossContractBoundary: boolean;
+
     constructor(
-        public readonly step: TraceStep
+        public readonly step: TraceStep,
+        previousStep?: TraceStep
     ) {
         const isStateUpdate = step.operation === 'StateUpdate' || step.operation === 'LedgerState';
 
@@ -64,12 +71,30 @@ export class TraceItem extends vscode.TreeItem {
             isStateUpdate ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
         );
 
-        this.tooltip = `${this.label}`;
-        this.description = step.error ? `Error: ${step.error}` : '';
-        this.contextValue = 'traceStep';
+        this.isCrossContractBoundary = isCrossContractTransition(previousStep, step);
+
+        // Build budget metrics display
+        const budgetParts: string[] = [];
+        if (step.cpu_delta !== undefined && step.cpu_delta > 0) {
+            budgetParts.push(`CPU: ${this.formatNumber(step.cpu_delta)}`);
+        }
+        if (step.memory_delta !== undefined && step.memory_delta > 0) {
+            budgetParts.push(`Mem: ${this.formatBytes(step.memory_delta)}`);
+        }
+        const budgetInfo = budgetParts.length > 0 ? ` [${budgetParts.join(', ')}]` : '';
+
+        this.tooltip = `${this.label}${budgetInfo}`;
+        this.description = step.error
+            ? `Error: ${step.error}`
+            : this.isCrossContractBoundary
+                ? `[boundary] ${previousStep?.contract_id} -> ${step.contract_id}${budgetInfo}`
+                : budgetInfo;
+        this.contextValue = this.isCrossContractBoundary ? 'traceStepBoundary' : 'traceStep';
 
         if (step.error) {
             this.iconPath = new (vscode.ThemeIcon as any)('error', new (vscode.ThemeColor as any)('errorForeground'));
+        } else if (this.isCrossContractBoundary) {
+            this.iconPath = new (vscode.ThemeIcon as any)('git-compare', new (vscode.ThemeColor as any)('editorWarning.foreground'));
         } else if (isStateUpdate) {
             this.iconPath = new (vscode.ThemeIcon as any)('database', new (vscode.ThemeColor as any)('symbolIcon.fieldForeground'));
         } else {
@@ -84,6 +109,32 @@ export class TraceItem extends vscode.TreeItem {
             };
         }
     }
+
+    private formatNumber(num: number): string {
+        if (num >= 1000000) {
+            return `${(num / 1000000).toFixed(2)}M`;
+        } else if (num >= 1000) {
+            return `${(num / 1000).toFixed(2)}K`;
+        }
+        return num.toString();
+    }
+
+    private formatBytes(bytes: number): string {
+        if (bytes >= 1048576) {
+            return `${(bytes / 1048576).toFixed(2)}MB`;
+        } else if (bytes >= 1024) {
+            return `${(bytes / 1024).toFixed(2)}KB`;
+        }
+        return `${bytes}B`;
+    }
+}
+
+// isCrossContractTransition returns true when two consecutive steps belong to different contracts.
+function isCrossContractTransition(prev: TraceStep | undefined, current: TraceStep): boolean {
+    if (!prev || !prev.contract_id || !current.contract_id) {
+        return false;
+    }
+    return prev.contract_id !== current.contract_id;
 }
 
 export class StateDetailItem extends vscode.TreeItem {

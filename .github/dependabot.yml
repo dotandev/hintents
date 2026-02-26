@@ -1,0 +1,71 @@
+version: 2
+
+updates:
+  # Rust / Cargo - simulator (soroban-env-host and related dependencies)
+  - package-ecosystem: "cargo"
+    directory: "/simulator"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "rust"
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      # Do not auto-bump soroban-env-host major versions without review
+      - dependency-name: "soroban-env-host"
+        update-types: ["version-update:semver-major"]
+
+  # Go modules
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # npm - erst_extension
+  - package-ecosystem: "npm"
+    directory: "/erst_extension"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # npm - docs/showcase
+  - package-ecosystem: "npm"
+    directory: "/docs/showcase"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(deps)"

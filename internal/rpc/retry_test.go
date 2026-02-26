@@ -433,6 +433,101 @@ func TestRetryerNilClient(t *testing.T) {
 	}
 }
 
+func TestRetryerResponseTooLarge(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		w.Write([]byte("response too large"))
+	}))
+	defer server.Close()
+
+	cfg := DefaultRetryConfig()
+	cfg.MaxRetries = 3
+	cfg.InitialBackoff = 10 * time.Millisecond
+	retrier := NewRetrier(cfg, server.Client())
+
+	req, err := http.NewRequest("POST", server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := retrier.Do(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error for 413 response, got nil")
+	}
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	if attempts != 1 {
+		t.Errorf("expected exactly 1 attempt (no retry for 413), got %d", attempts)
+	}
+
+	if err.Error() == "" || !containsResponseTooLarge(err) {
+		t.Errorf("expected response-too-large error, got: %v", err)
+	}
+}
+
+func TestRetryTransportResponseTooLarge(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		w.Write([]byte("response too large"))
+	}))
+	defer server.Close()
+
+	cfg := DefaultRetryConfig()
+	cfg.MaxRetries = 3
+	cfg.InitialBackoff = 10 * time.Millisecond
+	transport := NewRetryTransport(cfg, http.DefaultTransport)
+	client := &http.Client{Transport: transport}
+
+	req, err := http.NewRequest("POST", server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err == nil {
+		t.Fatal("expected error for 413 response, got nil")
+	}
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	if attempts != 1 {
+		t.Errorf("expected exactly 1 attempt (no retry for 413), got %d", attempts)
+	}
+
+	if !containsResponseTooLarge(err) {
+		t.Errorf("expected response-too-large error, got: %v", err)
+	}
+}
+
+func containsResponseTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return len(msg) > 0 &&
+		(contains(msg, "response too large") || contains(msg, "exceeded the server"))
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchString(s, substr)
+}
+
+func searchString(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 func BenchmarkRetryerSuccess(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

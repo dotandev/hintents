@@ -9,6 +9,7 @@ package rpc
 // calls by storing ledger state data with filenames derived from LedgerKey hashes.
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
 // TestLedgerKeyHashing_Deterministic verifies that hashing the same LedgerKey
@@ -875,6 +877,8 @@ func BenchmarkLedgerKeyHashing_AllTypes(b *testing.B) {
 	}
 }
 func TestCacheTTL_SetAndGet(t *testing.T) {
+	setupTestCacheDB(t)
+
 	key := "test-key"
 	value := "test-value"
 	ttl := 1 * time.Hour
@@ -889,6 +893,8 @@ func TestCacheTTL_SetAndGet(t *testing.T) {
 }
 
 func TestCacheTTL_DefaultTTL(t *testing.T) {
+	setupTestCacheDB(t)
+
 	key := "default-ttl-key"
 	value := "default-value"
 
@@ -902,6 +908,8 @@ func TestCacheTTL_DefaultTTL(t *testing.T) {
 }
 
 func TestCacheTTL_Expiration(t *testing.T) {
+	setupTestCacheDB(t)
+
 	key := "expiring-key"
 	value := "expiring-value"
 	ttl := 100 * time.Millisecond
@@ -922,6 +930,8 @@ func TestCacheTTL_Expiration(t *testing.T) {
 }
 
 func TestCacheTTL_ZeroTTLUsesDefault(t *testing.T) {
+	setupTestCacheDB(t)
+
 	key := "zero-ttl-key"
 	value := "zero-ttl-value"
 
@@ -935,6 +945,8 @@ func TestCacheTTL_ZeroTTLUsesDefault(t *testing.T) {
 }
 
 func TestCacheTTL_NegativeTTLUsesDefault(t *testing.T) {
+	setupTestCacheDB(t)
+
 	key := "negative-ttl-key"
 	value := "negative-ttl-value"
 
@@ -948,6 +960,8 @@ func TestCacheTTL_NegativeTTLUsesDefault(t *testing.T) {
 }
 
 func TestCacheTTL_MultipleEntriesWithDifferentTTLs(t *testing.T) {
+	setupTestCacheDB(t)
+
 	key1 := "short-ttl"
 	key2 := "long-ttl"
 	value := "test-value"
@@ -968,6 +982,8 @@ func TestCacheTTL_MultipleEntriesWithDifferentTTLs(t *testing.T) {
 }
 
 func TestCacheTTL_InvalidateAfterExpiry(t *testing.T) {
+	setupTestCacheDB(t)
+
 	key := "auto-cleanup-key"
 	value := "auto-cleanup-value"
 
@@ -985,6 +1001,8 @@ func TestCacheTTL_InvalidateAfterExpiry(t *testing.T) {
 }
 
 func TestCacheTTL_SetWithCustomTTL(t *testing.T) {
+	setupTestCacheDB(t)
+
 	key := "custom-ttl"
 	value := "custom-value"
 	customTTL := 200 * time.Millisecond
@@ -1004,7 +1022,121 @@ func TestCacheTTL_SetWithCustomTTL(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestCache_Invalidate(t *testing.T) {
+	setupTestCacheDB(t)
+
+	key := "invalidate-key"
+	value := "invalidate-value"
+
+	err := Set(key, value)
+	require.NoError(t, err)
+
+	_, found, err := Get(key)
+	require.NoError(t, err)
+	require.True(t, found)
+
+	err = Invalidate(key)
+	require.NoError(t, err)
+
+	_, found, err = Get(key)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
+func TestCache_Cleanup(t *testing.T) {
+	setupTestCacheDB(t)
+
+	// Insert entries with very short TTL so they expire quickly
+	err := SetWithTTL("cleanup-a", "val-a", 10*time.Millisecond)
+	require.NoError(t, err)
+	err = SetWithTTL("cleanup-b", "val-b", 10*time.Millisecond)
+	require.NoError(t, err)
+	// This one should survive
+	err = SetWithTTL("cleanup-c", "val-c", 10*time.Second)
+	require.NoError(t, err)
+
+	time.Sleep(50 * time.Millisecond)
+
+	removed, err := Cleanup(0)
+	require.NoError(t, err)
+	require.Equal(t, 2, removed)
+
+	// The surviving entry should still be readable
+	val, found, err := Get("cleanup-c")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "val-c", val)
+}
+
+func TestCache_UpsertOverwrite(t *testing.T) {
+	setupTestCacheDB(t)
+
+	key := "overwrite-key"
+
+	err := Set(key, "first")
+	require.NoError(t, err)
+
+	err = Set(key, "second")
+	require.NoError(t, err)
+
+	val, found, err := Get(key)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "second", val)
+}
+
+func TestCache_GetMissingKey(t *testing.T) {
+	setupTestCacheDB(t)
+
+	_, found, err := Get("nonexistent-key")
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
+func TestCache_CloseAndReinit(t *testing.T) {
+	setupTestCacheDB(t)
+
+	err := Set("persist-key", "persist-value")
+	require.NoError(t, err)
+
+	// Closing should succeed
+	err = CloseCache()
+	require.NoError(t, err)
+
+	// After close, re-init with a fresh in-memory DB (data is lost for in-memory)
+	setupTestCacheDB(t)
+
+	_, found, err := Get("persist-key")
+	require.NoError(t, err)
+	// In-memory DB is fresh, so key is gone
+	require.False(t, found)
+}
+
+// setupTestCacheDB creates an in-memory SQLite database for tests
+// and registers a cleanup to close it when the test finishes.
+func setupTestCacheDB(t *testing.T) {
+	t.Helper()
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+
+	err = InitCacheWithDB(db)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		CloseCache()
+	})
+}
+
 func BenchmarkCacheTTL_Set(b *testing.B) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		b.Fatal(err)
+	}
+	if err := InitCacheWithDB(db); err != nil {
+		b.Fatal(err)
+	}
+	defer CloseCache()
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		SetWithTTL("bench-key", "bench-value", 24*time.Hour)
@@ -1012,6 +1144,15 @@ func BenchmarkCacheTTL_Set(b *testing.B) {
 }
 
 func BenchmarkCacheTTL_Get(b *testing.B) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		b.Fatal(err)
+	}
+	if err := InitCacheWithDB(db); err != nil {
+		b.Fatal(err)
+	}
+	defer CloseCache()
+
 	SetWithTTL("bench-get", "bench-value", 24*time.Hour)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

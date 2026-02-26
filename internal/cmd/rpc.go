@@ -48,8 +48,13 @@ var rpcHealthCmd = &cobra.Command{
 		fmt.Println("[STATS] RPC Endpoint Status:")
 		fmt.Println()
 
+		timeout := time.Duration(15) * time.Second
+		if err == nil && cfg.RequestTimeout > 0 {
+			timeout = time.Duration(cfg.RequestTimeout) * time.Second
+		}
+
 		client := &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: timeout,
 		}
 
 		for i, url := range urls {

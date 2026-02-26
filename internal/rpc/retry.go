@@ -75,6 +75,12 @@ func (r *Retrier) Do(ctx context.Context, req *http.Request) (*http.Response, er
 			continue
 		}
 
+		// HTTP 413: response too large -- not retryable
+		if resp.StatusCode == http.StatusRequestEntityTooLarge {
+			resp.Body.Close()
+			return nil, errors.WrapRPCResponseTooLarge(req.URL.String())
+		}
+
 		// Check if response status is retryable
 		if r.shouldRetry(resp.StatusCode) {
 			lastErr = fmt.Errorf("status code %d", resp.StatusCode)
@@ -211,6 +217,12 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			}
 			backoff = rt.nextBackoff(backoff)
 			continue
+		}
+
+		// HTTP 413: response too large -- not retryable
+		if resp.StatusCode == http.StatusRequestEntityTooLarge {
+			resp.Body.Close()
+			return nil, errors.WrapRPCResponseTooLarge(req.URL.String())
 		}
 
 		// Check if response status is retryable

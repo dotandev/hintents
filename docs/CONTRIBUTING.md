@@ -5,12 +5,21 @@ Thank you for your interest in contributing to Erst! We welcome contributions fr
 ## Getting Started
 
 1.  **Fork the repository** on GitHub.
+
+
 2.  **Clone your fork** locally:
     ```bash
-    git clone https://github.com/your-username/erst.git
-    cd erst
+    git clone https://github.com/your-username/hintents.git
+    cd hintents
     ```
-3.  **Create a branch** for your feature or bug fix:
+
+3.  **Sync with the latest `main` branch**:
+    ```bash
+    git checkout main
+    git pull origin main
+    ```
+
+4.  **Create a new branch** for your feature or bug fix (always branch from `main`):
     ```bash
     git checkout -b feature/my-new-feature
     ```
@@ -64,17 +73,23 @@ You will need the following installed:
 *   **Rust**: Standard Stable Toolchain. [Install Rust](https://www.rust-lang.org/tools/install)
 *   **(Optional) Docker**: If you prefer building in a container.
 
-### detailed Setup
+### Detailed Local Development Setup
 
 #### 1. Rust Simulator Setup
 
 The simulator must be built first because the Go CLI depends on the binary being available (or in the path).
 
 ```bash
+# From the project root
 cd simulator
-# Ensure you have the latest stable toolchain
+
+# Ensure the latest stable Rust toolchain is installed
 rustup update stable
-# Build the release binary (release is recommended for performance)
+
+# Install required Rust components (if not already installed)
+rustup component add rustfmt clippy
+
+# Build the release binary (recommended for performance)
 cargo build --release
 ```
 
@@ -85,8 +100,14 @@ cargo build --release
 Once the simulator is built, you can build and run the Go CLI.
 
 ```bash
-# From the project root
+# Return to the project root
+cd ..
+
+# Download Go dependencies
+go mod tidy
 go mod download
+
+# Build the CLI binary
 go build -o erst cmd/erst/main.go
 ```
 
@@ -111,12 +132,43 @@ go test ./...
 cd simulator
 cargo test
 ```
+> Always run both Go and Rust tests before submitting a pull request.
+
 
 ## Submitting a Pull Request
 
-1.  Ensure all tests pass.
-2.  Update documentation if you change functionality.
-3.  Submit your PR to the `main` branch.
+1.  **Run strict linting**: Ensure all linting checks pass before submitting.
+    ```bash
+    make lint-all-strict
+    ```
+    See [STRICT_LINTING.md](STRICT_LINTING.md) for details on our linting requirements.
+
+2.  **Ensure all tests pass**: Run the full test suite.
+    ```bash
+    make test
+    make rust-test
+    ```
+
+3.  **Update documentation** if you change functionality.
+
+4.  **Submit your PR** to the `main` branch.
+
+### Code Quality Requirements
+
+All PRs must pass strict linting checks:
+
+- **No unused variables, imports, or functions**
+- **No dead code** (unless explicitly justified)
+- **All warnings treated as errors** in CI
+- **Proper formatting** (gofmt for Go, cargo fmt for Rust)
+
+The CI pipeline will automatically fail if any linting issues are detected. To avoid CI failures:
+
+- Run `make lint-all-strict` locally before pushing
+- Install pre-commit hooks: `pip install pre-commit && pre-commit install`
+- Fix all linting issues before requesting review
+
+For details on suppressing false positives, see [STRICT_LINTING.md](STRICT_LINTING.md).
 
 ## License
 

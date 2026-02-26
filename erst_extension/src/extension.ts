@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import * as vscode from 'vscode';
 import { ERSTClient } from './erstClient';
 import { TraceTreeDataProvider, TraceItem } from './traceTreeView';
