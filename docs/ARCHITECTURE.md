@@ -9,6 +9,36 @@ The architecture consists of three core components:
 2. **RPC Client**: Stellar network data fetching via Horizon API and JSON-RPC
 3. **Rust Simulator** (`erst-sim`): Soroban transaction execution and diagnostics
 
+## CLI Framework V2
+
+The CLI has been redesigned to support Protocol V2 specifications and improved modularity.
+
+### Core Components
+
+*   **Command Interface**: `internal/cli/command.go` defines the `Command` interface, enabling dependency injection and structured error handling.
+*   **Registry**: `internal/cli/command.go` provides a central registry for managing command lifecycles, replacing global `init()` functions.
+*   **Protocol Manager**: `internal/cli/protocol.go` handles Protocol V2 version negotiation and validation, ensuring commands run in compatible environments.
+
+### Command Structure
+
+Each command implements the `Command` interface:
+
+```go
+type Command interface {
+    Name() string
+    Description() string
+    CreateCobraCommand() *cobra.Command
+    Validate(ctx context.Context, args []string) error
+    Execute(ctx context.Context, args []string) error
+}
+```
+
+This structure separates command configuration (Cobra) from business logic (`Execute`), facilitating unit testing and validation.
+
+### Protocol V2 Support
+
+The `ProtocolManager` ensures that commands are executed only when the connected node supports the required protocol version (e.g., Soroban Protocol 20-22).
+
 ---
 
 ## System Architecture Diagram

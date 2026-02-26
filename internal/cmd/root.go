@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"github.com/dotandev/hintents/internal/cli"
 	"github.com/dotandev/hintents/internal/localization"
 	"github.com/dotandev/hintents/internal/updater"
 	"github.com/spf13/cobra"
@@ -119,4 +120,8 @@ func init() {
 
 	// Register commands
 	rootCmd.AddCommand(statsCmd)
+	
+	// Initialize new CLI registry and register commands
+	registry := cli.NewRegistry(rootCmd)
+	registry.Register(cli.NewAddCommand())
 }
