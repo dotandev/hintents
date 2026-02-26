@@ -49,6 +49,7 @@ var (
 	ErrRPCResponseTooLarge  = errors.New("RPC response too large")
 	ErrConfigFailed         = errors.New("configuration error")
 	ErrNetworkNotFound      = errors.New("network not found")
+	ErrMissingLedgerKey     = errors.New("missing ledger key in footprint")
 	ErrWasmInvalid          = errors.New("invalid WASM file")
 	ErrSpecNotFound         = errors.New("contract spec not found")
 )
@@ -103,6 +104,20 @@ func (e *ResponseTooLargeError) Error() string {
 
 func (e *ResponseTooLargeError) Is(target error) bool {
 	return target == ErrRPCResponseTooLarge
+}
+
+// MissingLedgerKeyError is returned when partial simulation halts because
+// a required ledger key is absent from the provided state snapshot.
+type MissingLedgerKeyError struct {
+	Key string
+}
+
+func (e *MissingLedgerKeyError) Error() string {
+	return fmt.Sprintf("%v: %s", ErrMissingLedgerKey, e.Key)
+}
+
+func (e *MissingLedgerKeyError) Is(target error) bool {
+	return target == ErrMissingLedgerKey
 }
 
 // Wrap functions for consistent error wrapping
@@ -236,6 +251,9 @@ func WrapRPCResponseTooLarge(url string) error {
 	}
 }
 
+func WrapMissingLedgerKey(key string) error {
+	return &MissingLedgerKeyError{Key: key}
+}
 
 // ErstErrorCode is the canonical classification for all errors crossing
 // RPC and Simulator boundaries.

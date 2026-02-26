@@ -5,6 +5,7 @@ package rpc
 
 import (
 	"crypto/sha256"
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
