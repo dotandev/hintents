@@ -50,7 +50,6 @@ func NewRunner(simPathOverride string, debug bool) (*Runner, error) {
 	return &Runner{
 		BinaryPath: path,
 		Debug:      debug,
-		Validator:  NewValidator(false),
 	}, nil
 }
 
@@ -64,7 +63,6 @@ func NewRunnerWithMockTime(simPathOverride string, debug bool, mockTime int64) (
 	r.MockTime = mockTime
 	return r, nil
 }
-
 
 // -------------------- Binary Discovery --------------------
 
@@ -143,13 +141,6 @@ func abs(path string) string {
 // -------------------- Execution --------------------
 
 func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
-	// Validate request before processing
-	if r.Validator != nil {
-		if err := r.Validator.ValidateRequest(req); err != nil {
-			logger.Logger.Error("Request validation failed", "error", err)
-			return nil, err
-		}
-	}
 
 	proto := GetOrDefault(req.ProtocolVersion)
 
@@ -194,7 +185,8 @@ func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
 	// If the simulator returned a logical error inside the response payload,
 	// classify it into a unified ErstError before returning to the caller.
 	if resp.Error != "" {
-		classified := ipc.Error{Message: resp.Error}.ToErstError()
+		err := ipc.Error{Message: resp.Error}
+		classified := err.ToErstError()
 		logger.Logger.Error("Simulator returned error",
 			"code", classified.Code,
 			"original", classified.OriginalError,

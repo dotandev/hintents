@@ -26,21 +26,21 @@ const (
 
 // TrapInfo contains information about a trap that occurred during execution
 type TrapInfo struct {
-	Type           TrapType               // Type of trap
-	Message        string                 // Error message
+	Type           TrapType              // Type of trap
+	Message        string                // Error message
 	SourceLocation *dwarf.SourceLocation // Source location if available
-	LocalVars      []LocalVarInfo         // Local variables at trap point
-	Function       string                 // Function where trap occurred
-	CallStack      []string               // Call stack at trap point
+	LocalVars      []LocalVarInfo        // Local variables at trap point
+	Function       string                // Function where trap occurred
+	CallStack      []string              // Call stack at trap point
 }
 
 // LocalVarInfo represents a local variable with its value at trap time
 type LocalVarInfo struct {
-	Name           string               // Variable name
-	DemangledName  string               // Demangled name for display
-	Type           string               // Variable type
-	Value          interface{}          // Value at trap time (if available)
-	Location       string               // Memory location
+	Name           string                // Variable name
+	DemangledName  string                // Demangled name for display
+	Type           string                // Variable type
+	Value          interface{}           // Value at trap time (if available)
+	Location       string                // Memory location
 	SourceLocation *dwarf.SourceLocation // Where in source the variable is defined
 }
 
@@ -183,7 +183,7 @@ func (td *TrapDetector) extractLocalVars(sp *dwarf.SubprogramInfo) []LocalVarInf
 			Name:          lv.Name,
 			DemangledName: lv.DemangledName,
 			Type:          lv.Type,
-			Location:     lv.Location,
+			Location:      lv.Location,
 		}
 
 		// Try to get source location

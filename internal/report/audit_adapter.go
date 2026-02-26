@@ -59,11 +59,11 @@ func FromSignedAuditDump(dump *SignedAuditDump) *Report {
 
 	r.Metadata.DataSource = fmt.Sprintf("signed-audit-dump (signer: %s)", dump.Signer.Provider)
 	r.Metadata.Tags = map[string]string{
-		"algorithm":    dump.Algorithm,
-		"hash":         dump.Hash,
-		"signer":       dump.Signer.Provider,
-		"public_key":   truncate(dump.PublicKey, 64),
-		"signature":    truncate(dump.Signature, 32) + "...",
+		"algorithm":  dump.Algorithm,
+		"hash":       dump.Hash,
+		"signer":     dump.Signer.Provider,
+		"public_key": truncate(dump.PublicKey, 64),
+		"signature":  truncate(dump.Signature, 32) + "...",
 	}
 
 	return r

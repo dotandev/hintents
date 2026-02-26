@@ -274,11 +274,11 @@ const (
 	CodeLedgerArchived       ErstErrorCode = "RPC_LEDGER_ARCHIVED"
 
 	// Simulator origin
-	CodeSimNotFound     ErstErrorCode = "SIM_BINARY_NOT_FOUND"
-	CodeSimCrash        ErstErrorCode = "SIM_PROCESS_CRASHED"
-	CodeSimExecFailed   ErstErrorCode = "SIM_EXECUTION_FAILED"
-	CodeSimLogicError   ErstErrorCode = "SIM_LOGIC_ERROR"
-	CodeSimProtoUnsup   ErstErrorCode = "SIM_PROTOCOL_UNSUPPORTED"
+	CodeSimNotFound   ErstErrorCode = "SIM_BINARY_NOT_FOUND"
+	CodeSimCrash      ErstErrorCode = "SIM_PROCESS_CRASHED"
+	CodeSimExecFailed ErstErrorCode = "SIM_EXECUTION_FAILED"
+	CodeSimLogicError ErstErrorCode = "SIM_LOGIC_ERROR"
+	CodeSimProtoUnsup ErstErrorCode = "SIM_PROTOCOL_UNSUPPORTED"
 
 	// Shared / general
 	CodeValidationFailed ErstErrorCode = "VALIDATION_FAILED"

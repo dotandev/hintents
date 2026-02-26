@@ -4,13 +4,8 @@
 use soroban_env_host::{
     budget::Budget,
     storage::Storage,
-    xdr::{ Hash, ScErrorCode, ScErrorType },
-    DiagnosticLevel,
-    Error as EnvError,
-    Host,
-    HostError,
-    TryIntoVal,
-    Val,
+    xdr::{Hash, ScErrorCode, ScErrorType},
+    DiagnosticLevel, Error as EnvError, Host, HostError, TryIntoVal, Val,
 };
 
 #[allow(dead_code)]
@@ -28,7 +23,7 @@ impl SimHost {
     pub fn new(
         budget_limits: Option<(u64, u64)>,
         calibration: Option<crate::types::ResourceCalibration>,
-        memory_limit: Option<u64>
+        memory_limit: Option<u64>,
     ) -> Self {
         let budget = Budget::default();
 
@@ -67,7 +62,8 @@ impl SimHost {
         let host = Host::with_storage_and_budget(Storage::default(), budget);
 
         // Enable debug mode for better diagnostics
-        host.set_diagnostic_level(DiagnosticLevel::Debug).expect("failed to set diagnostic level");
+        host.set_diagnostic_level(DiagnosticLevel::Debug)
+            .expect("failed to set diagnostic level");
 
         Self {
             inner: host,
@@ -106,7 +102,10 @@ impl SimHost {
         if let Some(limit) = self.memory_limit {
             if let Ok(mem_bytes) = self.inner.budget_cloned().get_mem_bytes_consumed() {
                 if mem_bytes > limit {
-                    panic!("Memory limit exceeded: {} bytes > {} bytes limit", mem_bytes, limit);
+                    panic!(
+                        "Memory limit exceeded: {} bytes > {} bytes limit",
+                        mem_bytes, limit
+                    );
                 }
             }
         }
@@ -133,7 +132,8 @@ mod tests {
         assert!(host.contract_id.is_some());
 
         // Test setting function name
-        host.set_fn_name("add").expect("failed to set function name");
+        host.set_fn_name("add")
+            .expect("failed to set function name");
         assert!(host.fn_name.is_some());
     }
 

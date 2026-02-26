@@ -81,10 +81,10 @@ func TraceToPprof(execTrace *trace.ExecutionTrace) (*profile.Profile, error) {
 				funcByKey[key] = fn
 			}
 			loc = &profile.Location{
-				ID:       nextLocID(),
-				Mapping:  mapping,
-				Address:  uint64(state.Step),
-				Line:     []profile.Line{{Function: fn, Line: int64(state.Step)}},
+				ID:      nextLocID(),
+				Mapping: mapping,
+				Address: uint64(state.Step),
+				Line:    []profile.Line{{Function: fn, Line: int64(state.Step)}},
 			}
 			p.Location = append(p.Location, loc)
 			locByKey[key] = loc

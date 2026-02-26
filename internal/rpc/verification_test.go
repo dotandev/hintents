@@ -24,19 +24,20 @@ func TestVerifyLedgerEntryHash_ValidKey(t *testing.T) {
 
 	contractAddr := xdr.ScAddress{
 		Type:       xdr.ScAddressTypeScAddressTypeContract,
-		ContractId: &contractID,
+		ContractId: (*xdr.ContractId)(&contractID),
 	}
 
+	sym := xdr.ScSymbol("COUNTER")
 	keyVal := xdr.ScVal{
 		Type: xdr.ScValTypeScvSymbol,
-		Sym:  &xdr.ScSymbol("COUNTER"),
+		Sym:  &sym,
 	}
 
 	ledgerKey := xdr.LedgerKey{
 		Type: xdr.LedgerEntryTypeContractData,
 		ContractData: &xdr.LedgerKeyContractData{
-			Contract: contractAddr,
-			Key:      keyVal,
+			Contract:   contractAddr,
+			Key:        keyVal,
 			Durability: xdr.ContractDataDurability(xdr.ContractDataDurabilityPersistent),
 		},
 	}
@@ -206,19 +207,20 @@ func createTestLedgerKey(t *testing.T, seed int) string {
 
 	contractAddr := xdr.ScAddress{
 		Type:       xdr.ScAddressTypeScAddressTypeContract,
-		ContractId: &contractID,
+		ContractId: (*xdr.ContractId)(&contractID),
 	}
 
+	sym := xdr.ScSymbol("COUNTER")
 	keyVal := xdr.ScVal{
 		Type: xdr.ScValTypeScvSymbol,
-		Sym:  &xdr.ScSymbol("COUNTER"),
+		Sym:  &sym,
 	}
 
 	ledgerKey := xdr.LedgerKey{
 		Type: xdr.LedgerEntryTypeContractData,
 		ContractData: &xdr.LedgerKeyContractData{
-			Contract: contractAddr,
-			Key:      keyVal,
+			Contract:   contractAddr,
+			Key:        keyVal,
 			Durability: xdr.ContractDataDurability(xdr.ContractDataDurabilityPersistent),
 		},
 	}

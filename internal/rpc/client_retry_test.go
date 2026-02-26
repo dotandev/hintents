@@ -83,7 +83,12 @@ func TestGetLedgerEntriesRetriesOnRateLimit(t *testing.T) {
 			Jsonrpc: "2.0",
 			ID:      1,
 		}
-		resp.Result.Entries = []LedgerEntryResult{{
+		resp.Result.Entries = []struct {
+			Key                string `json:"key"`
+			Xdr                string `json:"xdr"`
+			LastModifiedLedger int    `json:"lastModifiedLedgerSeq"`
+			LiveUntilLedger    int    `json:"liveUntilLedgerSeq"`
+		}{{
 			Key: "AAA",
 			Xdr: "BBB",
 		}}

@@ -93,13 +93,13 @@ func TestIdentifyTrapType(t *testing.T) {
 // TestDetectTrap tests trap detection
 func TestDetectTrap(t *testing.T) {
 	tests := []struct {
-		name   string
-		state  *ExecutionState
+		name    string
+		state   *ExecutionState
 		wantNil bool
 	}{
 		{
-			name:     "nil state",
-			state:    nil,
+			name:    "nil state",
+			state:   nil,
 			wantNil: true,
 		},
 		{
@@ -112,7 +112,7 @@ func TestDetectTrap(t *testing.T) {
 		{
 			name: "memory out of bounds error",
 			state: &ExecutionState{
-				Error:     "memory out of bounds at address 0x1000",
+				Error:    "memory out of bounds at address 0x1000",
 				Function: "transfer",
 			},
 			wantNil: false,
@@ -120,7 +120,7 @@ func TestDetectTrap(t *testing.T) {
 		{
 			name: "index out of bounds error",
 			state: &ExecutionState{
-				Error:     "index out of bounds: len=5, index=10",
+				Error:    "index out of bounds: len=5, index=10",
 				Function: "get_balance",
 			},
 			wantNil: false,
@@ -243,8 +243,8 @@ func TestExtractCallStack(t *testing.T) {
 // TestFormatTrapInfo tests trap info formatting
 func TestFormatTrapInfo(t *testing.T) {
 	trap := &TrapInfo{
-		Type:    TrapIndexOutOfBounds,
-		Message: "index out of bounds: len=5, index=10",
+		Type:     TrapIndexOutOfBounds,
+		Message:  "index out of bounds: len=5, index=10",
 		Function: "transfer",
 		SourceLocation: &dwarf.SourceLocation{
 			File: "token.rs",
@@ -293,14 +293,14 @@ func TestFormatTrapInfo(t *testing.T) {
 // TestIsMemoryTrap tests memory trap detection
 func TestIsMemoryTrap(t *testing.T) {
 	tests := []struct {
-		name  string
-		trap  *TrapInfo
-		want  bool
+		name string
+		trap *TrapInfo
+		want bool
 	}{
 		{
-			name:  "nil trap",
-			trap:  nil,
-			want:  false,
+			name: "nil trap",
+			trap: nil,
+			want: false,
 		},
 		{
 			name: "memory out of bounds",
@@ -348,7 +348,7 @@ func TestLocalVarInfo(t *testing.T) {
 		Name:          "_RNv5balance",
 		DemangledName: "balance",
 		Type:          "i128",
-		Location:     "0x1000",
+		Location:      "0x1000",
 		Value:         int64(1000),
 		SourceLocation: &dwarf.SourceLocation{
 			File: "token.rs",

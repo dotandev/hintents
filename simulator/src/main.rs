@@ -9,8 +9,8 @@ mod runner;
 mod source_map_cache;
 mod source_mapper;
 mod stack_trace;
-mod vm;
 mod types;
+mod vm;
 mod wasm;
 
 use crate::gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor, CPU_LIMIT, MEMORY_LIMIT};
@@ -181,10 +181,6 @@ fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<Categoriz
             let contract_id = e.event.contract_id.as_ref().map(|id| format!("{id:?}"));
             let topics = match &e.event.body {
                 soroban_env_host::xdr::ContractEventBody::V0(v0) => {
-                    v0.topics
-                        .iter()
-                        .map(|t| format!("{:?}", t))
-                        .collect::<Vec<String>>()
                     v0.topics.iter().map(|t| format!("{t:?}")).collect()
                 }
             };
@@ -221,7 +217,7 @@ fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<Categoriz
 
 /// Main entry point for the erst simulator.
 ///
-/// Reads a JSON `SimulationRequest` from stdin, 
+/// Reads a JSON `SimulationRequest` from stdin,
 /// initializes a Soroban host environment, and outputs a JSON
 /// `SimulationResponse` with simulation results or errors.
 ///
@@ -241,11 +237,6 @@ fn main() {
 
     // Read JSON from Stdin
     let mut buffer = String::new();
-    if let Err(e) = std::io::stdin().read_to_string(&mut buffer) {
-        let err_msg = format!("Failed to read stdin: {}", e);
-        let res = SimulationResponse {
-            status: "error".to_string(),
-            error: Some(err_msg.clone()),
     if let Err(e) = io::stdin().read_to_string(&mut buffer) {
         let res = SimulationResponse {
             status: "error".to_string(),
@@ -266,7 +257,6 @@ fn main() {
             eprintln!("Failed to serialize error response");
             println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
         }
-        eprintln!("{}", err_msg);
         eprintln!("Failed to read stdin: {e}");
         return;
     }
@@ -289,7 +279,10 @@ fn main() {
                 stack_trace: None,
                 wasm_offset: None,
             };
-            println!("{}", serde_json::to_string(&res).expect("Failed to serialize error response"));
+            println!(
+                "{}",
+                serde_json::to_string(&res).expect("Failed to serialize error response")
+            );
             return;
         }
     };
@@ -559,14 +552,14 @@ fn main() {
                                     wasm_instruction,
                                 }
                             })
-                        .collect();
-                    (raw_events, diag_events)
-                }
-                Err(_) => (
-                    vec!["Failed to retrieve events".to_string()],
-                    Vec::<DiagnosticEvent>::new(),
-                ),
-            };
+                            .collect();
+                        (raw_events, diag_events)
+                    }
+                    Err(_) => (
+                        vec!["Failed to retrieve events".to_string()],
+                        Vec::<DiagnosticEvent>::new(),
+                    ),
+                };
 
             // Capture categorized events for analyzer
             let categorized_events = match host.get_events() {
@@ -653,7 +646,7 @@ fn main() {
             // Host error during execution (e.g., contract trap, validation failure)
             let error_msg = format!("{:?}", host_error);
             let decoded_msg = decode_error(&error_msg);
-            
+
             let structured_error = StructuredError {
                 error_type: "HostError".to_string(),
                 message: decoded_msg.clone(),
@@ -661,6 +654,7 @@ fn main() {
                     "Contract execution failed with host error: {}",
                     decoded_msg
                 )),
+            };
             let error_debug = format!("{:?}", host_error);
             let wasm_trace = WasmStackTrace::from_host_error(&error_debug);
 
@@ -788,12 +782,13 @@ fn main() {
 
             let error_msg = format!("{:?}", host_error);
             let wasm_offset = extract_wasm_offset(&error_msg);
-            
-            let source_location = if let (Some(offset), Some(mapper)) = (wasm_offset, &source_mapper) {
-                mapper.map_wasm_offset_to_source(offset)
-            } else {
-                None
-            };
+
+            let source_location =
+                if let (Some(offset), Some(mapper)) = (wasm_offset, &source_mapper) {
+                    mapper.map_wasm_offset_to_source(offset)
+                } else {
+                    None
+                };
 
             let error_msg = format!("{:?}", host_error);
             let wasm_offset = extract_wasm_offset(&error_msg);
@@ -861,11 +856,13 @@ fn extract_wasm_offset(error_msg: &str) -> Option<u64> {
     // Look for patterns like "@ 0x[HEX]" in the error message
     // Soroban/Wasmi errors often contain stack traces like:
     // "  0: func[42] @ 0xa3c"
-    
+
     for line in error_msg.lines() {
         if let Some(pos) = line.find("@ 0x") {
             let hex_part = &line[pos + 4..];
-            let end = hex_part.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(hex_part.len());
+            let end = hex_part
+                .find(|c: char| !c.is_ascii_hexdigit())
+                .unwrap_or(hex_part.len());
             if let Ok(offset) = u64::from_str_radix(&hex_part[..end], 16) {
                 return Some(offset);
             }
@@ -876,53 +873,17 @@ fn extract_wasm_offset(error_msg: &str) -> Option<u64> {
 /// Translate a raw soroban / WASM error string into a user-friendly description.
 ///
 /// Protocol 21 standardised the set of VM trap codes emitted by the host.
-/// This function maps those codes to clear English phrases so that
-/// upper-level diagnostics (e.g. `erst explain`) can display them directly.
-pub fn decode_error(raw: &str) -> String {
-    let lower = raw.to_lowercase();
-
-    if lower.contains("wasm trap") || lower.contains("vm trap") {
-        if lower.contains("out of bounds") || lower.contains("memory access") {
-            return "VM Trap: Out of Bounds Access — the contract read or wrote outside its allocated memory region.".to_string();
-        }
-        if lower.contains("stack overflow") || lower.contains("call stack") {
-            return "VM Trap: Stack Overflow — the contract exceeded the maximum call-stack depth.".to_string();
-        }
-        if lower.contains("integer overflow") || lower.contains("divide by zero") {
-            return "VM Trap: Arithmetic Trap — integer overflow or division by zero.".to_string();
-        }
-        if lower.contains("unreachable") {
-            return "VM Trap: Unreachable — the contract executed an explicit trap or reached dead code.".to_string();
-        }
-        if lower.contains("indirect call") || lower.contains("table") {
-            return "VM Trap: Indirect-Call Type Mismatch — wrong function signature in call_indirect.".to_string();
-        }
-        return format!("VM Trap: {}", raw);
-    }
-
-    if lower.contains("auth") || lower.contains("unauthorized") {
-        return "Authorization failure — a required signer or policy check was not satisfied.".to_string();
-    }
-
-    if lower.contains("budget") || lower.contains("cpu limit") || lower.contains("mem limit") {
-        return "Resource limit exceeded — the transaction consumed more CPU instructions or memory than the protocol-21 budget allows.".to_string();
-    }
-
-    if lower.contains("missing") || lower.contains("not found") {
-        return "Missing ledger entry — the contract referenced a key that does not exist in the current ledger state.".to_string();
-    }
-
-    // Fallback: return the raw message unchanged.
-    raw.to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stack_trace::decode_error;
 
     #[test]
     fn test_decode_vm_traps() {
-        assert!(decode_error("Error: Wasm Trap: out of bounds memory access").contains("VM Trap: Out of Bounds Access"));
+        assert!(
+            decode_error("Error: Wasm Trap: out of bounds memory access")
+                .contains("VM Trap: Out of Bounds Access")
+        );
         assert!(decode_error("Panic: unreachable").contains("VM Trap: Unreachable Instruction"));
         assert!(decode_error("integer divide by zero").contains("VM Trap: Division by Zero"));
         assert!(decode_error("stack overflow occurred").contains("VM Trap: Stack Overflow"));
@@ -951,6 +912,9 @@ mod tests {
     fn test_decode_unreachable() {
         let msg = decode_error("wasm trap: unreachable");
         assert!(msg.contains("VM Trap: Unreachable"));
+    }
+
+    #[test]
     fn test_enforce_soroban_compatibility_rejects_floats() {
         let wat = r#"
             (module
@@ -974,8 +938,8 @@ mod tests {
     fn test_in_successful_contract_call_is_negation_of_failed_call() {
         use soroban_env_host::events::{Events, HostEvent};
         use soroban_env_host::xdr::{
-            ContractEvent, ContractEventBody, ContractEventType, ContractEventV0,
-            ExtensionPoint, VecM,
+            ContractEvent, ContractEventBody, ContractEventType, ContractEventV0, ExtensionPoint,
+            VecM,
         };
 
         let make_event = |failed: bool| -> HostEvent {
@@ -1018,8 +982,8 @@ mod tests {
     fn test_categorize_events_type_labels() {
         use soroban_env_host::events::{Events, HostEvent};
         use soroban_env_host::xdr::{
-            ContractEvent, ContractEventBody, ContractEventType, ContractEventV0,
-            ExtensionPoint, VecM,
+            ContractEvent, ContractEventBody, ContractEventType, ContractEventV0, ExtensionPoint,
+            VecM,
         };
 
         let make_typed_event = |t: ContractEventType| HostEvent {

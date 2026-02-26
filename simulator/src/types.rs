@@ -5,7 +5,7 @@
 
 use crate::gas_optimizer::OptimizationReport;
 use crate::stack_trace::WasmStackTrace;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]

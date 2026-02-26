@@ -35,25 +35,29 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"go.opentelemetry.io/otel/attribute"
 )
+
 var (
-	networkFlag        string
-	rpcURLFlag         string
-	rpcTokenFlag       string
-	tracingEnabled     bool
-	otlpExporterURL    string
-	generateTrace      bool
-	traceOutputFile    string
-	snapshotFlag       string
-	compareNetworkFlag string
-	verbose            bool
-	wasmPath           string
-	args               []string
-	noCacheFlag        bool
-	demoMode           bool
-	watchFlag          bool
-	watchTimeoutFlag   int
-	mockBaseFeeFlag    uint32
-	mockGasPriceFlag   uint64
+	networkFlag         string
+	rpcURLFlag          string
+	rpcTokenFlag        string
+	tracingEnabled      bool
+	otlpExporterURL     string
+	generateTrace       bool
+	traceOutputFile     string
+	snapshotFlag        string
+	compareNetworkFlag  string
+	verbose             bool
+	wasmPath            string
+	args                []string
+	noCacheFlag         bool
+	demoMode            bool
+	watchFlag           bool
+	watchTimeoutFlag    int
+	mockBaseFeeFlag     uint32
+	mockGasPriceFlag    uint64
+	themeFlag           string
+	mockTimeFlag        int64
+	protocolVersionFlag uint32
 )
 
 // DebugCommand holds dependencies for the debug command
@@ -563,7 +567,7 @@ Local WASM Replay Mode:
 		// Analysis: Error Suggestions (Heuristic-based)
 		if len(lastSimResp.Events) > 0 {
 			suggestionEngine := decoder.NewSuggestionEngine()
-			
+
 			// Decode events for analysis
 			callTree, err := decoder.DecodeEvents(lastSimResp.Events)
 			if err == nil && callTree != nil {
@@ -1112,6 +1116,8 @@ func checkLTOWarning(wasmFilePath string) {
 		}
 		dir = parent
 	}
+}
+
 func displaySourceLocation(loc *simulator.SourceLocation) {
 	fmt.Printf("%s Location: %s:%d:%d\n", visualizer.Symbol("location"), loc.File, loc.Line, loc.Column)
 

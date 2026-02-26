@@ -352,7 +352,8 @@ mod tests {
 
     #[test]
     fn test_extract_named_frames() {
-        let input = "trace:\n  0: soroban_token::transfer @ 0x100\n  1: soroban_sdk::invoke @ 0x200";
+        let input =
+            "trace:\n  0: soroban_token::transfer @ 0x100\n  1: soroban_sdk::invoke @ 0x200";
         let frames = extract_frames(input);
 
         assert_eq!(frames.len(), 2);

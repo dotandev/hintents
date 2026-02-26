@@ -5,6 +5,19 @@ package visualizer
 
 import "os"
 
+// ANSI SGR codes
+const (
+	sgrReset   = "\033[0m"
+	sgrRed     = "\033[31m"
+	sgrGreen   = "\033[32m"
+	sgrYellow  = "\033[33m"
+	sgrBlue    = "\033[34m"
+	sgrMagenta = "\033[35m"
+	sgrCyan    = "\033[36m"
+	sgrDim     = "\033[2m"
+	sgrBold    = "\033[1m"
+)
+
 // Theme defines a color palette for terminal output
 type Theme string
 

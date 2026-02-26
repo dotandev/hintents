@@ -12,6 +12,7 @@ import (
 func TestNoColorDisablesColors(t *testing.T) {
 	os.Setenv("NO_COLOR", "1")
 	defer os.Unsetenv("NO_COLOR")
+	ResetRenderer()
 
 	if ColorEnabled() {
 		t.Error("ColorEnabled() should be false when NO_COLOR is set")
@@ -31,6 +32,7 @@ func TestTermDumbDisablesColors(t *testing.T) {
 	defer func() { os.Setenv("TERM", oldTerm) }()
 	os.Unsetenv("NO_COLOR")
 	os.Setenv("TERM", "dumb")
+	ResetRenderer()
 
 	if ColorEnabled() {
 		t.Error("ColorEnabled() should be false when TERM=dumb")
@@ -40,6 +42,7 @@ func TestTermDumbDisablesColors(t *testing.T) {
 func TestSymbolReturnsPlainASCIIWhenDisabled(t *testing.T) {
 	os.Setenv("NO_COLOR", "1")
 	defer os.Unsetenv("NO_COLOR")
+	ResetRenderer()
 
 	for name, wantPlain := range map[string]string{
 		"check":   "[OK]",
@@ -57,6 +60,7 @@ func TestSymbolReturnsPlainASCIIWhenDisabled(t *testing.T) {
 func TestSuccessWarningErrorNoEscapeWhenDisabled(t *testing.T) {
 	os.Setenv("NO_COLOR", "1")
 	defer os.Unsetenv("NO_COLOR")
+	ResetRenderer()
 
 	for _, s := range []string{Success(), Warning(), Error()} {
 		if strings.Contains(s, "\033") {
@@ -66,12 +70,14 @@ func TestSuccessWarningErrorNoEscapeWhenDisabled(t *testing.T) {
 }
 
 func TestNoColorOverridesForceColor(t *testing.T) {
+	os.Unsetenv("FORCE_COLOR")
 	os.Setenv("NO_COLOR", "1")
 	os.Setenv("FORCE_COLOR", "1")
 	defer func() {
 		os.Unsetenv("NO_COLOR")
 		os.Unsetenv("FORCE_COLOR")
 	}()
+	ResetRenderer()
 
 	if ColorEnabled() {
 		t.Error("NO_COLOR must take precedence over FORCE_COLOR")
@@ -86,6 +92,7 @@ func TestForceColorEnablesColorsWhenSet(t *testing.T) {
 	os.Unsetenv("NO_COLOR")
 	os.Setenv("FORCE_COLOR", "1")
 	defer os.Unsetenv("FORCE_COLOR")
+	ResetRenderer()
 
 	// FORCE_COLOR=1 should enable colors (even when piped / not TTY)
 	if !ColorEnabled() {
@@ -100,6 +107,7 @@ func TestForceColorEnablesColorsWhenSet(t *testing.T) {
 func TestContractBoundaryPlainText(t *testing.T) {
 	os.Setenv("NO_COLOR", "1")
 	defer os.Unsetenv("NO_COLOR")
+	ResetRenderer()
 
 	out := ContractBoundary("CABC", "CXYZ")
 	expected := "--- contract boundary: CABC -> CXYZ ---"
@@ -115,6 +123,7 @@ func TestContractBoundaryWithColor(t *testing.T) {
 	os.Unsetenv("NO_COLOR")
 	os.Setenv("FORCE_COLOR", "1")
 	defer os.Unsetenv("FORCE_COLOR")
+	ResetRenderer()
 
 	out := ContractBoundary("CABC", "CXYZ")
 	if !strings.Contains(out, "CABC") || !strings.Contains(out, "CXYZ") {

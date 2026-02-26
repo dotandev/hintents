@@ -46,8 +46,8 @@ func TestParseMouseEvent_SGRFormat(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, evt)
 	assert.Equal(t, LeftButton, evt.Button)
-	assert.Equal(t, 9, evt.Col)   // 0-based
-	assert.Equal(t, 4, evt.Row)   // 0-based
+	assert.Equal(t, 9, evt.Col) // 0-based
+	assert.Equal(t, 4, evt.Row) // 0-based
 	assert.True(t, evt.IsClickEvent())
 	assert.False(t, evt.IsScrollEvent())
 }
@@ -134,7 +134,7 @@ func TestTreeRenderer_HandleMouseClick_SelectRow(t *testing.T) {
 
 	// Click on child row at column where it's not the expand box
 	toggled := renderer.HandleMouseClick(20, 1) // Click on text, not expand box
-	assert.False(t, toggled)                     // Should not toggle
+	assert.False(t, toggled)                    // Should not toggle
 	assert.Equal(t, child, renderer.GetSelectedNode())
 }
 

@@ -4,7 +4,6 @@
 package watch
 
 import (
-	"fmt"
 	"sync"
 	"time"
 

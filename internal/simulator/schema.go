@@ -101,10 +101,10 @@ type SecurityViolation struct {
 
 // SourceLocation represents a precise position in Rust/WASM source code.
 type SourceLocation struct {
-	File      string  `json:"file"`
-	Line      uint    `json:"line"`
-	Column    uint    `json:"column"`
-	ColumnEnd *uint   `json:"column_end,omitempty"`
+	File      string `json:"file"`
+	Line      uint   `json:"line"`
+	Column    uint   `json:"column"`
+	ColumnEnd *uint  `json:"column_end,omitempty"`
 }
 
 // Session represents a stored simulation result
