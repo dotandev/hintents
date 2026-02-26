@@ -89,7 +89,12 @@ fn send_error(msg: String) {
         stack_trace: Some(trace),
         wasm_offset: None,
     };
-    println!("{}", serde_json::to_string(&res).unwrap());
+    if let Ok(json) = serde_json::to_string(&res) {
+        println!("{}", json);
+    } else {
+        eprintln!("Failed to serialize error response");
+        println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+    }
     std::process::exit(1);
 }
 
@@ -484,9 +489,8 @@ fn main() {
                 match host.get_events() {
                     Ok(evs) => {
                         let raw_events: Vec<String> =
-                            evs.0.iter().map(|e| format!("{:?}", e)).collect();
-                        let diag_events: Vec<DiagnosticEvent> = evs
-                            .0
+                            (evs.0).iter().map(|e| format!("{:?}", e)).collect();
+                        let diag_events: Vec<DiagnosticEvent> = (evs.0)
                             .iter()
                             .map(|event| {
                                 let event_type = match &event.event.type_ {
@@ -521,10 +525,6 @@ fn main() {
                                     contract_id,
                                     topics,
                                     data,
-                                    in_successful_contract_call: event.failed_call,
-                                    wasm_instruction,
-                                    // failed_call=true means the call failed;
-                                    // negate to get "was this a successful call?".
                                     in_successful_contract_call: !event.failed_call,
                                 };
 
@@ -616,9 +616,8 @@ fn main() {
                 match host.get_events() {
                     Ok(evs) => {
                         let raw_events: Vec<String> =
-                            evs.0.iter().map(|e| format!("{:?}", e)).collect();
-                        let diag_events: Vec<DiagnosticEvent> = evs
-                            .0
+                            (evs.0).iter().map(|e| format!("{:?}", e)).collect();
+                        let diag_events: Vec<DiagnosticEvent> = (evs.0)
                             .iter()
                             .map(|event| {
                                 let event_type = match &event.event.type_ {
@@ -751,7 +750,12 @@ fn main() {
                 stack_trace: Some(wasm_trace),
                 wasm_offset,
             };
-            println!("{}", serde_json::to_string(&response).unwrap());
+            if let Ok(json) = serde_json::to_string(&response) {
+                println!("{}", json);
+            } else {
+                eprintln!("Failed to serialize host error response");
+                println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+            }
         }
         Err(panic_info) => {
             let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
@@ -783,7 +787,12 @@ fn main() {
                 stack_trace: Some(wasm_trace),
                 wasm_offset: None,
             };
-            println!("{}", serde_json::to_string(&response).unwrap());
+            if let Ok(json) = serde_json::to_string(&response) {
+                println!("{}", json);
+            } else {
+                eprintln!("Failed to serialize panic response");
+                println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+            }
         }
     }
 }

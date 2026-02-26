@@ -4,6 +4,8 @@
 package cmd
 
 import (
+	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +37,7 @@ func TestScaffoldErstProjectCreatesFilesAndDirs(t *testing.T) {
 	erstToml, err := os.ReadFile(filepath.Join(root, "erst.toml"))
 	require.NoError(t, err)
 	assert.Contains(t, string(erstToml), `network = "testnet"`)
+	assert.Contains(t, string(erstToml), `network_passphrase = "Test SDF Network ; September 2015"`)
 	assert.Contains(t, string(erstToml), `cache_path = ".erst/cache"`)
 
 	gitignore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
@@ -76,7 +79,38 @@ func TestEnsureGitignoreBlockIsIdempotent(t *testing.T) {
 }
 
 func TestRenderProjectErstTomlStandaloneNetwork(t *testing.T) {
-	content := renderProjectErstToml("standalone")
+	content := renderProjectErstToml(initScaffoldOptions{Network: "standalone"})
 	assert.Contains(t, content, `rpc_url = "http://localhost:8000"`)
 	assert.Contains(t, content, `network = "standalone"`)
+	assert.Contains(t, content, `network_passphrase = "Standalone Network ; February 2017"`)
+}
+
+func TestRenderProjectErstTomlWithOverrides(t *testing.T) {
+	content := renderProjectErstToml(initScaffoldOptions{
+		Network:           "testnet",
+		RPCURL:            "https://rpc.example.org",
+		NetworkPassphrase: "Example Network Passphrase",
+	})
+
+	assert.Contains(t, content, `rpc_url = "https://rpc.example.org"`)
+	assert.Contains(t, content, `network_passphrase = "Example Network Passphrase"`)
+}
+
+func TestPromptWithDefaultUsesDefaultOnEmptyInput(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("\n"))
+	out := &bytes.Buffer{}
+
+	value, err := promptWithDefault(reader, out, "Preferred Soroban RPC URL", "https://rpc.default")
+	require.NoError(t, err)
+	assert.Equal(t, "https://rpc.default", value)
+	assert.Contains(t, out.String(), "Preferred Soroban RPC URL [https://rpc.default]: ")
+}
+
+func TestPromptWithDefaultUsesUserInput(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("https://rpc.custom\n"))
+	out := &bytes.Buffer{}
+
+	value, err := promptWithDefault(reader, out, "Preferred Soroban RPC URL", "https://rpc.default")
+	require.NoError(t, err)
+	assert.Equal(t, "https://rpc.custom", value)
 }
