@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dotandev/hintents/internal/errors"
+	"github.com/dotandev/hintents/internal/httpclient"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 )
 
@@ -23,7 +24,7 @@ type clientBuilder struct {
 	altURLs      []string
 	cacheEnabled bool
 	config       *NetworkConfig
-	httpClient   *http.Client
+	httpClient   httpclient.HTTPClient
 }
 
 func newBuilder() *clientBuilder {
@@ -110,9 +111,10 @@ func WithCacheEnabled(enabled bool) ClientOption {
 	}
 }
 
+// IMPORTANT: Public signature unchanged
 func WithHTTPClient(client *http.Client) ClientOption {
 	return func(b *clientBuilder) error {
-		b.httpClient = client
+		b.httpClient = httpclient.New(client)
 		return nil
 	}
 }
@@ -208,11 +210,14 @@ func (b *clientBuilder) build() (*Client, error) {
 		b.altURLs = []string{b.horizonURL}
 	}
 
+	// Unwrap for Horizon SDK
+	stdClient := unwrapStdClient(b.httpClient)
+
 	return &Client{
 		HorizonURL: b.horizonURL,
 		Horizon: &horizonclient.Client{
 			HorizonURL: b.horizonURL,
-			HTTP:       b.httpClient,
+			HTTP:       stdClient,
 		},
 		Network:      b.network,
 		SorobanURL:   b.sorobanURL,

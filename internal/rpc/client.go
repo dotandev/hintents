@@ -1,6 +1,5 @@
 // Copyright 2025 Erst Users
 // SPDX-License-Identifier: Apache-2.0
-
 package rpc
 
 import (
@@ -14,8 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotandev/hintents/internal/httpclient"
 	"github.com/dotandev/hintents/internal/logger"
-
 	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
@@ -103,8 +102,8 @@ type Client struct {
 	AltURLs      []string
 	currIndex    int
 	mu           sync.RWMutex
-	httpClient   *http.Client
-	token        string // stored for reference, not logged
+	httpClient   httpclient.HTTPClient // STEP 2: changed from *http.Client
+	token        string                // stored for reference, not logged
 	Config       NetworkConfig
 	CacheEnabled bool
 	failures     map[string]int
@@ -206,6 +205,17 @@ func NewClientWithURLsOption(urls []string, net Network, token string) *Client {
 	return client
 }
 
+// unwrapStdClient extracts the underlying *http.Client from an httpclient.HTTPClient.
+// Falls back to http.DefaultClient if the wrapper cannot be unwrapped.
+// This is required when passing an HTTP client to the Stellar Horizon SDK,
+// which expects *http.Client directly.
+func unwrapStdClient(hc httpclient.HTTPClient) *http.Client {
+	if wrapper, ok := hc.(*httpclient.Wrapper); ok {
+		return wrapper.Unwrap()
+	}
+	return http.DefaultClient
+}
+
 // rotateURL switches to the next available provider URL, skipping unhealthy ones if possible
 func (c *Client) rotateURL() bool {
 	c.mu.Lock()
@@ -229,28 +239,39 @@ func (c *Client) rotateURL() bool {
 	}
 
 	c.HorizonURL = c.AltURLs[c.currIndex]
-	httpClient := c.httpClient
-	if httpClient == nil {
-		httpClient = createHTTPClient(c.token)
-	}
+
+	// STEP 5: unwrap to *http.Client for the Horizon SDK
+	hc := c.getHTTPClientLocked()
+	stdClient := unwrapStdClient(hc)
+
 	c.Horizon = &horizonclient.Client{
 		HorizonURL: c.HorizonURL,
-		HTTP:       httpClient,
+		HTTP:       stdClient,
 	}
 
 	logger.Logger.Warn("RPC failover triggered", "new_url", c.HorizonURL)
 	return true
 }
 
-func (c *Client) getHTTPClient() *http.Client {
+// getHTTPClientLocked returns the httpclient.HTTPClient without acquiring the lock.
+// Must only be called when c.mu is already held.
+func (c *Client) getHTTPClientLocked() httpclient.HTTPClient {
 	if c.httpClient != nil {
 		return c.httpClient
 	}
-	return http.DefaultClient
+	return httpclient.New(http.DefaultClient)
 }
 
-// createHTTPClient creates an HTTP client with optional authentication
-func createHTTPClient(token string) *http.Client {
+// STEP 3: getHTTPClient returns an httpclient.HTTPClient for Soroban/direct HTTP calls.
+func (c *Client) getHTTPClient() httpclient.HTTPClient {
+	if c.httpClient != nil {
+		return c.httpClient
+	}
+	return httpclient.New(http.DefaultClient)
+}
+
+// STEP 4: createHTTPClient returns an httpclient.HTTPClient with optional authentication.
+func createHTTPClient(token string) httpclient.HTTPClient {
 	cfg := DefaultRetryConfig()
 
 	var baseTransport http.RoundTripper = http.DefaultTransport
@@ -265,9 +286,9 @@ func createHTTPClient(token string) *http.Client {
 
 	transport = NewRetryTransport(cfg, transport)
 
-	return &http.Client{
+	return httpclient.New(&http.Client{
 		Transport: transport,
-	}
+	})
 }
 
 // NewCustomClient creates a new RPC client for a custom/private network
@@ -277,10 +298,15 @@ func NewCustomClient(config NetworkConfig) (*Client, error) {
 		return nil, err
 	}
 
+	// STEP 6: createHTTPClient now returns httpclient.HTTPClient
 	httpClient := createHTTPClient("")
+
+	// Unwrap for Horizon SDK which requires *http.Client
+	stdClient := unwrapStdClient(httpClient)
+
 	horizonClient := &horizonclient.Client{
 		HorizonURL: config.HorizonURL,
-		HTTP:       httpClient,
+		HTTP:       stdClient,
 	}
 
 	sorobanURL := config.SorobanRPCURL
@@ -294,7 +320,7 @@ func NewCustomClient(config NetworkConfig) (*Client, error) {
 		SorobanURL:   sorobanURL,
 		Config:       config,
 		CacheEnabled: true,
-		httpClient:   httpClient,
+		httpClient:   httpClient, // STEP 6: assigned correctly as httpclient.HTTPClient
 	}, nil
 }
 
@@ -372,7 +398,6 @@ func (c *Client) getTransactionAttempt(ctx context.Context, hash string) (*Trans
 	logger.Logger.Info("Transaction fetched", "hash", hash, "envelope_size", len(tx.EnvelopeXdr), "url", c.HorizonURL)
 
 	return ParseTransactionResponse(tx), nil
-
 }
 
 // GetNetworkPassphrase returns the network passphrase for this client
@@ -413,10 +438,7 @@ type GetLedgerEntriesResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// GetLedgerEntries fetches the current state of ledger entries from Soroban RPC with automatic failover
-// GetLedgerHeader fetches ledger header details for a specific sequence.
-// This includes essential metadata like sequence number, timestamp, protocol version,
-// and XDR-encoded header data needed for transaction simulation.
+// GetLedgerHeader fetches ledger header details for a specific sequence with automatic fallback.
 //
 // Parameters:
 //   - ctx: Context for timeout and cancellation
@@ -435,8 +457,6 @@ type GetLedgerEntriesResponse struct {
 //	if IsLedgerNotFound(err) {
 //	    log.Printf("Ledger not found: %v", err)
 //	}
-//
-// GetLedgerHeader fetches ledger header details for a specific sequence with automatic fallback.
 func (c *Client) GetLedgerHeader(ctx context.Context, sequence uint32) (*LedgerHeaderResponse, error) {
 	var failures []NodeFailure
 	for attempt := 0; attempt < len(c.AltURLs); attempt++ {
@@ -676,7 +696,6 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 	}
 
 	logger.Logger.Info("Ledger entries fetched",
-		// 		"total_requested", len(keys),
 		"total_requested", len(keysToFetch),
 		"from_cache", len(keysToFetch)-fetchedCount,
 		"from_rpc", fetchedCount,
