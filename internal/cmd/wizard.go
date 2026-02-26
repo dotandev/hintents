@@ -16,7 +16,7 @@ var wizardCmd = &cobra.Command{
 	Use:     "wizard",
 	GroupID: "development",
 	Short:   "Interactive transaction selection wizard",
-	Long:  "Find and select recent failed transactions for debugging.",
+	Long:    "Find and select recent failed transactions for debugging.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		account, _ := cmd.Flags().GetString("account")
 		network, _ := cmd.Flags().GetString("network")

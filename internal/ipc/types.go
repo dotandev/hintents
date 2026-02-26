@@ -28,15 +28,17 @@ func (e *Error) ToErstError() *errors.ErstError {
 // Currently the Rust simulator does not emit structured codes, so this will
 // return CodeUnknown in most cases and ToErstError will fall back to classifyByMessage.
 func mapIPCCode(raw string) errors.ErstErrorCode {
-	switch raw {
-	case "simulation_failed", "execution_failed":
+	switch strings.ToUpper(raw) {
+	case "SIMULATION_FAILED", "EXECUTION_FAILED":
 		return errors.CodeSimExecFailed
-	case "wasm_trap", "contract_trap":
+	case "WASM_TRAP", "CONTRACT_TRAP":
 		return errors.CodeSimCrash
-	case "invalid_input", "validation_error":
+	case "INVALID_INPUT", "VALIDATION_ERROR":
 		return errors.CodeValidationFailed
-	case "protocol_unsupported":
+	case "PROTOCOL_UNSUPPORTED":
 		return errors.CodeSimProtoUnsup
+	case "ERR_MEMORY_LIMIT_EXCEEDED", "MEMORY_LIMIT_EXCEEDED":
+		return errors.CodeSimMemoryLimitExceeded
 	default:
 		return errors.CodeUnknown
 	}
@@ -58,6 +60,9 @@ func classifyByMessage(msg string) errors.ErstErrorCode {
 		strings.Contains(msg, "stack overflow"),
 		strings.Contains(msg, "out of bounds"):
 		return errors.CodeSimCrash
+	case strings.Contains(strings.ToLower(msg), "err_memory_limit_exceeded"),
+		strings.Contains(strings.ToLower(msg), "memory limit exceeded"):
+		return errors.CodeSimMemoryLimitExceeded
 	case strings.Contains(msg, "InvalidInput"):
 		return errors.CodeValidationFailed
 	default:

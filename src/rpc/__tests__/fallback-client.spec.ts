@@ -5,10 +5,14 @@ import { FallbackRPCClient } from '../fallback-client';
 import { RPCConfig } from '../../config/rpc-config';
 import axios from 'axios';
 import MockAdapter from 'axios-mock-adapter';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 describe('FallbackRPCClient', () => {
     let client: FallbackRPCClient;
     let mock: MockAdapter;
+    let tempDir: string;
 
     const config: RPCConfig = {
         urls: [
@@ -28,10 +32,12 @@ describe('FallbackRPCClient', () => {
         // Clear mock registry
         mock = new MockAdapter(axios);
         client = new FallbackRPCClient(config);
+        tempDir = mkdtempSync(join(tmpdir(), 'fallback-rpc-client-'));
     });
 
     afterEach(() => {
         mock.restore();
+        rmSync(tempDir, { recursive: true, force: true });
     });
 
     describe('request with fallback', () => {
@@ -156,10 +162,12 @@ describe('FallbackRPCClient', () => {
     describe('deployWasmPathsChunked', () => {
         it('should send one request when paths fit in one chunk', async () => {
             mock.onPost('https://rpc1.test.com/deploy').reply(200, { ok: true });
+            const wasmA = createWasmFile(tempDir, 'a.wasm');
+            const wasmB = createWasmFile(tempDir, 'b.wasm');
 
             const result = await client.deployWasmPathsChunked(
                 '/deploy',
-                ['a.wasm', 'b.wasm'],
+                [wasmA, wasmB],
                 { network: 'testnet' },
                 { chunkSize: 10 },
             );
@@ -169,13 +177,15 @@ describe('FallbackRPCClient', () => {
 
             const body = JSON.parse(mock.history.post[0].data);
             expect(body.network).toBe('testnet');
-            expect(body.wasm_paths).toEqual(['a.wasm', 'b.wasm']);
+            expect(body.wasm_paths).toEqual([wasmA, wasmB]);
         });
 
         it('should chunk wasm paths across multiple requests and preserve order', async () => {
             mock.onPost('https://rpc1.test.com/deploy').reply(200, { ok: true });
 
-            const wasmPaths = ['1.wasm', '2.wasm', '3.wasm', '4.wasm', '5.wasm'];
+            const wasmPaths = ['1.wasm', '2.wasm', '3.wasm', '4.wasm', '5.wasm'].map((file) =>
+                createWasmFile(tempDir, file),
+            );
             const result = await client.deployWasmPathsChunked(
                 '/deploy',
                 wasmPaths,
@@ -188,9 +198,9 @@ describe('FallbackRPCClient', () => {
 
             const sentChunks = mock.history.post.map((req) => JSON.parse(req.data).wasm_file_paths);
             expect(sentChunks).toEqual([
-                ['1.wasm', '2.wasm'],
-                ['3.wasm', '4.wasm'],
-                ['5.wasm'],
+                [wasmPaths[0], wasmPaths[1]],
+                [wasmPaths[2], wasmPaths[3]],
+                [wasmPaths[4]],
             ]);
         });
 
@@ -199,5 +209,21 @@ describe('FallbackRPCClient', () => {
             expect(result).toEqual([]);
             expect(mock.history.post.length).toBe(0);
         });
+
+        it('should reject invalid wasm files before making any RPC request', async () => {
+            const invalidPath = join(tempDir, 'not-wasm.bin');
+            writeFileSync(invalidPath, Buffer.from('this is not wasm'));
+
+            await expect(client.deployWasmPathsChunked('/deploy', [invalidPath])).rejects.toThrow(
+                `Invalid WASM binary at "${invalidPath}": expected file to start with \\0asm`,
+            );
+            expect(mock.history.post.length).toBe(0);
+        });
     });
 });
+
+function createWasmFile(dir: string, fileName: string): string {
+    const wasmPath = join(dir, fileName);
+    writeFileSync(wasmPath, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01]));
+    return wasmPath;
+}

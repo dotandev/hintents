@@ -87,7 +87,9 @@ jobs:
       - name: Configure sccache
         run: |
           echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          # Keep sccache enabled, but avoid hard failures when the Actions
+          # Artifact Cache service has an outage.
+          echo "SCCACHE_GHA_ENABLED=false" >> $GITHUB_ENV
 
       - name: Cache Cargo dependencies and build artifacts
         uses: Swatinem/rust-cache@v2

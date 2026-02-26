@@ -15,21 +15,24 @@ import (
 
 // SimulationRequest is the JSON object passed to the Rust binary via Stdin
 type SimulationRequest struct {
-	EnvelopeXdr     string            `json:"envelope_xdr"`
-	ResultMetaXdr   string            `json:"result_meta_xdr"`
-	LedgerEntries   map[string]string `json:"ledger_entries,omitempty"`
-	Timestamp       int64             `json:"timestamp,omitempty"`
-	LedgerSequence  uint32            `json:"ledger_sequence,omitempty"`
-	WasmPath        *string           `json:"wasm_path,omitempty"`
-	MockArgs        *[]string         `json:"mock_args,omitempty"`
-	Profile         bool              `json:"profile,omitempty"`
-	ProtocolVersion *uint32           `json:"protocol_version,omitempty"`
-	MockBaseFee     *uint32           `json:"mock_base_fee,omitempty"`
-	MockGasPrice    *uint64           `json:"mock_gas_price,omitempty"`
+	EnvelopeXdr      string            `json:"envelope_xdr"`
+	ResultMetaXdr    string            `json:"result_meta_xdr"`
+	LedgerEntries    map[string]string `json:"ledger_entries,omitempty"`
+	Timestamp        int64             `json:"timestamp,omitempty"`
+	LedgerSequence   uint32            `json:"ledger_sequence,omitempty"`
+	WasmPath         *string           `json:"wasm_path,omitempty"`
+	MockArgs         *[]string         `json:"mock_args,omitempty"`
+	Profile          bool              `json:"profile,omitempty"`
+	ProtocolVersion  *uint32           `json:"protocol_version,omitempty"`
+	MockBaseFee      *uint32           `json:"mock_base_fee,omitempty"`
+	MockGasPrice     *uint64           `json:"mock_gas_price,omitempty"`
+	MemoryLimit      *uint64           `json:"memory_limit,omitempty"`
+	EnableCoverage   bool              `json:"enable_coverage,omitempty"`
+	CoverageLCOVPath *string           `json:"coverage_lcov_path,omitempty"`
 
 	//New: restorePreamble for state restoration operations
 	RestorePreamble map[string]interface{} `json:"restore_preamble,omitempty"`
-	
+
 	AuthTraceOpts       *AuthTraceOptions      `json:"auth_trace_opts,omitempty"`
 	CustomAuthCfg       map[string]interface{} `json:"custom_auth_config,omitempty"`
 	ResourceCalibration *ResourceCalibration   `json:"resource_calibration,omitempty"`
@@ -80,6 +83,9 @@ type BudgetUsage struct {
 type SimulationResponse struct {
 	Status            string               `json:"status"` // "success" or "error"
 	Error             string               `json:"error,omitempty"`
+	ErrorCode         string               `json:"error_code,omitempty"`
+	LCOVReport        string               `json:"lcov_report,omitempty"`
+	LCOVReportPath    string               `json:"lcov_report_path,omitempty"`
 	Events            []string             `json:"events,omitempty"`            // Raw event strings (backward compatibility)
 	DiagnosticEvents  []DiagnosticEvent    `json:"diagnostic_events,omitempty"` // Structured diagnostic events
 	Logs              []string             `json:"logs,omitempty"`              // Host debug logs
@@ -110,10 +116,10 @@ type SecurityViolation struct {
 
 // SourceLocation represents a precise position in Rust/WASM source code.
 type SourceLocation struct {
-	File      string  `json:"file"`
-	Line      uint    `json:"line"`
-	Column    uint    `json:"column"`
-	ColumnEnd *uint   `json:"column_end,omitempty"`
+	File      string `json:"file"`
+	Line      uint   `json:"line"`
+	Column    uint   `json:"column"`
+	ColumnEnd *uint  `json:"column_end,omitempty"`
 }
 
 // Session represents a stored simulation result

@@ -16,14 +16,14 @@ import (
 
 // Session represents an interactive shell session with persistent ledger state
 type Session struct {
-	runner           simulator.RunnerInterface
-	rpcClient        *rpc.Client
-	network          rpc.Network
-	ledgerEntries    map[string]string
-	ledgerSequence   uint32
-	timestamp        int64
-	invocationCount  int
-	initialState     *LedgerState
+	runner          simulator.RunnerInterface
+	rpcClient       *rpc.Client
+	network         rpc.Network
+	ledgerEntries   map[string]string
+	ledgerSequence  uint32
+	timestamp       int64
+	invocationCount int
+	initialState    *LedgerState
 }
 
 // LedgerState represents the state of the ledger at a point in time
@@ -109,14 +109,14 @@ func (s *Session) Invoke(ctx context.Context, contractID, function string, args 
 func (s *Session) buildInvocationEnvelope(contractID, function string, args []string) (string, error) {
 	// This is a simplified version - in production, you'd use stellar-sdk to build proper XDR
 	// For now, we'll create a minimal envelope structure
-	
+
 	// TODO: Implement proper XDR envelope building using stellar-sdk
 	// This would involve:
 	// 1. Creating a TransactionEnvelope
 	// 2. Adding InvokeHostFunction operation
 	// 3. Setting contract ID, function name, and arguments
 	// 4. Encoding to base64 XDR
-	
+
 	return "", fmt.Errorf("envelope building not yet implemented - requires stellar-sdk integration")
 }
 
@@ -124,10 +124,14 @@ func (s *Session) buildInvocationEnvelope(contractID, function string, args []st
 func (s *Session) updateLedgerState(resp *simulator.SimulationResponse) {
 	// Increment ledger sequence
 	s.ledgerSequence++
-	
+
 	// Update timestamp
-	s.timestamp = time.Now().Unix()
-	
+	now := time.Now().Unix()
+	if now <= s.timestamp {
+		now = s.timestamp + 1
+	}
+	s.timestamp = now
+
 	// TODO: Extract and update ledger entries from simulation response
 	// This would involve parsing the ResultMetaXDR to get state changes
 }

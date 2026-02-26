@@ -28,22 +28,22 @@ type AttestationCertificate struct {
 // provides cryptographic proof that the signing key resides on a
 // hardware device and is non-exportable.
 type HardwareAttestation struct {
-	Certificates    []AttestationCertificate `json:"certificates"`
-	TokenInfo       string                  `json:"token_info"`
-	KeyNonExportable bool                   `json:"key_non_exportable"`
-	RetrievedAt     string                  `json:"retrieved_at"`
+	Certificates     []AttestationCertificate `json:"certificates"`
+	TokenInfo        string                   `json:"token_info"`
+	KeyNonExportable bool                     `json:"key_non_exportable"`
+	RetrievedAt      string                   `json:"retrieved_at"`
 }
 
 // AuditLog represents the signed audit trail of a transaction simulation
 type AuditLog struct {
-	Version              string               `json:"version"`
-	Timestamp            time.Time            `json:"timestamp"`
-	TransactionHash      string               `json:"transaction_hash"`
-	TraceHash            string               `json:"trace_hash"`
-	Signature            string               `json:"signature"`
-	PublicKey            string               `json:"public_key"`
-	Payload              Payload              `json:"payload"`
-	HardwareAttestation  *HardwareAttestation `json:"hardware_attestation,omitempty"`
+	Version             string               `json:"version"`
+	Timestamp           time.Time            `json:"timestamp"`
+	TransactionHash     string               `json:"transaction_hash"`
+	TraceHash           string               `json:"trace_hash"`
+	Signature           string               `json:"signature"`
+	PublicKey           string               `json:"public_key"`
+	Payload             Payload              `json:"payload"`
+	HardwareAttestation *HardwareAttestation `json:"hardware_attestation,omitempty"`
 }
 
 // Payload contains the actual trace data

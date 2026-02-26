@@ -13,7 +13,7 @@ func uint32Ptr(u uint32) *uint32 { return &u }
 func BenchmarkValidateRequest(b *testing.B) {
 	validXDR := base64.StdEncoding.EncodeToString([]byte("valid xdr data"))
 	validator := NewValidator(false)
-	
+
 	req := &SimulationRequest{
 		EnvelopeXdr:     validXDR,
 		ResultMetaXdr:   validXDR,
@@ -34,7 +34,7 @@ func BenchmarkValidateRequest(b *testing.B) {
 func BenchmarkValidateRequestStrictMode(b *testing.B) {
 	validXDR := base64.StdEncoding.EncodeToString([]byte("valid xdr data"))
 	validator := NewValidator(true)
-	
+
 	req := &SimulationRequest{
 		EnvelopeXdr:     validXDR,
 		ResultMetaXdr:   validXDR,
@@ -55,13 +55,13 @@ func BenchmarkValidateRequestStrictMode(b *testing.B) {
 func BenchmarkValidateRequestWithLargeEntries(b *testing.B) {
 	validXDR := base64.StdEncoding.EncodeToString([]byte("valid xdr data"))
 	validator := NewValidator(false)
-	
+
 	entries := make(map[string]string, 1000)
 	for i := 0; i < 1000; i++ {
 		key := base64.StdEncoding.EncodeToString([]byte{byte(i % 256), byte(i / 256)})
 		entries[key] = validXDR
 	}
-	
+
 	req := &SimulationRequest{
 		EnvelopeXdr:   validXDR,
 		ResultMetaXdr: validXDR,
@@ -76,7 +76,7 @@ func BenchmarkValidateRequestWithLargeEntries(b *testing.B) {
 
 func BenchmarkValidateResponse(b *testing.B) {
 	validator := NewValidator(false)
-	
+
 	resp := &SimulationResponse{
 		Status: "success",
 		BudgetUsage: &BudgetUsage{
@@ -123,7 +123,7 @@ func BenchmarkValidateRequestWithCustomValidator(b *testing.B) {
 	validator := NewValidator(false).WithCustomValidator("test", func(v interface{}) error {
 		return nil
 	})
-	
+
 	req := &SimulationRequest{
 		EnvelopeXdr:   validXDR,
 		ResultMetaXdr: validXDR,

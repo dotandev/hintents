@@ -41,11 +41,11 @@ func (r *ANSIRenderer) IsTTY() bool {
 }
 
 func (r *ANSIRenderer) checkTTY() bool {
-	if os.Getenv("FORCE_COLOR") != "" {
-		return true
-	}
 	if _, ok := os.LookupEnv("NO_COLOR"); ok {
 		return false
+	}
+	if os.Getenv("FORCE_COLOR") != "" {
+		return true
 	}
 	if os.Getenv("TERM") == "dumb" {
 		return false

@@ -5,7 +5,7 @@
 
 use crate::gas_optimizer::OptimizationReport;
 use crate::stack_trace::WasmStackTrace;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
@@ -24,6 +24,14 @@ pub struct SimulationRequest {
     pub mock_base_fee: Option<u32>,
     pub mock_gas_price: Option<u64>,
     #[serde(default)]
+    pub enable_coverage: bool,
+    #[serde(default)]
+    pub coverage_lcov_path: Option<String>,
+    pub resource_calibration: Option<ResourceCalibration>,
+    /// Optional hard memory limit in bytes. If set, the simulator will panic
+    /// when memory consumption exceeds this limit, simulating live network constraints.
+    pub memory_limit: Option<u64>,
+    #[serde(default)]
     pub restore_preamble: Option<serde_json::Value>,
 }
 
@@ -36,12 +44,16 @@ pub struct ResourceCalibration {
     pub ed25519_fixed: u64,
 }
 
-use crate::source_mapper::SourceLocation;
-
 #[derive(Debug, Serialize)]
 pub struct SimulationResponse {
     pub status: String,
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lcov_report: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lcov_report_path: Option<String>,
     pub events: Vec<String>,
     pub diagnostic_events: Vec<DiagnosticEvent>,
     pub categorized_events: Vec<CategorizedEvent>,

@@ -31,8 +31,8 @@ var versionCmd = &cobra.Command{
 	Use:     "version",
 	GroupID: "utility",
 	Short:   "Show version information",
-	Long:  "Display detailed build information including version, commit hash, and build date",
-	Args:  cobra.NoArgs,
+	Long:    "Display detailed build information including version, commit hash, and build date",
+	Args:    cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		jsonOutput, _ := cmd.Flags().GetBool("json")
 

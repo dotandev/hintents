@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import { open, type FileHandle } from 'fs/promises';
 import { RPCConfig } from '../config/rpc-config';
 import { getLogger, LogCategory } from '../utils/logger';
 
@@ -156,6 +157,12 @@ export class FallbackRPCClient {
         basePayload: Record<string, any> = {},
         options: WasmDeployChunkOptions = {},
     ): Promise<T[]> {
+        if (wasmPaths.length === 0) {
+            return [];
+        }
+
+        await this.validateWasmPaths(wasmPaths);
+
         const field = options.pathsField || 'wasm_paths';
         const chunkSize = this.resolveWasmPathChunkSize(options.chunkSize);
         const chunks = this.chunkStringSlice(wasmPaths, chunkSize);
@@ -345,6 +352,47 @@ export class FallbackRPCClient {
             chunks.push(values.slice(i, i + chunkSize));
         }
         return chunks;
+    }
+
+    private async validateWasmPaths(wasmPaths: string[]): Promise<void> {
+        for (const wasmPath of wasmPaths) {
+            await this.validateWasmFile(wasmPath);
+        }
+    }
+
+    private async validateWasmFile(wasmPath: string): Promise<void> {
+        let handle: FileHandle | undefined;
+
+        try {
+            handle = await open(wasmPath, 'r');
+            const header = new Uint8Array(4);
+            const { bytesRead } = await handle.read(header, 0, header.length, 0);
+            const hasWasmMagic =
+                header[0] === 0x00 &&
+                header[1] === 0x61 &&
+                header[2] === 0x73 &&
+                header[3] === 0x6d;
+
+            if (bytesRead < 4 || !hasWasmMagic) {
+                throw new Error(
+                    `Invalid WASM binary at "${wasmPath}": expected file to start with \\0asm`,
+                );
+            }
+        } catch (error) {
+            if (error instanceof Error && error.message.includes('expected file to start with \\0asm')) {
+                throw error;
+            }
+
+            if (error instanceof Error) {
+                throw new Error(`Failed to read WASM file "${wasmPath}": ${error.message}`);
+            }
+
+            throw new Error(`Failed to read WASM file "${wasmPath}"`);
+        } finally {
+            if (handle) {
+                await handle.close();
+            }
+        }
     }
 
     /**

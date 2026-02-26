@@ -49,7 +49,7 @@ func TestCreateMockTrace_WithBudgetMetrics(t *testing.T) {
 func TestTraceNode_BudgetMetrics_NestedNodes(t *testing.T) {
 	// Create a tree with nested budget metrics
 	root := NewTraceNode("root", "transaction")
-	
+
 	call1 := NewTraceNode("call-1", "contract_call")
 	cpu1 := uint64(100000)
 	mem1 := uint64(1024)
@@ -66,16 +66,16 @@ func TestTraceNode_BudgetMetrics_NestedNodes(t *testing.T) {
 
 	// Flatten and check all nodes
 	flattened := root.FlattenAll()
-	
+
 	assert.Equal(t, 3, len(flattened))
-	
+
 	// Root should not have budget (transaction node)
 	assert.Nil(t, flattened[0].CPUDelta)
-	
+
 	// Child nodes should have budget
 	assert.NotNil(t, flattened[1].CPUDelta)
 	assert.Equal(t, uint64(100000), *flattened[1].CPUDelta)
-	
+
 	assert.NotNil(t, flattened[2].CPUDelta)
 	assert.Equal(t, uint64(200000), *flattened[2].CPUDelta)
 }

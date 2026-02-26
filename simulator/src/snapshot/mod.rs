@@ -133,9 +133,21 @@ pub enum SnapshotError {
 /// * `Ok(LedgerKey)` - Successfully decoded key
 /// * `Err(SnapshotError)` - Decoding or parsing failed
 pub fn decode_ledger_key(key_xdr: &str) -> Result<LedgerKey, SnapshotError> {
+    if key_xdr.is_empty() {
+        return Err(SnapshotError::Base64Decode(
+            "LedgerKey: empty payload".to_string(),
+        ));
+    }
+
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(key_xdr)
         .map_err(|e| SnapshotError::Base64Decode(format!("LedgerKey: {e}")))?;
+
+    if bytes.is_empty() {
+        return Err(SnapshotError::Base64Decode(
+            "LedgerKey: decoded payload is empty".to_string(),
+        ));
+    }
 
     LedgerKey::from_xdr(bytes, Limits::none())
         .map_err(|e| SnapshotError::XdrParse(format!("LedgerKey: {e}")))
@@ -150,9 +162,21 @@ pub fn decode_ledger_key(key_xdr: &str) -> Result<LedgerKey, SnapshotError> {
 /// * `Ok(LedgerEntry)` - Successfully decoded entry
 /// * `Err(SnapshotError)` - Decoding or parsing failed
 pub fn decode_ledger_entry(entry_xdr: &str) -> Result<LedgerEntry, SnapshotError> {
+    if entry_xdr.is_empty() {
+        return Err(SnapshotError::Base64Decode(
+            "LedgerEntry: empty payload".to_string(),
+        ));
+    }
+
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(entry_xdr)
         .map_err(|e| SnapshotError::Base64Decode(format!("LedgerEntry: {e}")))?;
+
+    if bytes.is_empty() {
+        return Err(SnapshotError::Base64Decode(
+            "LedgerEntry: decoded payload is empty".to_string(),
+        ));
+    }
 
     LedgerEntry::from_xdr(bytes, Limits::none())
         .map_err(|e| SnapshotError::XdrParse(format!("LedgerEntry: {e}")))
@@ -226,6 +250,33 @@ mod tests {
             result.unwrap_err(),
             SnapshotError::Base64Decode(_)
         ));
+    }
+
+    #[test]
+    fn test_decode_empty_payloads() {
+        let key_result = decode_ledger_key("");
+        assert!(key_result.is_err());
+        assert!(matches!(
+            key_result.unwrap_err(),
+            SnapshotError::Base64Decode(_)
+        ));
+
+        let entry_result = decode_ledger_entry("");
+        assert!(entry_result.is_err());
+        assert!(matches!(
+            entry_result.unwrap_err(),
+            SnapshotError::Base64Decode(_)
+        ));
+    }
+
+    #[test]
+    fn test_from_base64_map_with_empty_payload_returns_error() {
+        let mut entries = HashMap::new();
+        entries.insert(String::new(), String::new());
+
+        let result = LedgerSnapshot::from_base64_map(&entries);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SnapshotError::Base64Decode(_)));
     }
 
     #[test]

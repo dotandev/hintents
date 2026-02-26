@@ -20,10 +20,11 @@ import (
 //		WithLedgerEntry("key1", "value1").
 //		Build()
 type SimulationRequestBuilder struct {
-	envelopeXdr   string
-	resultMetaXdr string
-	ledgerEntries map[string]string
-	errors        []string
+	envelopeXdr     string
+	resultMetaXdr   string
+	ledgerEntries   map[string]string
+	restorePreamble map[string]interface{}
+	errors          []string
 }
 
 // NewSimulationRequestBuilder creates a new builder instance.
@@ -87,6 +88,12 @@ func (b *SimulationRequestBuilder) WithLedgerEntries(entries map[string]string) 
 	return b
 }
 
+// WithRestorePreamble sets optional restore preamble data used in restore simulations.
+func (b *SimulationRequestBuilder) WithRestorePreamble(preamble map[string]interface{}) *SimulationRequestBuilder {
+	b.restorePreamble = preamble
+	return b
+}
+
 // Build constructs and validates the final SimulationRequest.
 // Returns an error if required fields are missing or validation fails.
 func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
@@ -116,9 +123,9 @@ func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 	}
 
 	// Only set restorePreamble if present
- 	if b.restorePreamble != nil {
-  		req.RestorePreamble = b.restorePreamble
- 	}
+	if b.restorePreamble != nil {
+		req.RestorePreamble = b.restorePreamble
+	}
 
 	return req, nil
 }
@@ -138,6 +145,7 @@ func (b *SimulationRequestBuilder) Reset() *SimulationRequestBuilder {
 	b.envelopeXdr = ""
 	b.resultMetaXdr = ""
 	b.ledgerEntries = make(map[string]string)
+	b.restorePreamble = nil
 	b.errors = make([]string, 0)
 	return b
 }

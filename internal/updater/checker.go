@@ -76,13 +76,20 @@ func (c *Checker) CheckForUpdates() {
 		return
 	}
 
-	// Update cache with the latest version (banner is shown from cache at next run start)
+	// Update cache with the latest version
 	if err := c.updateCache(latestVersion); err != nil {
 		// Silent failure
 		return
 	}
-	// Do not display here; banner is shown once per run from ShowBannerFromCache to avoid
-	// mid-output or duplicate messages.
+
+	// Compare versions
+	needsUpdate, err := c.compareVersions(c.currentVersion, latestVersion)
+	if err != nil || !needsUpdate {
+		return
+	}
+
+	// Display notification
+	c.displayNotification(latestVersion)
 }
 
 // shouldCheck determines if we should check based on cache
@@ -169,50 +176,13 @@ func (c *Checker) compareVersions(current, latest string) (bool, error) {
 	return latestVer.GreaterThan(currentVer), nil
 }
 
-// displayNotification prints the update message to stderr (small one-line banner)
+// displayNotification prints the update message to stderr
 func (c *Checker) displayNotification(latestVersion string) {
 	message := fmt.Sprintf(
-		"Upgrade available: %s — run 'go install github.com/dotandev/hintents/cmd/erst@latest' to update\n",
+		"\n[INFO] Upgrade available: %s. Run 'go install github.com/dotandev/hintents/cmd/erst@latest' to update.\n\n",
 		latestVersion,
 	)
 	fmt.Fprint(os.Stderr, message)
-}
-
-// ShowBannerFromCache reads the last update check cache and, if a newer version
-// was found, prints a small "Upgrade available" banner to stderr. Called at CLI
-// start so the banner appears once per run without blocking. Skips if update
-// checking is disabled or cache is missing/invalid.
-func ShowBannerFromCache(currentVersion string) {
-	c := NewChecker(currentVersion)
-	c.showBannerFromCache()
-}
-
-// ShowBannerFromCacheWithCacheDir is for testing: same as ShowBannerFromCache
-// but uses the given cache directory (full path to the erst cache dir, e.g. …/erst).
-func ShowBannerFromCacheWithCacheDir(currentVersion, cacheDir string) {
-	c := &Checker{currentVersion: currentVersion, cacheDir: cacheDir}
-	c.showBannerFromCache()
-}
-
-// showBannerFromCache reads cache and displays the banner if cached latest > current.
-func (c *Checker) showBannerFromCache() {
-	if c.isUpdateCheckDisabled() {
-		return
-	}
-	cacheFile := filepath.Join(c.cacheDir, "last_update_check")
-	data, err := os.ReadFile(cacheFile)
-	if err != nil {
-		return
-	}
-	var cache CacheData
-	if err := json.Unmarshal(data, &cache); err != nil || cache.LatestVersion == "" {
-		return
-	}
-	needsUpdate, err := c.compareVersions(c.currentVersion, cache.LatestVersion)
-	if err != nil || !needsUpdate {
-		return
-	}
-	c.displayNotification(cache.LatestVersion)
 }
 
 // updateCache updates the cache file with the latest check time and version
@@ -252,6 +222,33 @@ func (c *Checker) isUpdateCheckDisabled() bool {
 	}
 
 	return false
+}
+
+// ShowBannerFromCache prints an upgrade banner if a newer cached version exists.
+func ShowBannerFromCache(currentVersion string) {
+	ShowBannerFromCacheWithCacheDir(currentVersion, getCacheDir())
+}
+
+// ShowBannerFromCacheWithCacheDir is a testable variant of ShowBannerFromCache.
+func ShowBannerFromCacheWithCacheDir(currentVersion, cacheDir string) {
+	cacheFile := filepath.Join(cacheDir, "last_update_check")
+	data, err := os.ReadFile(cacheFile)
+	if err != nil {
+		return
+	}
+
+	var cache CacheData
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return
+	}
+
+	checker := &Checker{currentVersion: currentVersion, cacheDir: cacheDir}
+	needsUpdate, err := checker.compareVersions(currentVersion, cache.LatestVersion)
+	if err != nil || !needsUpdate {
+		return
+	}
+
+	checker.displayNotification(cache.LatestVersion)
 }
 
 // getConfigPath returns the path to the config file

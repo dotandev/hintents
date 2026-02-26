@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Test suite for HSM signing load test
  * Validates the audit:sign performance under various load scenarios

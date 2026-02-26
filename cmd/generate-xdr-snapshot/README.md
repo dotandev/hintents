@@ -14,12 +14,12 @@ This tool generates snapshot files containing 1,000,000+ randomized but realisti
 
 ## Features
 
-✅ **Generates valid snapshot format** - Produces soroban-cli compatible snapshot files  
-✅ **Realistic XDR data** - Generates Base64-encoded values matching real ledger entry sizes  
-✅ **Deterministic output** - Optional seed for reproducible benchmarks  
-✅ **Progress reporting** - Real-time progress with ETA  
-✅ **Memory efficient** - Streaming generation with batch sorting  
-✅ **Performance statistics** - Detailed output metrics  
+[OK] **Generates valid snapshot format** - Produces soroban-cli compatible snapshot files  
+[OK] **Realistic XDR data** - Generates Base64-encoded values matching real ledger entry sizes  
+[OK] **Deterministic output** - Optional seed for reproducible benchmarks  
+[OK] **Progress reporting** - Real-time progress with ETA  
+[OK] **Memory efficient** - Streaming generation with batch sorting  
+[OK] **Performance statistics** - Detailed output metrics  
 
 ## Building
 

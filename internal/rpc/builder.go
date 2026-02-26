@@ -16,24 +16,26 @@ import (
 type ClientOption func(*clientBuilder) error
 
 type clientBuilder struct {
-	network        Network
-	token          string
-	horizonURL     string
-	sorobanURL     string
-	altURLs        []string
-	cacheEnabled   bool
-	config         *NetworkConfig
-	httpClient     *http.Client
-	requestTimeout time.Duration
+	network         Network
+	token           string
+	horizonURL      string
+	sorobanURL      string
+	altURLs         []string
+	cacheEnabled    bool
+	methodTelemetry MethodTelemetry
+	config          *NetworkConfig
+	httpClient      *http.Client
+	requestTimeout  time.Duration
 }
 
 const defaultHTTPTimeout = 15 * time.Second
 
 func newBuilder() *clientBuilder {
 	return &clientBuilder{
-		network:        Mainnet,
-		cacheEnabled:   true,
-		requestTimeout: defaultHTTPTimeout,
+		network:         Mainnet,
+		cacheEnabled:    true,
+		methodTelemetry: defaultMethodTelemetry(),
+		requestTimeout:  defaultHTTPTimeout,
 	}
 }
 
@@ -127,6 +129,18 @@ func WithRequestTimeout(d time.Duration) ClientOption {
 func WithHTTPClient(client *http.Client) ClientOption {
 	return func(b *clientBuilder) error {
 		b.httpClient = client
+		return nil
+	}
+}
+
+// WithMethodTelemetry injects an optional telemetry hook for SDK method timings.
+// If nil is provided, a no-op implementation is used.
+func WithMethodTelemetry(telemetry MethodTelemetry) ClientOption {
+	return func(b *clientBuilder) error {
+		if telemetry == nil {
+			telemetry = defaultMethodTelemetry()
+		}
+		b.methodTelemetry = telemetry
 		return nil
 	}
 }
@@ -228,14 +242,15 @@ func (b *clientBuilder) build() (*Client, error) {
 			HorizonURL: b.horizonURL,
 			HTTP:       b.httpClient,
 		},
-		Network:      b.network,
-		SorobanURL:   b.sorobanURL,
-		AltURLs:      b.altURLs,
-		httpClient:   b.httpClient,
-		token:        b.token,
-		Config:       *b.config,
-		CacheEnabled: b.cacheEnabled,
-		failures:     make(map[string]int),
-		lastFailure:  make(map[string]time.Time),
+		Network:         b.network,
+		SorobanURL:      b.sorobanURL,
+		AltURLs:         b.altURLs,
+		httpClient:      b.httpClient,
+		token:           b.token,
+		Config:          *b.config,
+		CacheEnabled:    b.cacheEnabled,
+		methodTelemetry: b.methodTelemetry,
+		failures:        make(map[string]int),
+		lastFailure:     make(map[string]time.Time),
 	}, nil
 }
