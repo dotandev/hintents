@@ -62,9 +62,9 @@ func TestWASMFormatDetection(t *testing.T) {
 	wasmHeader := []byte{
 		0x00, 0x61, 0x73, 0x6d, // WASM magic
 		0x01, 0x00, 0x00, 0x00, // version 1
-		0x00, // Section 0: custom
-		0x04, // Section size
-		0x04, // Name length
+		0x00,                   // Section 0: custom
+		0x04,                   // Section size
+		0x04,                   // Name length
 		0x00, 0x00, 0x00, 0x00, // Padding/name
 	}
 
@@ -78,13 +78,13 @@ func TestWASMFormatDetection(t *testing.T) {
 // TestLocalVar tests LocalVar struct
 func TestLocalVar(t *testing.T) {
 	lv := LocalVar{
-		Name:         "balance",
+		Name:          "balance",
 		DemangledName: "balance",
-		Type:         "i128",
-		Location:     "0x1000",
-		Address:      0x1000,
-		StartLine:    10,
-		EndLine:      20,
+		Type:          "i128",
+		Location:      "0x1000",
+		Address:       0x1000,
+		StartLine:     10,
+		EndLine:       20,
 	}
 
 	if lv.Name != "balance" {
@@ -135,9 +135,9 @@ func TestSourceLocation(t *testing.T) {
 // TestFormatLocation tests location formatting
 func TestFormatLocation(t *testing.T) {
 	tests := []struct {
-		name   string
-		loc    []byte
-		want   string
+		name string
+		loc  []byte
+		want string
 	}{
 		{
 			name: "empty location",

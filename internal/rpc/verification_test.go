@@ -35,8 +35,8 @@ func TestVerifyLedgerEntryHash_ValidKey(t *testing.T) {
 	ledgerKey := xdr.LedgerKey{
 		Type: xdr.LedgerEntryTypeContractData,
 		ContractData: &xdr.LedgerKeyContractData{
-			Contract: contractAddr,
-			Key:      keyVal,
+			Contract:   contractAddr,
+			Key:        keyVal,
 			Durability: xdr.ContractDataDurability(xdr.ContractDataDurabilityPersistent),
 		},
 	}
@@ -217,8 +217,8 @@ func createTestLedgerKey(t *testing.T, seed int) string {
 	ledgerKey := xdr.LedgerKey{
 		Type: xdr.LedgerEntryTypeContractData,
 		ContractData: &xdr.LedgerKeyContractData{
-			Contract: contractAddr,
-			Key:      keyVal,
+			Contract:   contractAddr,
+			Key:        keyVal,
 			Durability: xdr.ContractDataDurability(xdr.ContractDataDurabilityPersistent),
 		},
 	}

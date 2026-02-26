@@ -63,7 +63,6 @@ func NewRunnerWithMockTime(simPathOverride string, debug bool, mockTime int64) (
 	return r, nil
 }
 
-
 // -------------------- Binary Discovery --------------------
 
 func findSimBinary(simPathOverride string) (string, string, error) {

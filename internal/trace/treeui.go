@@ -10,21 +10,21 @@ import (
 
 // TreeUINode represents a renderable node in the tree UI with mouse tracking
 type TreeUINode struct {
-	Node           *TraceNode
-	DisplayText    string
-	IndentLevel    int
-	ScreenRow      int // Row number on screen for mouse tracking
-	ExpandBoxCol   int // Column where the expand/collapse box is
-	IsVisible      bool
+	Node         *TraceNode
+	DisplayText  string
+	IndentLevel  int
+	ScreenRow    int // Row number on screen for mouse tracking
+	ExpandBoxCol int // Column where the expand/collapse box is
+	IsVisible    bool
 }
 
 // TreeRenderer handles rendering of the trace tree with mouse support
 type TreeRenderer struct {
-	nodes          []*TreeUINode
-	selectedRow    int
-	screenWidth    int
-	screenHeight   int
-	scrollOffset   int
+	nodes        []*TreeUINode
+	selectedRow  int
+	screenWidth  int
+	screenHeight int
+	scrollOffset int
 }
 
 // NewTreeRenderer creates a new tree renderer
