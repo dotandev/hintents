@@ -21,6 +21,8 @@ pub struct SimulationRequest {
     /// (e.g. time-locked contract logic); not yet consumed by the simulator.
     #[allow(dead_code)]
     pub timestamp: String,
+    /// Optional Unix domain socket path for streaming events in real-time
+    pub socket_path: Option<String>,
     pub mock_base_fee: Option<u32>,
     pub mock_gas_price: Option<u64>,
     pub mock_signature_verification: Option<bool>,
@@ -69,7 +71,7 @@ pub struct SimulationResponse {
     pub wasm_offset: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DiagnosticEvent {
     pub event_type: String,
     pub contract_id: Option<String>,

@@ -7,6 +7,7 @@ mod config;
 mod gas_optimizer;
 mod git_detector;
 mod runner;
+mod socket;
 mod source_map_cache;
 mod source_mapper;
 mod stack_trace;
@@ -15,6 +16,7 @@ mod vm;
 mod wasm;
 
 use crate::gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor, CPU_LIMIT, MEMORY_LIMIT};
+use crate::socket::{SocketStreamer, StreamMessage};
 use crate::source_mapper::SourceMapper;
 use crate::stack_trace::WasmStackTrace;
 use crate::types::*;
@@ -53,6 +55,24 @@ fn init_logger() {
     } else {
         // Output human-readable text
         subscriber.compact().init();
+    }
+}
+
+/// Initialize socket streamer if socket_path is provided in the request
+fn init_streamer(socket_path: &Option<String>) -> Option<SocketStreamer> {
+    if let Some(path) = socket_path {
+        match SocketStreamer::connect(path) {
+            Ok(streamer) => {
+                tracing::info!(event = "socket_connected", path = %path, "Connected to streaming socket");
+                Some(streamer)
+            }
+            Err(e) => {
+                tracing::warn!(event = "socket_connect_failed", error = %e, "Failed to connect to socket, continuing without streaming");
+                None
+            }
+        }
+    } else {
+        None
     }
 }
 
@@ -381,6 +401,9 @@ fn main() {
         }
     };
 
+    // Initialize socket streamer if requested
+    let mut streamer = init_streamer(&request.socket_path);
+
     // Decode Envelope XDR
     let envelope = match base64::engine::general_purpose::STANDARD.decode(&request.envelope_xdr) {
         Ok(bytes) => match soroban_env_host::xdr::TransactionEnvelope::from_xdr(
@@ -649,15 +672,20 @@ fn main() {
                                     }
                                 };
 
-                                let wasm_instruction = extract_wasm_instruction(&topics, &data);
-                                DiagnosticEvent {
+                                let diag_event = DiagnosticEvent {
                                     event_type,
                                     contract_id,
                                     topics,
                                     data,
                                     in_successful_contract_call: !event.failed_call,
-                                    wasm_instruction,
+                                };
+
+                                // Stream event in real-time if streamer is available
+                                if let Some(ref mut s) = streamer {
+                                    let _ = s.send_event(diag_event.clone());
                                 }
+
+                                diag_event
                             })
                             .collect();
                         (raw_events, diag_events)
@@ -683,48 +711,10 @@ fn main() {
             ];
             final_logs.extend(exec_logs);
 
-            if let Some(required_fee) = mocked_required_fee_stroops(
-                &request,
-                operations.as_slice().len(),
-                cpu_insns,
-                mem_bytes,
-            ) {
-                let declared_fee = transaction_fee_stroops(&envelope);
-                final_logs.push(format!(
-                    "Mock fee check: declared={} required={}",
-                    declared_fee, required_fee
-                ));
-
-                if declared_fee < required_fee {
-                    let response = SimulationResponse {
-                        status: "error".to_string(),
-                        error: Some(format!(
-                            "insufficient fee (mocked): declared {} stroops, required {} stroops",
-                            declared_fee, required_fee
-                        )),
-                        error_code: None,
-                        lcov_report: lcov_report.clone(),
-                        lcov_report_path: lcov_report_path.clone(),
-                        events,
-                        diagnostic_events,
-                        categorized_events,
-                        logs: final_logs,
-                        flamegraph: flamegraph_svg,
-                        optimization_report,
-                        budget_usage: Some(budget_usage),
-                        source_location: None,
-                        stack_trace: None,
-                        wasm_offset: None,
-                    };
-
-                    if let Ok(json) = serde_json::to_string(&response) {
-                        println!("{}", json);
-                    } else {
-                        eprintln!("Failed to serialize simulation response");
-                        println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
-                    }
-                    return;
-                }
+            // Stream budget update if streamer is available
+            if let Some(ref mut s) = streamer {
+                let _ = s.send_budget_update(cpu_insns, mem_bytes);
+                let _ = s.send_complete();
             }
 
             let response = SimulationResponse {
@@ -751,12 +741,7 @@ fn main() {
                 wasm_offset: None,
             };
 
-            if let Ok(json) = serde_json::to_string(&response) {
-                println!("{}", json);
-            } else {
-                eprintln!("Failed to serialize simulation response");
-                println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
-            }
+            println!("{}", serde_json::to_string(&response).unwrap());
         }
         Ok(Err(host_error)) => {
             // Host error during execution (e.g., contract trap, validation failure)
@@ -784,20 +769,84 @@ fn main() {
                     None
                 };
 
+            // Capture categorized events for analyzer
+            let categorized_events = match host.get_events() {
+                Ok(evs) => categorize_events(&evs),
+                Err(_) => vec![],
+            };
+
+            // Heuristic to ignore Rust stdlib panic wrappers and find the actual source point
+            let mut user_panic_point = None;
+            for event in &diagnostic_events {
+                let mut combined_text = event.data.clone();
+                for topic in &event.topics {
+                    combined_text.push_str(" ");
+                    combined_text.push_str(topic);
+                }
+
+                if combined_text.contains("panicked")
+                    || combined_text.contains("Error")
+                    || combined_text.contains("Trap")
+                {
+                    // Ignore known Rust stdlib wrappers commonly seen in Backtrace/Diagnostic events
+                    if combined_text.contains("core/src/panicking.rs")
+                        || combined_text.contains("core::panicking")
+                        || combined_text.contains("rust_begin_unwind")
+                        || combined_text.contains("std::rt::lang_start")
+                        || combined_text.contains("compiler_builtins")
+                        || combined_text.contains("rustc_std_workspace")
+                    {
+                        continue;
+                    }
+
+                    // Look for common user paths (like src/lib.rs, etc)
+                    if combined_text.contains(".rs") && !combined_text.contains("soroban-env-host")
+                    {
+                        user_panic_point = Some(combined_text.replace("\"", ""));
+                        // Break after finding the first valid panic point so we don't overwrite it with deeper arbitrary ones
+                        break;
+                    }
+                }
+            }
+
+            let details = if let Some(ref point) = user_panic_point {
+                format!(
+                    "Contract execution failed with host error: {:?}. Panic point: {}",
+                    host_error, point
+                )
+            } else {
+                format!(
+                    "Contract execution failed with host error: {:?}",
+                    host_error
+                )
+            };
+
+            let structured_error = StructuredError {
+                error_type: "HostError".to_string(),
+                message: format!("{:?}", host_error),
+                details: Some(details),
+            };
+
+            let error_msg = format!("{:?}", host_error);
+            let wasm_offset = extract_wasm_offset(&error_msg);
+            
+            let source_location = if let (Some(offset), Some(mapper)) = (wasm_offset, &source_mapper) {
+                mapper.map_wasm_offset_to_source(offset)
+            } else {
+                None
+            };
+
+            // Stream error if streamer is available
+            if let Some(ref mut s) = streamer {
+                let _ = s.send_error(error_msg.clone());
+            }
+
             let response = SimulationResponse {
                 status: "error".to_string(),
-                error: Some(
-                    serde_json::to_string(&structured_error).unwrap_or_else(|e| {
-                        eprintln!("Failed to serialize structured error: {}", e);
-                        format!("Internal error during error serialization: {}", e)
-                    }),
-                ),
-                error_code: None,
-                lcov_report: lcov_report.clone(),
-                lcov_report_path: lcov_report_path.clone(),
-                events: vec![],
-                diagnostic_events: vec![],
-                categorized_events: vec![],
+                error: Some(serde_json::to_string(&structured_error).unwrap()),
+                events,
+                diagnostic_events,
+                categorized_events,
                 logs: vec![format!("Stack trace:\n{}", trace_display)],
                 flamegraph: None,
                 optimization_report: None,
@@ -824,6 +873,11 @@ fn main() {
 
             let wasm_trace = WasmStackTrace::from_panic(&panic_msg);
             let memory_limit_exceeded = panic_msg.contains(ERR_MEMORY_LIMIT_EXCEEDED);
+
+            // Stream panic error if streamer is available
+            if let Some(ref mut s) = streamer {
+                let _ = s.send_error(format!("Simulator panicked: {}", panic_msg));
+            }
 
             let response = SimulationResponse {
                 status: "error".to_string(),
@@ -1248,4 +1302,3 @@ mod tests {
         assert!(report.contains("FNH:2"));
     }
 }
->>>>>>> ac2f0a127a0ae2292443728a70f9e09fa77f8835
