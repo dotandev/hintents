@@ -17,8 +17,6 @@ import (
 	"github.com/dotandev/hintents/internal/logger"
 )
 
-const wasmTargetPath = "target/wasm32-unknown-unknown/release"
-
 // Resolver coordinates fetching verified source code from a registry,
 // with optional local caching and auto-discovery of local DWARF symbols.
 type Resolver struct {
@@ -85,18 +83,18 @@ func (r *Resolver) Resolve(ctx context.Context, contractID string) (*SourceCode,
 	// 3. Fallback: Prompt user if source is unresolved (Issue #372)
 	if source == nil {
 		logger.Logger.Info("Contract source unresolved automatically", "contract_id", contractID)
-		
+
 		manualPath, err := r.PromptForWasmPath()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get manual WASM path: %w", err)
 		}
 
 		if manualPath != "" {
-			// In a real scenario, you might attempt to load symbols from this path 
+			// In a real scenario, you might attempt to load symbols from this path
 			// using the dwarf.Parser here. For now, we log the path as per requirements.
 			logger.Logger.Info("Manual WASM path provided by user", "path", manualPath)
 		}
-		
+
 		return nil, nil
 	}
 
@@ -117,12 +115,12 @@ func (r *Resolver) Resolve(ctx context.Context, contractID string) (*SourceCode,
 }
 
 // PromptForWasmPath pauses execution and asks the user for a manual WASM path.
-// Requirement: If erst encounters an unknown contract, pause and ask the user 
+// Requirement: If erst encounters an unknown contract, pause and ask the user
 // "Please provide path to contract WASM for better mapping".
 func (r *Resolver) PromptForWasmPath() (string, error) {
 	// Exact string required by Issue #372
 	fmt.Print("Please provide path to contract WASM for better mapping: ")
-	
+
 	reader := bufio.NewReader(os.Stdin)
 	path, err := reader.ReadString('\n')
 	if err != nil {
@@ -130,6 +128,8 @@ func (r *Resolver) PromptForWasmPath() (string, error) {
 	}
 
 	return strings.TrimSpace(path), nil
+}
+
 // AutoDiscoverLocalSymbols scans the project root for local WASM builds.
 // If a bytecode hash match is found, it merges DWARF debug symbols.
 func (r *Resolver) AutoDiscoverLocalSymbols(projectRoot string, expectedHash string) error {
@@ -186,9 +186,9 @@ func (r *Resolver) AutoDiscoverLocalSymbols(projectRoot string, expectedHash str
 		}
 
 		// Integration point: Merge symbols into the resolver session
-		logger.Logger.Info("Automatically merged symbols from local build", 
-            "file", file.Name(), 
-            "count", len(subprograms))
+		logger.Logger.Info("Automatically merged symbols from local build",
+			"file", file.Name(),
+			"count", len(subprograms))
 	}
 
 	return nil

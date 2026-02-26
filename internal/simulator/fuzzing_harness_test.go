@@ -4,6 +4,7 @@
 package simulator
 
 import (
+	"context"
 	"encoding/hex"
 	"math/rand"
 	"testing"
@@ -90,7 +91,7 @@ func TestFuzzingHarness_Fuzz(t *testing.T) {
 
 	t.Run("respects iteration count", func(t *testing.T) {
 		mockRunner := &MockRunner{
-			RunFunc: func(req *SimulationRequest) (*SimulationResponse, error) {
+			RunFunc: func(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 				return &SimulationResponse{Status: "success"}, nil
 			},
 		}
@@ -147,7 +148,7 @@ func TestFuzzingHarness_FuzzXDR(t *testing.T) {
 
 	t.Run("accepts valid XDR", func(t *testing.T) {
 		mockRunner := &MockRunner{
-			RunFunc: func(req *SimulationRequest) (*SimulationResponse, error) {
+			RunFunc: func(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 				return &SimulationResponse{Status: "success"}, nil
 			},
 		}
@@ -227,7 +228,7 @@ func TestFuzzingHarness_MutateHexString(t *testing.T) {
 func TestFuzzingHarness_TestFuzzerInput(t *testing.T) {
 	t.Run("reports successful execution", func(t *testing.T) {
 		mockRunner := &MockRunner{
-			RunFunc: func(req *SimulationRequest) (*SimulationResponse, error) {
+			RunFunc: func(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 				return &SimulationResponse{Status: "success"}, nil
 			},
 		}
@@ -247,7 +248,7 @@ func TestFuzzingHarness_TestFuzzerInput(t *testing.T) {
 
 	t.Run("detects errors", func(t *testing.T) {
 		mockRunner := &MockRunner{
-			RunFunc: func(req *SimulationRequest) (*SimulationResponse, error) {
+			RunFunc: func(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 				return &SimulationResponse{Status: "error", Error: "test error"}, nil
 			},
 		}

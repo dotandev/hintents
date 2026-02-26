@@ -20,7 +20,7 @@ func TestNewSuggestionEngine(t *testing.T) {
 
 func TestAnalyzeEvents_UninitializedContract(t *testing.T) {
 	engine := NewSuggestionEngine()
-	
+
 	events := []DecodedEvent{
 		{
 			ContractID: "abc123",
@@ -30,7 +30,7 @@ func TestAnalyzeEvents_UninitializedContract(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeEvents(events)
-	
+
 	if len(suggestions) == 0 {
 		t.Fatal("Expected at least one suggestion")
 	}
@@ -52,7 +52,7 @@ func TestAnalyzeEvents_UninitializedContract(t *testing.T) {
 
 func TestAnalyzeEvents_MissingAuthorization(t *testing.T) {
 	engine := NewSuggestionEngine()
-	
+
 	events := []DecodedEvent{
 		{
 			ContractID: "abc123",
@@ -62,7 +62,7 @@ func TestAnalyzeEvents_MissingAuthorization(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeEvents(events)
-	
+
 	if len(suggestions) == 0 {
 		t.Fatal("Expected at least one suggestion")
 	}
@@ -84,7 +84,7 @@ func TestAnalyzeEvents_MissingAuthorization(t *testing.T) {
 
 func TestAnalyzeEvents_InsufficientBalance(t *testing.T) {
 	engine := NewSuggestionEngine()
-	
+
 	events := []DecodedEvent{
 		{
 			ContractID: "abc123",
@@ -94,7 +94,7 @@ func TestAnalyzeEvents_InsufficientBalance(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeEvents(events)
-	
+
 	if len(suggestions) == 0 {
 		t.Fatal("Expected at least one suggestion")
 	}
@@ -116,7 +116,7 @@ func TestAnalyzeEvents_InsufficientBalance(t *testing.T) {
 
 func TestAnalyzeEvents_InvalidParameters(t *testing.T) {
 	engine := NewSuggestionEngine()
-	
+
 	events := []DecodedEvent{
 		{
 			ContractID: "abc123",
@@ -126,7 +126,7 @@ func TestAnalyzeEvents_InvalidParameters(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeEvents(events)
-	
+
 	if len(suggestions) == 0 {
 		t.Fatal("Expected at least one suggestion")
 	}
@@ -148,7 +148,7 @@ func TestAnalyzeEvents_InvalidParameters(t *testing.T) {
 
 func TestAnalyzeEvents_ContractNotFound(t *testing.T) {
 	engine := NewSuggestionEngine()
-	
+
 	events := []DecodedEvent{
 		{
 			ContractID: "0000000000000000000000000000000000000000000000000000000000000000",
@@ -158,7 +158,7 @@ func TestAnalyzeEvents_ContractNotFound(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeEvents(events)
-	
+
 	if len(suggestions) == 0 {
 		t.Fatal("Expected at least one suggestion")
 	}
@@ -180,7 +180,7 @@ func TestAnalyzeEvents_ContractNotFound(t *testing.T) {
 
 func TestAnalyzeEvents_ResourceLimitExceeded(t *testing.T) {
 	engine := NewSuggestionEngine()
-	
+
 	events := []DecodedEvent{
 		{
 			ContractID: "abc123",
@@ -190,7 +190,7 @@ func TestAnalyzeEvents_ResourceLimitExceeded(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeEvents(events)
-	
+
 	if len(suggestions) == 0 {
 		t.Fatal("Expected at least one suggestion")
 	}
@@ -212,7 +212,7 @@ func TestAnalyzeEvents_ResourceLimitExceeded(t *testing.T) {
 
 func TestAnalyzeEvents_NoMatch(t *testing.T) {
 	engine := NewSuggestionEngine()
-	
+
 	events := []DecodedEvent{
 		{
 			ContractID: "abc123",
@@ -222,7 +222,7 @@ func TestAnalyzeEvents_NoMatch(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeEvents(events)
-	
+
 	if len(suggestions) != 0 {
 		t.Errorf("Expected no suggestions for success events, got %d", len(suggestions))
 	}
@@ -230,7 +230,7 @@ func TestAnalyzeEvents_NoMatch(t *testing.T) {
 
 func TestAnalyzeCallTree(t *testing.T) {
 	engine := NewSuggestionEngine()
-	
+
 	root := &CallNode{
 		ContractID: "ROOT",
 		Function:   "TOP_LEVEL",
@@ -257,7 +257,7 @@ func TestAnalyzeCallTree(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeCallTree(root)
-	
+
 	if len(suggestions) < 2 {
 		t.Errorf("Expected at least 2 suggestions (one from root, one from child), got %d", len(suggestions))
 	}
@@ -273,7 +273,7 @@ func TestFormatSuggestions(t *testing.T) {
 	}
 
 	output := FormatSuggestions(suggestions)
-	
+
 	if !strings.Contains(output, "Potential Fixes") {
 		t.Error("Expected output to contain 'Potential Fixes'")
 	}
@@ -288,7 +288,7 @@ func TestFormatSuggestions(t *testing.T) {
 func TestFormatSuggestions_Empty(t *testing.T) {
 	suggestions := []Suggestion{}
 	output := FormatSuggestions(suggestions)
-	
+
 	if output != "" {
 		t.Errorf("Expected empty output for no suggestions, got: %s", output)
 	}
@@ -324,7 +324,7 @@ func TestAddCustomRule(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeEvents(events)
-	
+
 	found := false
 	for _, s := range suggestions {
 		if s.Rule == "custom_error" {
@@ -339,7 +339,7 @@ func TestAddCustomRule(t *testing.T) {
 
 func TestAnalyzeEvents_DuplicateRules(t *testing.T) {
 	engine := NewSuggestionEngine()
-	
+
 	// Create events that match the same rule multiple times
 	events := []DecodedEvent{
 		{
@@ -355,7 +355,7 @@ func TestAnalyzeEvents_DuplicateRules(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeEvents(events)
-	
+
 	// Count how many times uninitialized_contract appears
 	count := 0
 	for _, s := range suggestions {

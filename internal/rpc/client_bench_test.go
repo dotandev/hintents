@@ -78,12 +78,7 @@ func BenchmarkJSONRPCUnmarshal(b *testing.B) {
 				ID:      1,
 			}
 			resp.Result.LatestLedger = 12345
-			resp.Result.Entries = make([]struct {
-				Key                string `json:"key"`
-				Xdr                string `json:"xdr"`
-				LastModifiedLedger int    `json:"lastModifiedLedgerSeq"`
-				LiveUntilLedger    int    `json:"liveUntilLedgerSeq"`
-			}, tt.numEntries)
+			resp.Result.Entries = make([]LedgerEntryResult, tt.numEntries)
 
 			for i := 0; i < tt.numEntries; i++ {
 				resp.Result.Entries[i].Key = strings.Repeat("k", 64)
@@ -160,12 +155,7 @@ func BenchmarkLargeJSONParsing(b *testing.B) {
 		ID:      1,
 	}
 	resp.Result.LatestLedger = 99999
-	resp.Result.Entries = make([]struct {
-		Key                string `json:"key"`
-		Xdr                string `json:"xdr"`
-		LastModifiedLedger int    `json:"lastModifiedLedgerSeq"`
-		LiveUntilLedger    int    `json:"liveUntilLedgerSeq"`
-	}, 500)
+	resp.Result.Entries = make([]LedgerEntryResult, 500)
 
 	for i := 0; i < 500; i++ {
 		resp.Result.Entries[i].Key = strings.Repeat("k", 100)
@@ -255,12 +245,7 @@ func BenchmarkGetLedgerEntries(b *testing.B) {
 					ID:      1,
 				}
 				resp.Result.LatestLedger = 12345
-				resp.Result.Entries = make([]struct {
-					Key                string `json:"key"`
-					Xdr                string `json:"xdr"`
-					LastModifiedLedger int    `json:"lastModifiedLedgerSeq"`
-					LiveUntilLedger    int    `json:"liveUntilLedgerSeq"`
-				}, len(req.Params[0].([]interface{})))
+				resp.Result.Entries = make([]LedgerEntryResult, len(req.Params[0].([]interface{})))
 
 				for i := range resp.Result.Entries {
 					resp.Result.Entries[i].Key = strings.Repeat("k", 64)
@@ -427,12 +412,7 @@ func BenchmarkJSONRPCRoundTrip(b *testing.B) {
 			ID:      req.ID,
 		}
 		resp.Result.LatestLedger = 12345
-		resp.Result.Entries = make([]struct {
-			Key                string `json:"key"`
-			Xdr                string `json:"xdr"`
-			LastModifiedLedger int    `json:"lastModifiedLedgerSeq"`
-			LiveUntilLedger    int    `json:"liveUntilLedgerSeq"`
-		}, 1)
+		resp.Result.Entries = make([]LedgerEntryResult, 1)
 		resp.Result.Entries[0].Key = "test-key"
 		resp.Result.Entries[0].Xdr = "test-xdr"
 

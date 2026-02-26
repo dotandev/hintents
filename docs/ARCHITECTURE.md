@@ -627,6 +627,21 @@ graph LR
     D -->|Verify| E
 ```
 
+### CI/CD & Pipeline Standardization
+
+CI and automation are treated as part of the architecture:
+
+- **Workflows**:
+  - General CI: `.github/workflows/ci.yml`
+  - Strict linting: `.github/workflows/strict-lint.yml`
+  - CI robustness checks: `.github/workflows/ci-standardization.yml`
+- **Helper scripts** (path-stable, independent of current working directory):
+  - `scripts/validate-ci.sh` — validates CI configuration and versions
+  - `scripts/test-ci-locally.sh` — mirrors CI checks locally
+  - `scripts/lint-strict.sh` / `scripts/test-strict-linting.sh` — strict linting and verification
+
+All scripts compute the repository root from their own location instead of assuming they are invoked from the project root, removing implicit global state dependencies from the CI/CD pipeline.
+
 ---
 
 ## Troubleshooting Guide
@@ -713,3 +728,34 @@ The Rust simulator returns a JSON object with the execution status, logs, and an
   "logs": ["Host Initialized", "Charged 100 fee"]
 }
 ```
+
+---
+
+## SDK Middleware
+
+The SDK type system supports custom middleware injection via `SDKMiddleware`.
+Middleware functions intercept requests flowing through `FallbackRPCClient`,
+following a composable `(ctx, next) => response` pattern.
+
+### Types
+
+| Type | Description |
+|------|-------------|
+| `SDKContext` | Request context carrying path, method, data, headers, and metadata |
+| `SDKResponse<T>` | Response wrapper with data, status, duration, endpoint, and metadata |
+| `SDKMiddleware<T>` | `(ctx: SDKContext, next: NextFn<T>) => Promise<SDKResponse<T>>` |
+| `NextFn<T>` | Calls the next middleware or the core handler |
+| `composeMiddleware` | Composes an array of middleware into a single chain |
+
+### Registration
+
+Middleware can be registered in two ways:
+
+1. **Via config** — pass `middleware` array in `RPCConfig`
+2. **Via `use()`** — call `client.use(mw)` on a `FallbackRPCClient` instance
+
+### Execution Order
+
+Middleware executes in registration order (first registered runs first).
+Each middleware calls `next(ctx)` to pass control to the next in the chain.
+Middleware may short-circuit by returning a response without calling `next`.

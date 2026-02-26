@@ -26,8 +26,9 @@ var (
 )
 
 var initCmd = &cobra.Command{
-	Use:   "init [directory]",
-	Short: "Scaffold a local Erst debugging workspace",
+	Use:     "init [directory]",
+	GroupID: "development",
+	Short:   "Scaffold a local Erst debugging workspace",
 	Long: `Create project-local scaffolding for Erst debugging workflows.
 
 This command generates:
@@ -303,5 +304,8 @@ func init() {
 	initCmd.Flags().StringVar(&initNetworkName, "network", "testnet", "Default network to write into erst.toml (public, testnet, futurenet, standalone)")
 	initCmd.Flags().StringVar(&initRPCURLFlag, "rpc-url", "", "RPC URL to write into erst.toml (skips wizard default for this value)")
 	initCmd.Flags().StringVar(&initNetworkPassphraseFlag, "network-passphrase", "", "Network passphrase to write into erst.toml (skips wizard default for this value)")
+
+	_ = initCmd.RegisterFlagCompletionFunc("network", completeInitNetworkFlag)
+
 	rootCmd.AddCommand(initCmd)
 }

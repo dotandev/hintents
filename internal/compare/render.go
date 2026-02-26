@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	colWidth    = 52 // width of each column in the side-by-side table
-	columnSep   = " | "
+	colWidth  = 52 // width of each column in the side-by-side table
+	columnSep = " | "
 )
 
 // Render prints a human-readable side-by-side diff of a DiffResult to stdout.
@@ -134,7 +134,7 @@ func renderEventDiffs(diffs []EventDiff) {
 	for _, d := range diffs {
 		localEvt := truncate(d.LocalEvent, colWidth)
 		onChainEvt := truncate(d.OnChainEvent, colWidth)
-		marker := "  "
+		var marker string
 		if d.Divergent {
 			marker = visualizer.Colorize("[!]", "yellow") + " "
 		} else {

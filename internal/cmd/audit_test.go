@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/dotandev/hintents/internal/signer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -236,4 +237,65 @@ func TestGenerate_InvalidPrivateKey(t *testing.T) {
 
 	_, err = Generate("tx", "env", "meta", nil, nil, "aabb", nil)
 	assert.Error(t, err)
+}
+
+func TestGenerateWithSigner_InMemory(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	s := signer.NewInMemorySignerFromKey(priv)
+
+	log, err := GenerateWithSigner(
+		"tx_signer_test",
+		"envelope",
+		"meta",
+		[]string{"event1"},
+		[]string{"log1"},
+		s,
+		nil,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "tx_signer_test", log.TransactionHash)
+	assert.NotEmpty(t, log.Signature)
+	assert.NotEmpty(t, log.PublicKey)
+
+	valid, err := VerifyAuditLog(log)
+	require.NoError(t, err)
+	assert.True(t, valid)
+}
+
+func TestGenerateWithSigner_WithAttestation(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	s := signer.NewInMemorySignerFromKey(priv)
+
+	attestation := &HardwareAttestation{
+		Certificates: []AttestationCertificate{
+			{
+				PEM:     "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----",
+				Subject: "CN=Test",
+				Issuer:  "CN=Root",
+				Serial:  "01",
+			},
+		},
+		TokenInfo:        "TestHSM",
+		KeyNonExportable: true,
+		RetrievedAt:      "2026-02-26T00:00:00Z",
+	}
+
+	log, err := GenerateWithSigner(
+		"tx_att",
+		"env",
+		"meta",
+		nil,
+		nil,
+		s,
+		&GenerateOptions{HardwareAttestation: attestation},
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, log.HardwareAttestation)
+	assert.True(t, log.HardwareAttestation.KeyNonExportable)
+
+	valid, err := VerifyAuditLog(log)
+	require.NoError(t, err)
+	assert.True(t, valid)
 }

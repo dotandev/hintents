@@ -16,9 +16,10 @@ import (
 var exportSnapshotFlag string
 
 var exportCmd = &cobra.Command{
-	Use:   "export",
-	Short: "Export data from the current session",
-	Long:  `Export debugging data, such as state snapshots, from the currently active session.`,
+	Use:     "export",
+	GroupID: "utility",
+	Short:   "Export data from the current session",
+	Long:    `Export debugging data, such as state snapshots, from the currently active session.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if exportSnapshotFlag == "" {
 			return errors.WrapCliArgumentRequired("snapshot")

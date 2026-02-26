@@ -22,8 +22,9 @@ var (
 )
 
 var reportCmd = &cobra.Command{
-	Use:   "report",
-	Short: "Generate debugging reports from traces",
+	Use:     "report",
+	GroupID: "utility",
+	Short:   "Generate debugging reports from traces",
 	Long: `Generate professional PDF or HTML reports from execution traces.
 
 Reports include:
@@ -218,6 +219,8 @@ func init() {
 	reportCmd.Flags().StringVar(&reportFormat, "format", "html", "Output format: html, pdf, json, or html,pdf")
 	reportCmd.Flags().StringVar(&reportOutput, "output", ".", "Output directory for reports")
 	reportCmd.Flags().StringVar(&reportFile, "file", "", "Trace file to analyze")
+
+	_ = reportCmd.RegisterFlagCompletionFunc("format", completeReportFormatFlag)
 
 	rootCmd.AddCommand(reportCmd)
 }

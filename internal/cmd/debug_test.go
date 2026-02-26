@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -163,9 +164,14 @@ type MockRunner struct {
 	mock.Mock
 }
 
-func (m *MockRunner) Run(req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
-	args := m.Called(req)
+func (m *MockRunner) Run(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+	args := m.Called(ctx, req)
 	return args.Get(0).(*simulator.SimulationResponse), args.Error(1)
+}
+
+func (m *MockRunner) Close() error {
+	args := m.Called()
+	return args.Error(0)
 }
 
 func TestDebugCommand_Setup(t *testing.T) {
@@ -242,14 +248,17 @@ func TestMockRunner_ImplementsInterface(t *testing.T) {
 		Events: []string{"test-event"},
 	}
 
-	mockRunner.On("Run", req).Return(expectedResp, nil)
+	ctx := context.Background()
+	mockRunner.On("Run", ctx, req).Return(expectedResp, nil)
+	mockRunner.On("Close").Return(nil)
 
 	// Call the mock
-	resp, err := mockRunner.Run(req)
+	resp, err := mockRunner.Run(ctx, req)
 
 	// Verify results
 	assert.NoError(t, err)
 	assert.Equal(t, expectedResp, resp)
+	assert.NoError(t, mockRunner.Close())
 	mockRunner.AssertExpectations(t)
 }
 

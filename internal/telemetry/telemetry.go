@@ -22,19 +22,41 @@ type Config struct {
 	ServiceName string
 }
 
-// Init initializes OpenTelemetry with the given configuration
+// silentSpanExporter wraps a SpanExporter and swallows all export errors so
+// collector outages never block or log. Core SDK paths must not depend on telemetry.
+type silentSpanExporter struct {
+	delegate trace.SpanExporter
+}
+
+func (s *silentSpanExporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) error {
+	_ = s.delegate.ExportSpans(ctx, spans)
+	return nil
+}
+
+func (s *silentSpanExporter) Shutdown(ctx context.Context) error {
+	_ = s.delegate.Shutdown(ctx)
+	return nil
+}
+
+// Init initializes OpenTelemetry with the given configuration.
+// Graceful degradation: if the metrics collector is unreachable or init fails,
+// a no-op provider is used instead so the application never blocks or errors.
+// Export failures are swallowed; telemetry fails silently.
 func Init(ctx context.Context, config Config) (func(), error) {
 	if !config.Enabled {
 		return func() {}, nil
 	}
 
-	// Create OTLP HTTP exporter
+	// Create OTLP HTTP exporter (best-effort; short timeout to avoid blocking)
 	exporter, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpoint(config.ExporterURL),
-		otlptracehttp.WithInsecure(), // Use HTTP instead of HTTPS for local development
+		otlptracehttp.WithInsecure(),
+		otlptracehttp.WithTimeout(5*time.Second),
 	)
 	if err != nil {
-		return nil, err
+		// Collector unreachable at init: use no-op so core paths are unaffected
+		otel.SetTracerProvider(trace.NewTracerProvider())
+		return func() {}, nil
 	}
 
 	// Create resource
@@ -45,22 +67,26 @@ func Init(ctx context.Context, config Config) (func(), error) {
 		),
 	)
 	if err != nil {
-		return nil, err
+		_ = exporter.Shutdown(ctx)
+		otel.SetTracerProvider(trace.NewTracerProvider())
+		return func() {}, nil
 	}
 
-	// Create trace provider
+	// Wrap exporter so export failures never surface or log
+	silent := &silentSpanExporter{delegate: exporter}
+
+	// Create trace provider with silent exporter so collector downtime doesn't block or log
 	tp := trace.NewTracerProvider(
-		trace.WithBatcher(exporter),
+		trace.WithBatcher(silent),
 		trace.WithResource(res),
 	)
 
 	otel.SetTracerProvider(tp)
 
-	// Return cleanup function
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = tp.Shutdown(ctx) // Ignore error in cleanup
+		_ = tp.Shutdown(ctx)
 	}, nil
 }
 

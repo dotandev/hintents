@@ -71,7 +71,9 @@ func Load(path string) (*Snapshot, error) {
 
 // Save writes a snapshot to a JSON file with indentation for readability.
 func Save(path string, snap *Snapshot) error {
-	data, err := json.MarshalIndent(snap, "", "  ")
+	stable := normalizedForSave(snap)
+
+	data, err := json.MarshalIndent(stable, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal snapshot: %w", err)
 	}
@@ -81,4 +83,30 @@ func Save(path string, snap *Snapshot) error {
 	}
 
 	return nil
+}
+
+func normalizedForSave(snap *Snapshot) *Snapshot {
+	if snap == nil {
+		return &Snapshot{LedgerEntries: make([]LedgerEntryTuple, 0)}
+	}
+
+	entries := make([]LedgerEntryTuple, 0, len(snap.LedgerEntries))
+	for _, entry := range snap.LedgerEntries {
+		copied := append(LedgerEntryTuple(nil), entry...)
+		entries = append(entries, copied)
+	}
+
+	sort.SliceStable(entries, func(i, j int) bool {
+		left := ""
+		right := ""
+		if len(entries[i]) > 0 {
+			left = entries[i][0]
+		}
+		if len(entries[j]) > 0 {
+			right = entries[j][0]
+		}
+		return left < right
+	})
+
+	return &Snapshot{LedgerEntries: entries}
 }

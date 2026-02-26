@@ -4,6 +4,7 @@
 package simulator
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -198,7 +199,7 @@ func (h *FuzzingHarness) testFuzzerInput(input *FuzzerInput) FuzzingResult {
 	}
 
 	// Run simulation with timeout context
-	simResp, err := h.Runner.Run(simReq)
+	simResp, err := h.Runner.Run(context.Background(), simReq)
 	if err != nil {
 		result.Status = "crash"
 		result.ErrorMessage = fmt.Sprintf("execution error: %v", err)

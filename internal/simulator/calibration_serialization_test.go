@@ -14,8 +14,8 @@ func TestCalibrationSerialization(t *testing.T) {
 		ResourceCalibration: &ResourceCalibration{
 			SHA256Fixed:      3738,
 			SHA256PerByte:    37,
-			Keccak256Fixed:   3766,
-			Keccak256PerByte: 63,
+			Keccak256Fixed:   keccak256FixedCalibration,
+			Keccak256PerByte: keccak256PerByteCalibration,
 			Ed25519Fixed:     377524,
 		},
 	}
@@ -36,5 +36,11 @@ func TestCalibrationSerialization(t *testing.T) {
 
 	if req2.ResourceCalibration.SHA256Fixed != 3738 {
 		t.Errorf("expected 3738, got %d", req2.ResourceCalibration.SHA256Fixed)
+	}
+	if req2.ResourceCalibration.Keccak256Fixed != keccak256FixedCalibration {
+		t.Errorf("expected %d, got %d", keccak256FixedCalibration, req2.ResourceCalibration.Keccak256Fixed)
+	}
+	if req2.ResourceCalibration.Keccak256PerByte != keccak256PerByteCalibration {
+		t.Errorf("expected %d, got %d", keccak256PerByteCalibration, req2.ResourceCalibration.Keccak256PerByte)
 	}
 }

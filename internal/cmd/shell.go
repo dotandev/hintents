@@ -6,7 +6,6 @@ package cmd
 import (
 	"bufio"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
@@ -27,8 +26,9 @@ var (
 )
 
 var shellCmd = &cobra.Command{
-	Use:   "shell",
-	Short: "Start an interactive shell for contract invocations",
+	Use:     "shell",
+	GroupID: "development",
+	Short:   "Start an interactive shell for contract invocations",
 	Long: `Start a persistent interactive shell where you can invoke multiple contracts
 consecutively without losing the local ledger state between commands.
 
@@ -74,11 +74,17 @@ func runShell(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Initialize RPC client
-	var rpcClient *rpc.Client
+	opts := []rpc.ClientOption{rpc.WithNetwork(rpc.Network(shellNetworkFlag))}
+	if shellRPCToken != "" {
+		opts = append(opts, rpc.WithToken(shellRPCToken))
+	}
 	if shellRPCURLFlag != "" {
-		rpcClient = rpc.NewClientWithURL(shellRPCURLFlag, rpc.Network(shellNetworkFlag))
-	} else {
-		rpcClient = rpc.NewClient(rpc.Network(shellNetworkFlag))
+		opts = append(opts, rpc.WithHorizonURL(shellRPCURLFlag))
+	}
+
+	rpcClient, err := rpc.NewClient(opts...)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("failed to create RPC client: %v", err))
 	}
 
 	// Initialize simulator runner

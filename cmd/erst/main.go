@@ -7,18 +7,13 @@ import (
 	"os"
 
 	"github.com/dotandev/hintents/internal/cmd"
-	"github.com/dotandev/hintents/internal/updater"
 )
 
 var Version = "dev"
 
 func main() {
-	// Set version in cmd package
+	// Set version in cmd package (used for upgrade banner and async version check)
 	cmd.Version = Version
-
-	// Start update checker in background (non-blocking)
-	checker := updater.NewChecker(Version)
-	go checker.CheckForUpdates()
 
 	if err := cmd.Execute(); err != nil {
 		os.Exit(1)

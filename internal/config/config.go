@@ -100,14 +100,16 @@ func LoadConfig() (*Config, error) {
 	return config, nil
 }
 
-// Load loads the configuration from environment variables and TOML files
+// Load loads the configuration from environment variables and TOML files.
+// The lifecycle follows three distinct phases: load, merge defaults, validate.
 func Load() (*Config, error) {
+	// Phase 1: Load from sources (env vars, then TOML file).
 	cfg := &Config{
-		RpcUrl:         getEnv("ERST_RPC_URL", defaultConfig.RpcUrl),
-		Network:        Network(getEnv("ERST_NETWORK", string(defaultConfig.Network))),
-		SimulatorPath:  getEnv("ERST_SIMULATOR_PATH", defaultConfig.SimulatorPath),
-		LogLevel:       getEnv("ERST_LOG_LEVEL", defaultConfig.LogLevel),
-		CachePath:      getEnv("ERST_CACHE_PATH", defaultConfig.CachePath),
+		RpcUrl:         getEnv("ERST_RPC_URL", ""),
+		Network:        Network(getEnv("ERST_NETWORK", "")),
+		SimulatorPath:  getEnv("ERST_SIMULATOR_PATH", ""),
+		LogLevel:       getEnv("ERST_LOG_LEVEL", ""),
+		CachePath:      getEnv("ERST_CACHE_PATH", ""),
 		RPCToken:       getEnv("ERST_RPC_TOKEN", ""),
 		CrashEndpoint:  getEnv("ERST_CRASH_ENDPOINT", ""),
 		CrashSentryDSN: getEnv("ERST_SENTRY_DSN", ""),
@@ -121,7 +123,6 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// ERST_CRASH_REPORTING is a boolean env var; parse it explicitly.
 	switch strings.ToLower(os.Getenv("ERST_CRASH_REPORTING")) {
 	case "1", "true", "yes":
 		cfg.CrashReporting = true
@@ -132,17 +133,16 @@ func Load() (*Config, error) {
 		for i := range cfg.RpcUrls {
 			cfg.RpcUrls[i] = strings.TrimSpace(cfg.RpcUrls[i])
 		}
-	} else if urlsEnv := os.Getenv("STELLAR_RPC_URLS"); urlsEnv != "" {
-		cfg.RpcUrls = strings.Split(urlsEnv, ",")
-		for i := range cfg.RpcUrls {
-			cfg.RpcUrls[i] = strings.TrimSpace(cfg.RpcUrls[i])
-		}
 	}
 
 	if err := cfg.loadFromFile(); err != nil {
 		return nil, err
 	}
 
+	// Phase 2: Merge defaults for any fields still unset.
+	cfg.MergeDefaults()
+
+	// Phase 3: Validate.
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -274,15 +274,23 @@ func SaveConfig(config *Config) error {
 }
 
 func (c *Config) Validate() error {
+	return RunValidators(c, DefaultValidators())
+}
+
+// MergeDefaults fills zero-value fields with their defaults.
+func (c *Config) MergeDefaults() {
 	if c.RpcUrl == "" {
-		return errors.WrapValidationError("rpc_url cannot be empty")
+		c.RpcUrl = defaultConfig.RpcUrl
 	}
-
-	if c.Network != "" && !validNetworks[string(c.Network)] {
-		return errors.WrapInvalidNetwork(string(c.Network))
+	if c.Network == "" {
+		c.Network = defaultConfig.Network
 	}
-
-	return nil
+	if c.LogLevel == "" {
+		c.LogLevel = defaultConfig.LogLevel
+	}
+	if c.CachePath == "" {
+		c.CachePath = defaultConfig.CachePath
+	}
 }
 
 func (c *Config) NetworkURL() string {
@@ -308,9 +316,15 @@ func (c *Config) String() string {
 }
 
 func getEnv(key, defaultValue string) string {
+	// Only allow environment variables that are explicitly namespaced with ERST_
+	if !strings.HasPrefix(key, "ERST_") {
+		return defaultValue
+	}
+
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
+
 	return defaultValue
 }
 

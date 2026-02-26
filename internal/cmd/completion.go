@@ -4,14 +4,15 @@
 package cmd
 
 import (
-        "os"
 	"github.com/spf13/cobra"
+	"os"
 )
 
 // completionCmd represents the completion command
 var completionCmd = &cobra.Command{
-	Use:   "completion [bash|zsh|fish|powershell]",
-	Short: "Generate completion script for your shell",
+	Use:     "completion [bash|zsh|fish|powershell]",
+	GroupID: "utility",
+	Short:   "Generate completion script for your shell",
 	Long: `To load completions:
 
 Bash:
@@ -56,7 +57,7 @@ PowerShell:
 	Run: func(cmd *cobra.Command, args []string) {
 		switch args[0] {
 		case "bash":
-			cmd.Root().GenBashCompletion(os.Stdout)
+			cmd.Root().GenBashCompletionV2(os.Stdout, true)
 		case "zsh":
 			cmd.Root().GenZshCompletion(os.Stdout)
 		case "fish":

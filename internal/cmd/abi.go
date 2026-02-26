@@ -15,8 +15,9 @@ import (
 var abiFormat string
 
 var abiCmd = &cobra.Command{
-	Use:   "abi <wasm-file>",
-	Short: "Decompile and display a Soroban contract ABI",
+	Use:     "abi <wasm-file>",
+	GroupID: "utility",
+	Short:   "Decompile and display a Soroban contract ABI",
 	Long: `Parse a compiled Soroban WASM file and pretty-print the contract specification
 (functions, structs, enums, unions, error enums, and events).
 

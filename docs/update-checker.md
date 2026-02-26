@@ -12,13 +12,12 @@ The erst CLI includes an automatic update checker that notifies users when a new
 
 ## How It Works
 
-When you run any erst command, the update checker:
+When you run any erst command:
 
-1. Checks if update checking is disabled (via environment variable)
-2. Verifies if 24 hours have passed since the last check (using cache)
-3. Queries the GitHub API for the latest release
-4. Compares the latest version with your current version
-5. Displays a friendly notification if an update is available
+1. **Banner from cache**: A small “Upgrade available” line is shown at the start of the run if the last version check (from a previous run) found a newer release. This is instant and does not hit the network.
+2. **Async version check**: A background goroutine pings the version endpoint (GitHub releases API) so the next run can show the banner if an update is available. The check is skipped if update checking is disabled or if a check was already done in the last 24 hours.
+
+So you see the banner once per run when an update is available, without blocking CLI execution.
 
 ## Disabling Update Checks
 
@@ -48,10 +47,10 @@ The cache contains:
 
 ## Notification Example
 
-When an update is available, you'll see:
+When an update is available, you'll see a one-line banner at the start of the run (to stderr):
 
 ```
-[INFO] A new version (v1.2.3) is available! Run 'go install github.com/dotandev/hintents/cmd/erst@latest' to update.
+Upgrade available: v1.2.3 — run 'go install github.com/dotandev/hintents/cmd/erst@latest' to update
 ```
 
 ## Building with Version Information

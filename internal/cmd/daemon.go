@@ -27,8 +27,9 @@ var (
 )
 
 var daemonCmd = &cobra.Command{
-	Use:   "daemon",
-	Short: "Start JSON-RPC server for remote debugging",
+	Use:     "daemon",
+	GroupID: "development",
+	Short:   "Start JSON-RPC server for remote debugging",
 	Long: `Start a JSON-RPC 2.0 server that exposes ERST functionality for remote tools and IDEs.
 
 Endpoints:
@@ -108,6 +109,8 @@ func init() {
 	daemonCmd.Flags().StringVar(&daemonAuthToken, "auth-token", "", "Authentication token for API access")
 	daemonCmd.Flags().BoolVar(&daemonTracing, "tracing", false, "Enable OpenTelemetry tracing")
 	daemonCmd.Flags().StringVar(&daemonOTLPURL, "otlp-url", "http://localhost:4318", "OTLP exporter URL")
+
+	_ = daemonCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
 
 	rootCmd.AddCommand(daemonCmd)
 }

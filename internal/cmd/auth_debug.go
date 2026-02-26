@@ -21,8 +21,9 @@ var (
 )
 
 var authDebugCmd = &cobra.Command{
-	Use:   "auth-debug <transaction-hash>",
-	Short: "Debug multi-signature and threshold-based authorization failures",
+	Use:     "auth-debug <transaction-hash>",
+	GroupID: "core",
+	Short:   "Debug multi-signature and threshold-based authorization failures",
 	Long: `Analyze multi-signature authorization flows and identify which signatures or thresholds failed.
 
 Examples:
@@ -110,5 +111,8 @@ func init() {
 	authDebugCmd.Flags().StringVar(&authRPCURLFlag, "rpc-url", "", "Custom Horizon RPC URL")
 	authDebugCmd.Flags().BoolVar(&authDetailedFlag, "detailed", false, "Show detailed analysis and missing signatures")
 	authDebugCmd.Flags().BoolVar(&authJSONOutputFlag, "json", false, "Output as JSON")
+
+	_ = authDebugCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
+
 	rootCmd.AddCommand(authDebugCmd)
 }

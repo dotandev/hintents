@@ -4,6 +4,7 @@
 package simulator
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -33,7 +34,7 @@ func TestConcurrentReadOnlyMockRunnerAccess(t *testing.T) {
 	for i := 0; i < workers; i++ {
 		go func() {
 			defer wg.Done()
-			resp, err := mock.Run(req)
+			resp, err := mock.Run(context.Background(), req)
 			if err != nil {
 				errs <- err
 				return
@@ -146,7 +147,7 @@ func TestConcurrentMockRunnerWithSharedLedger(t *testing.T) {
 		"contract_3": "data_3",
 	}
 
-	mock := NewMockRunner(func(req *SimulationRequest) (*SimulationResponse, error) {
+	mock := NewMockRunner(func(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 		events := make([]string, 0, len(req.LedgerEntries))
 		for k := range req.LedgerEntries {
 			events = append(events, "read:"+k)
@@ -171,7 +172,7 @@ func TestConcurrentMockRunnerWithSharedLedger(t *testing.T) {
 				ResultMetaXdr: "meta",
 				LedgerEntries: ledger,
 			}
-			resp, err := mock.Run(req)
+			resp, err := mock.Run(context.Background(), req)
 			if err != nil {
 				errs <- err
 				return
@@ -214,7 +215,7 @@ func TestConcurrentBuilderReadOnlyAccess(t *testing.T) {
 	for i := 0; i < workers; i++ {
 		go func() {
 			defer wg.Done()
-			resp, err := mock.Run(req)
+			resp, err := mock.Run(context.Background(), req)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return

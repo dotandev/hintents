@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 #!/usr/bin/env node
 
 const fs = require('fs');
@@ -34,18 +37,18 @@ for (const file of schemaFiles) {
     const missingFields = requiredFields.filter(field => !schema[field]);
     
     if (missingFields.length > 0) {
-      console.error(`  ❌ Missing required fields: ${missingFields.join(', ')}`);
+      console.error(`  [FAIL] Missing required fields: ${missingFields.join(', ')}`);
       hasErrors = true;
     } else {
-      console.log(`  ✓ Has all required fields ($schema, $id, version)`);
+      console.log(`  [OK] Has all required fields ($schema, $id, version)`);
     }
     
     // Check version format
     if (schema.version && !/^\d+\.\d+\.\d+$/.test(schema.version)) {
-      console.error(`  ❌ Invalid version format: ${schema.version} (expected MAJOR.MINOR.PATCH)`);
+      console.error(`  [FAIL] Invalid version format: ${schema.version} (expected MAJOR.MINOR.PATCH)`);
       hasErrors = true;
     } else if (schema.version) {
-      console.log(`  ✓ Version format is valid: ${schema.version}`);
+      console.log(`  [OK] Version format is valid: ${schema.version}`);
     }
     
     // Extract all $ref values
@@ -72,7 +75,7 @@ for (const file of schemaFiles) {
       
       // Check if it's a relative path (not an absolute URL)
       if (ref.startsWith('http://') || ref.startsWith('https://')) {
-        console.error(`  ❌ Found absolute URL in $ref: ${ref} (should be relative path)`);
+        console.error(`  [FAIL] Found absolute URL in $ref: ${ref} (should be relative path)`);
         hasErrors = true;
         continue;
       }
@@ -83,25 +86,25 @@ for (const file of schemaFiles) {
       // Check if referenced file exists
       const refPath = path.join(schemaDir, refFile);
       if (!fs.existsSync(refPath)) {
-        console.error(`  ❌ Referenced file does not exist: ${refFile}`);
+        console.error(`  [FAIL] Referenced file does not exist: ${refFile}`);
         hasErrors = true;
       } else {
-        console.log(`  ✓ Reference exists: ${refFile}`);
+        console.log(`  [OK] Reference exists: ${refFile}`);
       }
     }
     
-    console.log(`  ✓ ${file} is valid\n`);
+    console.log(`  [OK] ${file} is valid\n`);
     
   } catch (error) {
-    console.error(`  ❌ Error parsing ${file}: ${error.message}\n`);
+    console.error(`  [FAIL] Error parsing ${file}: ${error.message}\n`);
     hasErrors = true;
   }
 }
 
 if (hasErrors) {
-  console.error('❌ Validation failed with errors');
+  console.error('[FAIL] Validation failed with errors');
   process.exit(1);
 } else {
-  console.log('✅ All schema files are valid!');
+  console.log('[OK] All schema files are valid!');
   process.exit(0);
 }

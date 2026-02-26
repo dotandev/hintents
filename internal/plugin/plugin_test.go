@@ -8,6 +8,8 @@ import (
 	"testing"
 )
 
+var _ DecoderPlugin = (*mockDecoder)(nil)
+
 type mockDecoder struct {
 	name       string
 	version    string

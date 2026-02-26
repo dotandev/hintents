@@ -4,6 +4,7 @@
 package simulator
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,13 +37,14 @@ func TestNewRunnerInterface(t *testing.T) {
 func TestExampleUsage(t *testing.T) {
 	// Create a mock implementation for testing
 	mockRunner := &mockRunnerForTest{}
+	ctx := context.Background()
 
 	req := &SimulationRequest{
 		EnvelopeXdr:   "test-envelope",
 		ResultMetaXdr: "test-meta",
 	}
 
-	resp, err := ExampleUsage(mockRunner, req)
+	resp, err := ExampleUsage(ctx, mockRunner, req)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
@@ -52,9 +54,13 @@ func TestExampleUsage(t *testing.T) {
 // Simple mock for testing the interface
 type mockRunnerForTest struct{}
 
-func (m *mockRunnerForTest) Run(req *SimulationRequest) (*SimulationResponse, error) {
+func (m *mockRunnerForTest) Run(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 	return &SimulationResponse{
 		Status: "success",
 		Events: []string{"mock-event"},
 	}, nil
+}
+
+func (m *mockRunnerForTest) Close() error {
+	return nil
 }

@@ -178,7 +178,7 @@ func (h *RegressionHarness) testTransaction(
 	}
 
 	// Run simulation
-	simResp, err := h.Runner.Run(simReq)
+	simResp, err := h.Runner.Run(ctx, simReq)
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("simulation failed: %v", err)
 		return result

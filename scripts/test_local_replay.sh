@@ -10,7 +10,11 @@
 # Test script for local WASM replay functionality
 # This script tests the erst debug --wasm feature
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
 
 echo "========================================="
 echo "Testing Local WASM Replay Feature"

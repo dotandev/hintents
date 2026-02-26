@@ -14,6 +14,11 @@ type ContractAuthHandler interface {
 	GetAuthDetails() map[string]interface{}
 }
 
+var (
+	_ ContractAuthHandler = (*MultiSigContractAuth)(nil)
+	_ ContractAuthHandler = (*RecoveryAuth)(nil)
+)
+
 type CustomContractAuthValidator struct {
 	contracts map[string]ContractAuthHandler
 }
