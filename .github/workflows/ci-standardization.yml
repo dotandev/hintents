@@ -1,0 +1,44 @@
+name: CI Standardization Self-Check
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  ci-standardization:
+    name: Validate CI scripts from non-root cwd
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Run CI validation script from non-root directory
+        run: |
+          cd /tmp
+          "$GITHUB_WORKSPACE/scripts/validate-ci.sh"
+
+      - name: Run local CI smoke tests from non-root directory
+        run: |
+          cd /tmp
+          "$GITHUB_WORKSPACE/scripts/test-ci-locally.sh"
+
+      - name: Run strict linting config tests from non-root directory
+        run: |
+          cd /tmp
+          "$GITHUB_WORKSPACE/scripts/test-strict-linting.sh"
+

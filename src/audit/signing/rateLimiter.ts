@@ -1,3 +1,6 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

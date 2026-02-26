@@ -10,21 +10,21 @@ import (
 
 // TreeUINode represents a renderable node in the tree UI with mouse tracking
 type TreeUINode struct {
-	Node           *TraceNode
-	DisplayText    string
-	IndentLevel    int
-	ScreenRow      int // Row number on screen for mouse tracking
-	ExpandBoxCol   int // Column where the expand/collapse box is
-	IsVisible      bool
+	Node         *TraceNode
+	DisplayText  string
+	IndentLevel  int
+	ScreenRow    int // Row number on screen for mouse tracking
+	ExpandBoxCol int // Column where the expand/collapse box is
+	IsVisible    bool
 }
 
 // TreeRenderer handles rendering of the trace tree with mouse support
 type TreeRenderer struct {
-	nodes          []*TreeUINode
-	selectedRow    int
-	screenWidth    int
-	screenHeight   int
-	scrollOffset   int
+	nodes        []*TreeUINode
+	selectedRow  int
+	screenWidth  int
+	screenHeight int
+	scrollOffset int
 }
 
 // NewTreeRenderer creates a new tree renderer
@@ -185,7 +185,6 @@ func (tr *TreeRenderer) Render() string {
 
 	// Render scrollbar indicator if needed
 	if len(tr.nodes) > visibleRows {
-		_ = int(float64(tr.scrollOffset) / float64(len(tr.nodes)-visibleRows) * float64(visibleRows))
 		scrollLine := fmt.Sprintf("─ Showing %d-%d of %d lines (↑↓ navigate, click [+/-] to expand) ─",
 			startRow+1, endRow, len(tr.nodes))
 		output.WriteString(scrollLine)

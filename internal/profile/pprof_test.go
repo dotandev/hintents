@@ -31,18 +31,18 @@ func TestTraceToPprof_EmptyTrace(t *testing.T) {
 func TestTraceToPprof_WithGas(t *testing.T) {
 	execTrace := trace.NewExecutionTrace("tx1", 10)
 	execTrace.AddState(trace.ExecutionState{
-		Step:      0,
-		Operation: "contract_call",
+		Step:       0,
+		Operation:  "contract_call",
 		ContractID: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2",
-		Function:  "transfer",
-		HostState: map[string]interface{}{"gas_used": float64(15000)},
+		Function:   "transfer",
+		HostState:  map[string]interface{}{"gas_used": float64(15000)},
 	})
 	execTrace.AddState(trace.ExecutionState{
-		Step:      1,
-		Operation: "contract_call",
+		Step:       1,
+		Operation:  "contract_call",
 		ContractID: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2",
-		Function:  "mint",
-		HostState: map[string]interface{}{"gas_used": 8000},
+		Function:   "mint",
+		HostState:  map[string]interface{}{"gas_used": 8000},
 	})
 
 	p, err := TraceToPprof(execTrace)

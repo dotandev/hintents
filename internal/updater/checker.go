@@ -214,7 +214,6 @@ func (c *Checker) showBannerFromCache() {
 	}
 	c.displayNotification(cache.LatestVersion)
 }
-
 // updateCache updates the cache file with the latest check time and version
 func (c *Checker) updateCache(latestVersion string) error {
 	// Ensure cache directory exists

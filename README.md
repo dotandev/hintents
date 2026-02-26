@@ -18,7 +18,7 @@ Currently, when a Soroban transaction fails on mainnet, developers receive a gen
 3.  **Trace decoding**: Map execution steps and failures back to readable instructions or Rust source lines.
 4.  **Source Mapping**: Map WASM instruction failures to specific Rust source code lines using debug symbols.
 5.  **GitHub Source Links**: Automatically generate clickable GitHub links to source code locations in traces (when in a Git repository).
-5.  **Error Suggestions**: Heuristic-based engine that suggests potential fixes for common Soroban errors.
+6.  **Error Suggestions**: Heuristic-based engine that suggests potential fixes for common Soroban errors.
 
 ## Usage (MVP)
 

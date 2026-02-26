@@ -49,7 +49,7 @@ For detailed instructions on setting up completions for your shell, consult your
 
 		switch shell {
 		case "bash":
-			return rootCmd.GenBashCompletion(os.Stdout)
+			return rootCmd.GenBashCompletionV2(os.Stdout, true)
 		case "zsh":
 			return rootCmd.GenZshCompletion(os.Stdout)
 		case "fish":

@@ -22,8 +22,8 @@ var xdrCmd = &cobra.Command{
 	Use:     "xdr",
 	GroupID: "utility",
 	Short:   "Format and decode XDR data",
-	Long:  `Decode and format XDR structures to JSON or table format for easy inspection.`,
-	RunE:  xdrExec,
+	Long:    `Decode and format XDR structures to JSON or table format for easy inspection.`,
+	RunE:    xdrExec,
 }
 
 func xdrExec(cmd *cobra.Command, args []string) error {
@@ -75,4 +75,7 @@ func init() {
 	xdrCmd.Flags().StringVar(&xdrType, "type", "ledger-entry", "XDR type: ledger-entry, diagnostic-event")
 
 	_ = xdrCmd.MarkFlagRequired("data")
+
+	_ = xdrCmd.RegisterFlagCompletionFunc("format", completeXDRFormatFlag)
+	_ = xdrCmd.RegisterFlagCompletionFunc("type", completeXDRTypeFlag)
 }

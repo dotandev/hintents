@@ -105,12 +105,12 @@ func FormatText(spec *ContractSpec) string {
 
 // jsonSpec is the JSON-friendly representation of a contract spec.
 type jsonSpec struct {
-	Functions  []jsonFunction  `json:"functions,omitempty"`
-	Structs    []jsonStruct    `json:"structs,omitempty"`
-	Enums      []jsonEnum      `json:"enums,omitempty"`
-	Unions     []jsonUnion     `json:"unions,omitempty"`
-	ErrorEnums []jsonEnum      `json:"error_enums,omitempty"`
-	Events     []jsonEvent     `json:"events,omitempty"`
+	Functions  []jsonFunction `json:"functions,omitempty"`
+	Structs    []jsonStruct   `json:"structs,omitempty"`
+	Enums      []jsonEnum     `json:"enums,omitempty"`
+	Unions     []jsonUnion    `json:"unions,omitempty"`
+	ErrorEnums []jsonEnum     `json:"error_enums,omitempty"`
+	Events     []jsonEvent    `json:"events,omitempty"`
 }
 
 type jsonFunction struct {

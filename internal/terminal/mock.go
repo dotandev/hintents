@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+var _ Renderer = (*MockRenderer)(nil)
+
 type MockRenderer struct {
 	Output []string
 	TTY    bool

@@ -58,3 +58,5 @@ commit_309*.next
 !package.json
 !package-lock.json
 !tsconfig*.json
+
+.gocache

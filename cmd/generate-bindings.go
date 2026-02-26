@@ -58,11 +58,11 @@ func runGenerateBindings(cmd *cobra.Command, args []string) error {
 
 	// Create generator config
 	config := bindings.GeneratorConfig{
-		WasmBytes:  wasmBytes,
-		OutputDir:  bindingsOutput,
+		WasmBytes:   wasmBytes,
+		OutputDir:   bindingsOutput,
 		PackageName: bindingsPackage,
-		ContractID: bindingsContractID,
-		Network:    bindingsNetwork,
+		ContractID:  bindingsContractID,
+		Network:     bindingsNetwork,
 	}
 
 	// Generate bindings
@@ -75,7 +75,7 @@ func runGenerateBindings(cmd *cobra.Command, args []string) error {
 	// Write files
 	for _, file := range files {
 		fullPath := filepath.Join(bindingsOutput, file.Path)
-		
+
 		// Create directory if needed
 		dir := filepath.Dir(fullPath)
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -93,7 +93,7 @@ func runGenerateBindings(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n[OK] TypeScript bindings generated successfully\n")
 	fmt.Printf("Package: %s\n", bindingsPackage)
 	fmt.Printf("Output: %s\n", bindingsOutput)
-	
+
 	return nil
 }
 

@@ -34,7 +34,7 @@ Validates that all Go and Rust files contain proper license headers.
 Validates markdown files for spelling errors using `misspell`.
 
 #### 4. Rust CI
-**Matrix Strategy**: Tests across multiple Rust versions (stable, 1.75, 1.76)
+**Matrix Strategy**: Tests across multiple Rust versions (stable, 1.85.0)
 
 **Steps**:
 - Code formatting check (`cargo fmt`)
@@ -64,9 +64,18 @@ Run CI checks locally before pushing:
 ./scripts/test-ci-locally.sh
 ```
 
-This script runs:
+This script runs from the repository root (or any directory, thanks to explicit path resolution):
 - Go: formatting, vet, tests, build
 - Rust: formatting, clippy, tests, build
+
+You can also rely on the CI standardization workflow to validate that CI helper scripts are portable and do not depend on the current working directory:
+
+```bash
+# In GitHub Actions: .github/workflows/ci-standardization.yml
+# Locally (optional, from any directory):
+path/to/repo/scripts/validate-ci.sh
+path/to/repo/scripts/test-ci-locally.sh
+```
 
 ### Testing CI Failure Detection
 
@@ -116,6 +125,7 @@ Recommended branch protection rules for `main`:
   - `Rust CI (stable)`
   - `License Headers Check`
   - `Docs Spellcheck`
+  - `CI Standardization Self-Check`
 
 ### Troubleshooting
 
@@ -147,15 +157,15 @@ Recommended branch protection rules for `main`:
 Edit `.github/workflows/ci.yml`:
 ```yaml
 matrix:
-  go-version: ["1.22", "1.23", "1.24"]  # Update versions
+  go-version: ["1.21", "1.22", "1.23"]  # Update versions as needed
 ```
 
 **Updating Rust versions**:
 ```yaml
 matrix:
-  rust-version: [stable, "1.76", "1.77"]  # Update versions
+  rust-version: [stable, "1.85.0"]  # Update versions as needed
 ```
 
 **Adding new linters**:
 - Go: Edit `.golangci.yml`
-- Rust: Modify clippy args in workflow
+- Rust: Modify clippy args in workflow or `.github/workflows/strict-lint.yml`

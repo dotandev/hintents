@@ -8,6 +8,20 @@ import (
 	"fmt"
 )
 
+// formatBytes converts bytes to a human-readable string (e.g., "1.5 MB")
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
 // New is a proxy to the standard errors.New
 func New(text string) error {
 	return errors.New(text)
@@ -47,6 +61,7 @@ var (
 	ErrLedgerArchived       = errors.New("ledger has been archived")
 	ErrRateLimitExceeded    = errors.New("rate limit exceeded")
 	ErrRPCResponseTooLarge  = errors.New("RPC response too large")
+	ErrRPCRequestTooLarge   = errors.New("RPC request payload too large")
 	ErrConfigFailed         = errors.New("configuration error")
 	ErrNetworkNotFound      = errors.New("network not found")
 	ErrMissingLedgerKey     = errors.New("missing ledger key in footprint")
@@ -251,6 +266,20 @@ func WrapRPCResponseTooLarge(url string) error {
 	}
 }
 
+// WrapRPCRequestTooLarge returns an error when the JSON payload exceeds
+// the maximum allowed size (10MB) to prevent network submission.
+func WrapRPCRequestTooLarge(sizeBytes int64, maxSizeBytes int64) error {
+	return fmt.Errorf(
+		"%v: request payload size (%s) exceeds maximum allowed size (%s). "+
+			"This payload is too large to submit to the network. "+
+			"Consider reducing the amount of data being sent (e.g., fewer ledger entries, "+
+			"smaller transaction envelopes, or breaking the request into smaller chunks)",
+		ErrRPCRequestTooLarge,
+		formatBytes(sizeBytes),
+		formatBytes(maxSizeBytes),
+	)
+}
+
 func WrapMissingLedgerKey(key string) error {
 	return &MissingLedgerKeyError{Key: key}
 }
@@ -266,6 +295,7 @@ const (
 	CodeRPCAllFailed         ErstErrorCode = "RPC_ALL_ENDPOINTS_FAILED"
 	CodeRPCError             ErstErrorCode = "RPC_SERVER_ERROR"
 	CodeRPCResponseTooLarge  ErstErrorCode = "RPC_RESPONSE_TOO_LARGE"
+	CodeRPCRequestTooLarge   ErstErrorCode = "RPC_REQUEST_TOO_LARGE"
 	CodeRPCRateLimitExceeded ErstErrorCode = "RPC_RATE_LIMIT_EXCEEDED"
 	CodeRPCMarshalFailed     ErstErrorCode = "RPC_MARSHAL_FAILED"
 	CodeRPCUnmarshalFailed   ErstErrorCode = "RPC_UNMARSHAL_FAILED"
@@ -274,11 +304,12 @@ const (
 	CodeLedgerArchived       ErstErrorCode = "RPC_LEDGER_ARCHIVED"
 
 	// Simulator origin
-	CodeSimNotFound     ErstErrorCode = "SIM_BINARY_NOT_FOUND"
-	CodeSimCrash        ErstErrorCode = "SIM_PROCESS_CRASHED"
-	CodeSimExecFailed   ErstErrorCode = "SIM_EXECUTION_FAILED"
-	CodeSimLogicError   ErstErrorCode = "SIM_LOGIC_ERROR"
-	CodeSimProtoUnsup   ErstErrorCode = "SIM_PROTOCOL_UNSUPPORTED"
+	CodeSimNotFound            ErstErrorCode = "SIM_BINARY_NOT_FOUND"
+	CodeSimCrash               ErstErrorCode = "SIM_PROCESS_CRASHED"
+	CodeSimExecFailed          ErstErrorCode = "SIM_EXECUTION_FAILED"
+	CodeSimMemoryLimitExceeded ErstErrorCode = "ERR_MEMORY_LIMIT_EXCEEDED"
+	CodeSimLogicError          ErstErrorCode = "SIM_LOGIC_ERROR"
+	CodeSimProtoUnsup          ErstErrorCode = "SIM_PROTOCOL_UNSUPPORTED"
 
 	// Shared / general
 	CodeValidationFailed ErstErrorCode = "VALIDATION_FAILED"

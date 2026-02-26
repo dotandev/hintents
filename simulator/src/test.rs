@@ -399,9 +399,28 @@ mod contract_execution_tests {
         // Create empty operations vector
         let operations: VecM<Operation, 100> = VecM::default();
         let host = soroban_env_host::Host::default();
+        let mut coverage = CoverageTracker::default();
 
         // Should succeed with empty operations
-        let result = execute_operations(&host, &operations);
+        let request = crate::types::SimulationRequest {
+            envelope_xdr: String::new(),
+            result_meta_xdr: String::new(),
+            ledger_entries: None,
+            contract_wasm: None,
+            wasm_path: None,
+            enable_optimization_advisor: false,
+            profile: None,
+            timestamp: String::new(),
+            mock_base_fee: None,
+            mock_gas_price: None,
+            mock_signature_verification: None,
+            enable_coverage: false,
+            coverage_lcov_path: None,
+            resource_calibration: None,
+            memory_limit: None,
+            restore_preamble: None,
+        };
+        let result = execute_operations(&host, &operations, &request, None, &mut coverage);
         assert!(result.is_ok());
 
         let logs = result.unwrap();

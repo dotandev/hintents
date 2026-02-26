@@ -148,11 +148,11 @@ func (g *Generator) generateTypes() string {
 
 func (g *Generator) generateStructType(b *strings.Builder, s xdr.ScSpecUdtStructV0) {
 	structName := string(s.Name)
-	
+
 	if s.Doc != "" {
 		b.WriteString(fmt.Sprintf("/** %s */\n", s.Doc))
 	}
-	
+
 	b.WriteString(fmt.Sprintf("export interface %s {\n", structName))
 	for _, field := range s.Fields {
 		tsType := g.mapTypeDefToTS(field.Type)
@@ -163,11 +163,11 @@ func (g *Generator) generateStructType(b *strings.Builder, s xdr.ScSpecUdtStruct
 
 func (g *Generator) generateEnumType(b *strings.Builder, e xdr.ScSpecUdtEnumV0) {
 	enumName := string(e.Name)
-	
+
 	if e.Doc != "" {
 		b.WriteString(fmt.Sprintf("/** %s */\n", e.Doc))
 	}
-	
+
 	b.WriteString(fmt.Sprintf("export enum %s {\n", enumName))
 	for _, c := range e.Cases {
 		b.WriteString(fmt.Sprintf("  %s = %d,\n", c.Name, c.Value))
@@ -177,14 +177,14 @@ func (g *Generator) generateEnumType(b *strings.Builder, e xdr.ScSpecUdtEnumV0) 
 
 func (g *Generator) generateUnionType(b *strings.Builder, u xdr.ScSpecUdtUnionV0) {
 	unionName := string(u.Name)
-	
+
 	if u.Doc != "" {
 		b.WriteString(fmt.Sprintf("/** %s */\n", u.Doc))
 	}
-	
+
 	// Generate discriminated union
 	b.WriteString(fmt.Sprintf("export type %s = \n", unionName))
-	
+
 	for i, c := range u.Cases {
 		switch c.Kind {
 		case xdr.ScSpecUdtUnionCaseV0KindScSpecUdtUnionCaseVoidV0:
@@ -194,10 +194,10 @@ func (g *Generator) generateUnionType(b *strings.Builder, u xdr.ScSpecUdtUnionV0
 			for j, t := range c.TupleCase.Type {
 				types[j] = g.mapTypeDefToTS(t)
 			}
-			b.WriteString(fmt.Sprintf("  | { tag: '%s'; values: [%s] }", 
+			b.WriteString(fmt.Sprintf("  | { tag: '%s'; values: [%s] }",
 				c.TupleCase.Name, strings.Join(types, ", ")))
 		}
-		
+
 		if i < len(u.Cases)-1 {
 			b.WriteString("\n")
 		}
@@ -207,17 +207,17 @@ func (g *Generator) generateUnionType(b *strings.Builder, u xdr.ScSpecUdtUnionV0
 
 func (g *Generator) generateErrorEnumType(b *strings.Builder, e xdr.ScSpecUdtErrorEnumV0) {
 	enumName := string(e.Name)
-	
+
 	if e.Doc != "" {
 		b.WriteString(fmt.Sprintf("/** %s */\n", e.Doc))
 	}
-	
+
 	b.WriteString(fmt.Sprintf("export enum %s {\n", enumName))
 	for _, c := range e.Cases {
 		b.WriteString(fmt.Sprintf("  %s = %d,\n", c.Name, c.Value))
 	}
 	b.WriteString("}\n\n")
-	
+
 	// Generate error class
 	b.WriteString(fmt.Sprintf("export class %sError extends Error {\n", enumName))
 	b.WriteString(fmt.Sprintf("  constructor(public code: %s, message?: string) {\n", enumName))
@@ -229,11 +229,11 @@ func (g *Generator) generateErrorEnumType(b *strings.Builder, e xdr.ScSpecUdtErr
 
 func (g *Generator) generateEventType(b *strings.Builder, ev xdr.ScSpecEventV0) {
 	eventName := string(ev.Name)
-	
+
 	if ev.Doc != "" {
 		b.WriteString(fmt.Sprintf("/** %s */\n", ev.Doc))
 	}
-	
+
 	b.WriteString(fmt.Sprintf("export interface %sEvent {\n", eventName))
 	for _, param := range ev.Params {
 		tsType := g.mapTypeDefToTS(param.Type)
@@ -419,62 +419,62 @@ func (g *Generator) generateClient() string {
 
 func (g *Generator) generateClientMethod(b *strings.Builder, fn xdr.ScSpecFunctionV0) {
 	methodName := string(fn.Name)
-	
+
 	// Generate JSDoc comment
 	if fn.Doc != "" {
 		b.WriteString(fmt.Sprintf("  /** %s */\n", fn.Doc))
 	}
-	
+
 	// Generate method signature
 	params := make([]string, 0, len(fn.Inputs)+2)
 	params = append(params, "source: StellarSdk.Keypair")
-	
+
 	for _, inp := range fn.Inputs {
 		tsType := g.mapTypeDefToTS(inp.Type)
 		params = append(params, fmt.Sprintf("%s: %s", inp.Name, tsType))
 	}
-	
+
 	params = append(params, "options?: CallOptions")
-	
+
 	returnType := "void"
 	if len(fn.Outputs) > 0 {
 		returnType = g.mapTypeDefToTS(fn.Outputs[0])
 	}
-	
-	b.WriteString(fmt.Sprintf("  async %s(%s): Promise<CallResult<%s>> {\n", 
+
+	b.WriteString(fmt.Sprintf("  async %s(%s): Promise<CallResult<%s>> {\n",
 		methodName, strings.Join(params, ", "), returnType))
-	
+
 	// Method body
 	b.WriteString("    const opts = options || {};\n\n")
-	
+
 	// Build transaction
 	b.WriteString("    // Build contract call transaction\n")
 	b.WriteString("    const contract = new StellarSdk.Contract(this.config.contractId);\n")
 	b.WriteString(fmt.Sprintf("    const operation = contract.call('%s'", methodName))
-	
+
 	if len(fn.Inputs) > 0 {
 		for _, inp := range fn.Inputs {
 			b.WriteString(fmt.Sprintf(", %s", inp.Name))
 		}
 	}
-	
+
 	b.WriteString(");\n\n")
-	
+
 	b.WriteString("    const account = await this.server.getAccount(source.publicKey());\n")
 	b.WriteString("    const txBuilder = new StellarSdk.TransactionBuilder(account, {\n")
 	b.WriteString("      fee: opts.fee || StellarSdk.BASE_FEE,\n")
 	b.WriteString("      networkPassphrase: this.getNetworkPassphrase(),\n")
 	b.WriteString("    });\n\n")
-	
+
 	b.WriteString("    if (opts.memo) {\n")
 	b.WriteString("      txBuilder.addMemo(opts.memo);\n")
 	b.WriteString("    }\n\n")
-	
+
 	b.WriteString("    const tx = txBuilder\n")
 	b.WriteString("      .addOperation(operation)\n")
 	b.WriteString("      .setTimeout(opts.timeoutInSeconds || 30)\n")
 	b.WriteString("      .build();\n\n")
-	
+
 	// Simulation with erst
 	b.WriteString("    // Simulate with erst if enabled\n")
 	b.WriteString("    if (opts.simulate && this.simulator) {\n")
@@ -484,12 +484,12 @@ func (g *Generator) generateClientMethod(b *strings.Builder, fn xdr.ScSpecFuncti
 	b.WriteString("        simulation: simResult,\n")
 	b.WriteString("      };\n")
 	b.WriteString("    }\n\n")
-	
+
 	// Execute transaction
 	b.WriteString("    // Sign and submit transaction\n")
 	b.WriteString("    tx.sign(source);\n")
 	b.WriteString("    const response = await this.server.sendTransaction(tx);\n\n")
-	
+
 	b.WriteString("    // Wait for confirmation\n")
 	b.WriteString("    if (response.status === 'PENDING') {\n")
 	b.WriteString("      const txResult = await this.server.getTransaction(response.hash);\n")
@@ -499,14 +499,14 @@ func (g *Generator) generateClientMethod(b *strings.Builder, fn xdr.ScSpecFuncti
 	b.WriteString("        transactionHash: response.hash,\n")
 	b.WriteString("      };\n")
 	b.WriteString("    }\n\n")
-	
+
 	b.WriteString("    throw new Error(`Transaction failed: ${response.status}`);\n")
 	b.WriteString("  }\n\n")
 }
 
 func (g *Generator) generateHelperMethods(b *strings.Builder) {
 	b.WriteString("  // Helper Methods\n\n")
-	
+
 	b.WriteString("  private getNetworkPassphrase(): string {\n")
 	b.WriteString("    switch (this.config.network) {\n")
 	b.WriteString("      case 'testnet':\n")
@@ -519,7 +519,7 @@ func (g *Generator) generateHelperMethods(b *strings.Builder) {
 	b.WriteString("        throw new Error(`Unknown network: ${this.config.network}`);\n")
 	b.WriteString("    }\n")
 	b.WriteString("  }\n\n")
-	
+
 	b.WriteString("  private parseResult(txResult: any): any {\n")
 	b.WriteString("    // Parse transaction result from Soroban RPC response\n")
 	b.WriteString("    if (txResult.status === 'SUCCESS' && txResult.returnValue) {\n")
@@ -754,7 +754,7 @@ func (g *Generator) generateReadme() string {
 		if fn.Doc != "" {
 			b.WriteString(fmt.Sprintf("%s\n\n", fn.Doc))
 		}
-		
+
 		if len(fn.Inputs) > 0 {
 			b.WriteString("**Parameters:**\n\n")
 			for _, inp := range fn.Inputs {
@@ -762,7 +762,7 @@ func (g *Generator) generateReadme() string {
 			}
 			b.WriteString("\n")
 		}
-		
+
 		if len(fn.Outputs) > 0 {
 			b.WriteString(fmt.Sprintf("**Returns:** `%s`\n\n", g.mapTypeDefToTS(fn.Outputs[0])))
 		}
@@ -792,12 +792,12 @@ func toPascalCase(s string) string {
 	words := strings.FieldsFunc(s, func(r rune) bool {
 		return r == '-' || r == '_' || r == ' '
 	})
-	
+
 	for i, word := range words {
 		if len(word) > 0 {
 			words[i] = strings.ToUpper(word[:1]) + strings.ToLower(word[1:])
 		}
 	}
-	
+
 	return strings.Join(words, "")
 }

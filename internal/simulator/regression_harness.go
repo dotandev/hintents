@@ -169,28 +169,16 @@ func (h *RegressionHarness) testTransaction(
 		return result
 	}
 
-	// Extract restorePreamble from the RPC payload if present
-	var restorePreamble map[string]interface{}
-	if resp != nil {
-		// If restorePreamble is present in the response, extract it
-		if rp, ok := resp.Extras["restorePreamble"]; ok {
-			if rpMap, ok := rp.(map[string]interface{}); ok {
-				restorePreamble = rpMap
-			}
-		}
-	}
-
 	// Build simulation request
 	simReq := &SimulationRequest{
 		EnvelopeXdr:     resp.EnvelopeXdr,
 		ResultMetaXdr:   resp.ResultMetaXdr,
 		LedgerEntries:   ledgerEntries,
 		ProtocolVersion: protocolVersionOverride,
-		RestorePreamble: restorePreamble,
 	}
 
 	// Run simulation
-	simResp, err := h.Runner.Run(simReq)
+	simResp, err := h.Runner.Run(ctx, simReq)
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("simulation failed: %v", err)
 		return result

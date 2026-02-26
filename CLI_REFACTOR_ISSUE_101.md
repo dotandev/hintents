@@ -49,8 +49,8 @@ Standardize the command line architecture for better help text formatting and ne
 
 ## Implementation Plan
 
-1. ✅ Add command groups to root.go
-2. ✅ Update debug.go to use GroupID
+1. [OK] Add command groups to root.go
+2. [OK] Update debug.go to use GroupID
 3. Update remaining commands to assign GroupID
 4. Test help output formatting
 5. Update documentation

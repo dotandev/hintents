@@ -132,7 +132,7 @@ func explainFromNetwork(cmd *cobra.Command, txHash string) error {
 		return fmt.Errorf("failed to initialize simulator: %w", err)
 	}
 
-	simResp, err := runner.Run(&simulator.SimulationRequest{
+	simResp, err := runner.Run(cmd.Context(), &simulator.SimulationRequest{
 		EnvelopeXdr:   resp.EnvelopeXdr,
 		ResultMetaXdr: resp.ResultMetaXdr,
 		LedgerEntries: ledgerEntries,
@@ -159,5 +159,8 @@ func init() {
 	explainCmd.Flags().StringVarP(&explainNetworkFlag, "network", "n", "mainnet", "Stellar network (testnet, mainnet, futurenet)")
 	explainCmd.Flags().StringVar(&explainRPCURLFlag, "rpc-url", "", "Custom RPC URL")
 	explainCmd.Flags().StringVar(&explainRPCToken, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
+
+	_ = explainCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
+
 	rootCmd.AddCommand(explainCmd)
 }

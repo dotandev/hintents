@@ -5,7 +5,10 @@ package sourcemap
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -745,4 +748,89 @@ func TestNewResolver_Options(t *testing.T) {
 			t.Fatal("expected custom registry client to be used")
 		}
 	})
+}
+
+// =============================================================================
+// CheckHashMismatch Tests
+// =============================================================================
+
+func TestCheckHashMismatch_Match(t *testing.T) {
+	content := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	sum := sha256.Sum256(content)
+	onChainHash := hex.EncodeToString(sum[:])
+
+	path := filepath.Join(t.TempDir(), "contract.wasm")
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatalf("failed to write WASM file: %v", err)
+	}
+
+	if err := CheckHashMismatch(path, onChainHash); err != nil {
+		t.Errorf("expected no error for matching hash, got: %v", err)
+	}
+}
+
+func TestCheckHashMismatch_Mismatch(t *testing.T) {
+	content := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	onChainHash := "0000000000000000000000000000000000000000000000000000000000000000"
+
+	path := filepath.Join(t.TempDir(), "contract.wasm")
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatalf("failed to write WASM file: %v", err)
+	}
+
+	err := CheckHashMismatch(path, onChainHash)
+	if err == nil {
+		t.Fatal("expected error for hash mismatch, got nil")
+	}
+
+	var mme *HashMismatchError
+	if !errors.As(err, &mme) {
+		t.Fatalf("expected HashMismatchError, got %T: %v", err, err)
+	}
+	if mme.OnChain != onChainHash {
+		t.Errorf("OnChain = %q, want %q", mme.OnChain, onChainHash)
+	}
+	if mme.Path != path {
+		t.Errorf("Path = %q, want %q", mme.Path, path)
+	}
+	if mme.Local == "" {
+		t.Error("Local hash should not be empty")
+	}
+}
+
+func TestCheckHashMismatch_FileNotFound(t *testing.T) {
+	err := CheckHashMismatch("/nonexistent/path/contract.wasm", "abc123")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	var mme *HashMismatchError
+	if errors.As(err, &mme) {
+		t.Fatal("expected a plain error, not HashMismatchError, for missing file")
+	}
+}
+
+func TestHashMismatchError_Message(t *testing.T) {
+	e := &HashMismatchError{
+		Path:    "/path/to/contract.wasm",
+		Local:   "aabbcc",
+		OnChain: "112233",
+	}
+	msg := e.Error()
+	for _, want := range []string{"aabbcc", "112233", "/path/to/contract.wasm"} {
+		if !contains(msg, want) {
+			t.Errorf("error message %q missing %q", msg, want)
+		}
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
+		func() bool {
+			for i := 0; i <= len(s)-len(sub); i++ {
+				if s[i:i+len(sub)] == sub {
+					return true
+				}
+			}
+			return false
+		}())
 }

@@ -275,6 +275,7 @@ fn parse_frame_body(body: &str) -> (Option<String>, Option<u32>, Option<u64>) {
 
 /// Public helper: decode a raw error string into a human-readable description
 /// that includes the trap kind. Used by `main.rs` for backward compatibility.
+#[allow(dead_code)]
 pub fn decode_error(msg: &str) -> String {
     let trace = WasmStackTrace::from_host_error(msg);
     let label = trace.trap_kind_label();
@@ -286,6 +287,7 @@ pub fn decode_error(msg: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn capitalise_first(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
@@ -352,7 +354,8 @@ mod tests {
 
     #[test]
     fn test_extract_named_frames() {
-        let input = "trace:\n  0: soroban_token::transfer @ 0x100\n  1: soroban_sdk::invoke @ 0x200";
+        let input =
+            "trace:\n  0: soroban_token::transfer @ 0x100\n  1: soroban_sdk::invoke @ 0x200";
         let frames = extract_frames(input);
 
         assert_eq!(frames.len(), 2);
