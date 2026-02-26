@@ -22,8 +22,9 @@ var (
 )
 
 var explainCmd = &cobra.Command{
-	Use:   "explain [transaction-hash]",
-	Short: "Summarize why a transaction failed in plain English",
+	Use:     "explain [transaction-hash]",
+	GroupID: "core",
+	Short:   "Summarize why a transaction failed in plain English",
 	Long: `Apply heuristic analysis to a transaction and output a single-paragraph
 explanation of the root cause of the failure.
 
@@ -131,7 +132,7 @@ func explainFromNetwork(cmd *cobra.Command, txHash string) error {
 		return fmt.Errorf("failed to initialize simulator: %w", err)
 	}
 
-	simResp, err := runner.Run(&simulator.SimulationRequest{
+	simResp, err := runner.Run(cmd.Context(), &simulator.SimulationRequest{
 		EnvelopeXdr:   resp.EnvelopeXdr,
 		ResultMetaXdr: resp.ResultMetaXdr,
 		LedgerEntries: ledgerEntries,
@@ -158,5 +159,8 @@ func init() {
 	explainCmd.Flags().StringVarP(&explainNetworkFlag, "network", "n", "mainnet", "Stellar network (testnet, mainnet, futurenet)")
 	explainCmd.Flags().StringVar(&explainRPCURLFlag, "rpc-url", "", "Custom RPC URL")
 	explainCmd.Flags().StringVar(&explainRPCToken, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
+
+	_ = explainCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
+
 	rootCmd.AddCommand(explainCmd)
 }

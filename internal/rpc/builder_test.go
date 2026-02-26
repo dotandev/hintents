@@ -127,6 +127,16 @@ func TestWithHTTPClient(t *testing.T) {
 	}
 }
 
+func TestMethodTelemetry_DefaultsToNoop(t *testing.T) {
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client.methodTelemetry == nil {
+		t.Fatal("expected default no-op method telemetry")
+	}
+}
+
 func TestMultipleOptions(t *testing.T) {
 	token := "test-token"
 	client, err := NewClient(

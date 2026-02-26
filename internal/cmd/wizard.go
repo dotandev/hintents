@@ -13,9 +13,10 @@ import (
 )
 
 var wizardCmd = &cobra.Command{
-	Use:   "wizard",
-	Short: "Interactive transaction selection wizard",
-	Long:  "Find and select recent failed transactions for debugging.",
+	Use:     "wizard",
+	GroupID: "development",
+	Short:   "Interactive transaction selection wizard",
+	Long:    "Find and select recent failed transactions for debugging.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		account, _ := cmd.Flags().GetString("account")
 		network, _ := cmd.Flags().GetString("network")
@@ -44,5 +45,8 @@ var wizardCmd = &cobra.Command{
 func init() {
 	wizardCmd.Flags().StringP("account", "a", "", "Stellar account address")
 	wizardCmd.Flags().StringP("network", "n", string(rpc.Mainnet), "Network (testnet, mainnet, futurenet)")
+
+	_ = wizardCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
+
 	rootCmd.AddCommand(wizardCmd)
 }

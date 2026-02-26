@@ -3,6 +3,8 @@
 
 import { URL } from 'url';
 
+import type { SDKMiddleware } from '../xdr/types';
+
 export interface RPCConfig {
     urls: string[];
     timeout: number;
@@ -12,6 +14,7 @@ export interface RPCConfig {
     circuitBreakerTimeout: number;
     maxRedirects: number;
     headers?: Record<string, string>;
+    middleware?: SDKMiddleware[];
 }
 
 export class RPCConfigParser {

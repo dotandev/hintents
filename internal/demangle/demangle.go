@@ -74,8 +74,9 @@ func DemangleSymbol(mangled string) string {
 // If an index isn’t found in the table, the original token is left intact.
 //
 // Example:
-//   input:  "call func[42] -> func[7]"
-//   output: "call my_contract::invoke -> soroban_sdk::log"
+//
+//	input:  "call func[42] -> func[7]"
+//	output: "call my_contract::invoke -> soroban_sdk::log"
 func DemangleTrace(trace string, table SymbolTable) string {
 	if len(table) == 0 {
 		return trace

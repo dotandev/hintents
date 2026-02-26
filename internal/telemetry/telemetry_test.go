@@ -20,29 +20,24 @@ func TestInit(t *testing.T) {
 	}
 	cleanup()
 
-	// Test with tracing enabled (will fail if no OTLP endpoint, but shouldn't crash)
+	// Graceful degradation: Init must never fail even when collector is unreachable
 	cleanup, err = Init(ctx, Config{
 		Enabled:     true,
 		ExporterURL: "http://localhost:4318",
 		ServiceName: "test-service",
 	})
 	if err != nil {
-		// This is expected if no OTLP endpoint is running
-		t.Logf("Expected error when no OTLP endpoint available: %v", err)
-		return
+		t.Fatalf("Init must not fail when collector is down (graceful degradation): %v", err)
 	}
+	cleanup()
 
-	// Test that tracer is available
+	// Tracer is always available (no-op if collector was unreachable)
 	tracer := GetTracer()
 	if tracer == nil {
 		t.Fatal("Tracer should not be nil after initialization")
 	}
-
-	// Test creating a span
 	_, span := tracer.Start(ctx, "test-span")
 	span.End()
-
-	cleanup()
 }
 
 func TestGetTracer(t *testing.T) {
@@ -56,4 +51,29 @@ func TestGetTracer(t *testing.T) {
 	ctx := context.Background()
 	_, span := tracer.Start(ctx, "test-span")
 	span.End()
+}
+
+// TestInit_UnreachableCollector proves graceful degradation: with tracing enabled
+// and an unreachable OTLP endpoint, Init succeeds and core paths (GetTracer, spans)
+// work without blocking or error. Run with: go test ./internal/telemetry/... -v -run TestInit_UnreachableCollector
+func TestInit_UnreachableCollector(t *testing.T) {
+	ctx := context.Background()
+	// Use a port that nothing listens on so the collector is "down"
+	cleanup, err := Init(ctx, Config{
+		Enabled:     true,
+		ExporterURL: "http://127.0.0.1:37999",
+		ServiceName: "test-service",
+	})
+	if err != nil {
+		t.Fatalf("graceful degradation: Init must not fail when collector is down, got: %v", err)
+	}
+	defer cleanup()
+
+	tracer := GetTracer()
+	if tracer == nil {
+		t.Fatal("GetTracer must never return nil")
+	}
+	_, span := tracer.Start(ctx, "telemetry-test-span")
+	span.End()
+	// If we get here without blocking or panic, telemetry fails silently as intended
 }

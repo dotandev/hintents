@@ -18,8 +18,9 @@ var (
 )
 
 var generateTestCmd = &cobra.Command{
-	Use:   "generate-test <transaction-hash>",
-	Short: "Generate regression tests from a transaction",
+	Use:     "generate-test <transaction-hash>",
+	GroupID: "testing",
+	Short:   "Generate regression tests from a transaction",
 	Long: `Generate regression tests from a recorded transaction trace.
 This creates test files that can be used to ensure bugs don't reoccur.
 

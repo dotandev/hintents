@@ -81,19 +81,12 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
+      - name: Cache Cargo dependencies and build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            simulator/target/
-          key: ${{ runner.os }}-cargo-strict-${{ hashFiles('simulator/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-strict-
-            ${{ runner.os }}-cargo-
+          workspaces: simulator -> target
+          prefix-key: ${{ runner.os }}-rust-strict-stable
+          cache-targets: true
 
       - name: Check formatting
         run: |
@@ -120,6 +113,7 @@ jobs:
             exit 1
           }
           echo " Clippy checks passed"
+
 
   # ============================================
   # Summary

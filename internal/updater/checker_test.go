@@ -291,3 +291,74 @@ func TestAPIIntegration(t *testing.T) {
 		_ = server
 	})
 }
+
+func TestShowBannerFromCache(t *testing.T) {
+	t.Run("no banner when cache missing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheDir := filepath.Join(tmpDir, "erst")
+		// No cache file; should not panic and should not print
+		ShowBannerFromCacheWithCacheDir("v1.0.0", cacheDir)
+	})
+
+	t.Run("shows banner when cached version is newer", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheDir := filepath.Join(tmpDir, "erst")
+		require.NoError(t, os.MkdirAll(cacheDir, 0755))
+		cacheFile := filepath.Join(cacheDir, "last_update_check")
+		cache := CacheData{
+			LastCheck:     time.Now(),
+			LatestVersion: "v1.1.0",
+		}
+		data, err := json.Marshal(cache)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(cacheFile, data, 0644))
+
+		oldStderr := os.Stderr
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		os.Stderr = w
+
+		ShowBannerFromCacheWithCacheDir("v1.0.0", cacheDir)
+
+		w.Close()
+		os.Stderr = oldStderr
+
+		var buf [1024]byte
+		n, _ := r.Read(buf[:])
+		output := string(buf[:n])
+
+		assert.Contains(t, output, "Upgrade available")
+		assert.Contains(t, output, "v1.1.0")
+		assert.Contains(t, output, "go install")
+	})
+
+	t.Run("no banner when cached version is same or older", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheDir := filepath.Join(tmpDir, "erst")
+		require.NoError(t, os.MkdirAll(cacheDir, 0755))
+		cacheFile := filepath.Join(cacheDir, "last_update_check")
+		cache := CacheData{
+			LastCheck:     time.Now(),
+			LatestVersion: "v1.0.0",
+		}
+		data, err := json.Marshal(cache)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(cacheFile, data, 0644))
+
+		oldStderr := os.Stderr
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		os.Stderr = w
+
+		ShowBannerFromCacheWithCacheDir("v1.0.0", cacheDir)
+
+		w.Close()
+		os.Stderr = oldStderr
+
+		var buf [1024]byte
+		n, _ := r.Read(buf[:])
+		output := string(buf[:n])
+
+		assert.Empty(t, output)
+	})
+}

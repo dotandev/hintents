@@ -9,12 +9,26 @@ export class TraceTreeDataProvider implements vscode.TreeDataProvider<vscode.Tre
     readonly onDidChangeTreeData: vscode.Event<vscode.TreeItem | undefined | null> = this._onDidChangeTreeData.event;
 
     private currentTrace: Trace | undefined;
+    private searchQuery = '';
 
     constructor() { }
 
     refresh(trace: Trace): void {
         this.currentTrace = trace;
         this._onDidChangeTreeData.fire(undefined);
+    }
+
+    getCurrentTrace(): Trace | undefined {
+        return this.currentTrace;
+    }
+
+    setSearchQuery(searchQuery: string): void {
+        this.searchQuery = searchQuery;
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    getSearchQuery(): string {
+        return this.searchQuery;
     }
 
     getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
@@ -48,12 +62,12 @@ export class TraceTreeDataProvider implements vscode.TreeDataProvider<vscode.Tre
                 return Promise.resolve(children);
             }
             return Promise.resolve([]);
-        } else {
-            const states = this.currentTrace.states;
-            return Promise.resolve(
-                states.map((step, idx) => new TraceItem(step, idx > 0 ? states[idx - 1] : undefined))
-            );
         }
+
+        const states = this.currentTrace.states;
+        return Promise.resolve(
+            states.map((step, idx) => new TraceItem(step, this.searchQuery, idx > 0 ? states[idx - 1] : undefined))
+        );
     }
 }
 
@@ -62,6 +76,7 @@ export class TraceItem extends vscode.TreeItem {
 
     constructor(
         public readonly step: TraceStep,
+        searchQuery: string,
         previousStep?: TraceStep
     ) {
         const isStateUpdate = step.operation === 'StateUpdate' || step.operation === 'LedgerState';
@@ -73,7 +88,6 @@ export class TraceItem extends vscode.TreeItem {
 
         this.isCrossContractBoundary = isCrossContractTransition(previousStep, step);
 
-        // Build budget metrics display
         const budgetParts: string[] = [];
         if (step.cpu_delta !== undefined && step.cpu_delta > 0) {
             budgetParts.push(`CPU: ${this.formatNumber(step.cpu_delta)}`);
@@ -91,14 +105,18 @@ export class TraceItem extends vscode.TreeItem {
                 : budgetInfo;
         this.contextValue = this.isCrossContractBoundary ? 'traceStepBoundary' : 'traceStep';
 
+        const matched = isStepMatch(step, searchQuery);
+
         if (step.error) {
-            this.iconPath = new (vscode.ThemeIcon as any)('error', new (vscode.ThemeColor as any)('errorForeground'));
+            this.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
+        } else if (matched) {
+            this.iconPath = new vscode.ThemeIcon('search', new vscode.ThemeColor('charts.yellow'));
         } else if (this.isCrossContractBoundary) {
-            this.iconPath = new (vscode.ThemeIcon as any)('git-compare', new (vscode.ThemeColor as any)('editorWarning.foreground'));
+            this.iconPath = new vscode.ThemeIcon('git-compare', new vscode.ThemeColor('editorWarning.foreground'));
         } else if (isStateUpdate) {
-            this.iconPath = new (vscode.ThemeIcon as any)('database', new (vscode.ThemeColor as any)('symbolIcon.fieldForeground'));
+            this.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('symbolIcon.fieldForeground'));
         } else {
-            this.iconPath = new (vscode.ThemeIcon as any)('pass', new (vscode.ThemeColor as any)('debugIcon.startForeground'));
+            this.iconPath = new vscode.ThemeIcon('pass', new vscode.ThemeColor('debugIcon.startForeground'));
         }
 
         if (!isStateUpdate) {
@@ -113,7 +131,8 @@ export class TraceItem extends vscode.TreeItem {
     private formatNumber(num: number): string {
         if (num >= 1000000) {
             return `${(num / 1000000).toFixed(2)}M`;
-        } else if (num >= 1000) {
+        }
+        if (num >= 1000) {
             return `${(num / 1000).toFixed(2)}K`;
         }
         return num.toString();
@@ -122,7 +141,8 @@ export class TraceItem extends vscode.TreeItem {
     private formatBytes(bytes: number): string {
         if (bytes >= 1048576) {
             return `${(bytes / 1048576).toFixed(2)}MB`;
-        } else if (bytes >= 1024) {
+        }
+        if (bytes >= 1024) {
             return `${(bytes / 1024).toFixed(2)}KB`;
         }
         return `${bytes}B`;
@@ -142,7 +162,7 @@ export class StateDetailItem extends vscode.TreeItem {
         super(label, vscode.TreeItemCollapsibleState.None);
         this.description = xdr.length > 30 ? xdr.substring(0, 30) + '...' : xdr;
         this.tooltip = `XDR: ${xdr}`;
-        this.iconPath = new (vscode.ThemeIcon as any)('code');
+        this.iconPath = new vscode.ThemeIcon('code');
         this.contextValue = 'stateDetail';
         this.command = {
             command: 'erst.showXdr',
@@ -157,7 +177,7 @@ export class StateDiffItem extends vscode.TreeItem {
         super('Visual Diff', vscode.TreeItemCollapsibleState.None);
         this.description = 'Compare states';
         this.tooltip = 'Show visual diff between before and after states';
-        this.iconPath = new (vscode.ThemeIcon as any)('diff');
+        this.iconPath = new vscode.ThemeIcon('diff');
         this.contextValue = 'stateDiff';
         this.command = {
             command: 'erst.showStateDiff',
@@ -165,4 +185,14 @@ export class StateDiffItem extends vscode.TreeItem {
             arguments: [before, after]
         };
     }
+}
+
+function isStepMatch(step: TraceStep, searchQuery: string): boolean {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+        return false;
+    }
+
+    const haystack = JSON.stringify(step).toLowerCase();
+    return haystack.includes(query);
 }

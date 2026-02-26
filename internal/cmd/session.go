@@ -31,8 +31,9 @@ func GetCurrentSession() *session.SessionData {
 }
 
 var sessionCmd = &cobra.Command{
-	Use:   "session",
-	Short: "Manage debugging sessions",
+	Use:     "session",
+	GroupID: "management",
+	Short:   "Manage debugging sessions",
 	Long: `Save, resume, and manage debugging sessions to preserve state across CLI invocations.
 
 Sessions store complete transaction data, simulation results, and analysis context,
@@ -149,10 +150,10 @@ Use 'erst session list' to see available sessions.`,
 			fmt.Fprintf(os.Stderr, "Warning: session cleanup failed: %v\n", err)
 		}
 
-		// Load session
-		data, err := store.Load(ctx, sessionID)
+		// Resolve session by exact ID, partial ID prefix, tx hash, or fuzzy match
+		data, err := resolveSessionInput(ctx, store, sessionID)
 		if err != nil {
-			return errors.WrapSessionNotFound(sessionID)
+			return err
 		}
 
 		// Check schema version compatibility
@@ -271,12 +272,17 @@ Use 'erst session list' to see available sessions.`,
 		}
 		defer store.Close()
 
-		// Delete session
-		if err := store.Delete(ctx, sessionID); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("failed to delete session '%s': %v", sessionID, err))
+		// Resolve to a valid session ID before deleting
+		resolved, resolveErr := resolveSessionInput(ctx, store, sessionID)
+		if resolveErr != nil {
+			return resolveErr
 		}
 
-		fmt.Printf("Session deleted: %s\n", sessionID)
+		if err := store.Delete(ctx, resolved.ID); err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("failed to delete session '%s': %v", resolved.ID, err))
+		}
+
+		fmt.Printf("Session deleted: %s\n", resolved.ID)
 		return nil
 	},
 }

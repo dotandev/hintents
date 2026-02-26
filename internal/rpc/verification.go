@@ -40,7 +40,10 @@ func VerifyLedgerEntryHash(requestedKeyB64, returnedKeyB64 string) error {
 
 	// Unmarshal into LedgerKey to validate structure
 	var ledgerKey xdr.LedgerKey
-	if _, err := xdr.Unmarshal(keyBytes, &ledgerKey); err != nil {
+	if err := ledgerKey.UnmarshalBinary(keyBytes); err != nil {
+	if err := xdr.SafeUnmarshal(keyBytes, &ledgerKey); err != nil {
+	if _, err := xdr.Unmarshal(bytes.NewReader(keyBytes), &ledgerKey); err != nil {
+	if err := xdr.SafeUnmarshal(keyBytes, &ledgerKey); err != nil {
 		return errors.WrapValidationError(fmt.Sprintf("failed to unmarshal ledger key: %v", err))
 	}
 

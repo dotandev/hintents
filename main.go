@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -59,13 +60,27 @@ func main() {
 	// Catch any unrecovered panic, report it, then re-panic.
 	defer reporter.HandlePanic(ctx, "erst")
 
-	if execErr := cmd.Execute(); execErr != nil {
-		// Report fatal command errors that were not recovered as panics.
-		if reporter.IsEnabled() {
+	execute := func() error {
+		execErr := cmd.Execute()
+		if execErr != nil && reporter.IsEnabled() && !cmd.IsInterrupted(execErr) {
+			// Report fatal command errors that were not recovered as panics.
 			stack := debug.Stack()
 			_ = reporter.Send(ctx, execErr, stack, "erst")
 		}
-		fmt.Fprintf(os.Stderr, "Error: %v\n", execErr)
-		os.Exit(1)
+		return execErr
 	}
+
+	os.Exit(run(execute, os.Stderr))
+}
+
+func run(execute func() error, stderr io.Writer) int {
+	if err := execute(); err != nil {
+		if cmd.IsInterrupted(err) {
+			fmt.Fprintln(stderr, "Interrupted. Shutting down...")
+			return cmd.InterruptExitCode
+		}
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+	return 0
 }

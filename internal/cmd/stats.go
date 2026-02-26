@@ -35,8 +35,9 @@ type contractStat struct {
 }
 
 var statsCmd = &cobra.Command{
-	Use:   "stats",
-	Short: "Summarize budget usage and call depth for the top contract calls",
+	Use:     "stats",
+	GroupID: "utility",
+	Short:   "Summarize budget usage and call depth for the top contract calls",
 	Long: `Returns a non-interactive table of the top 5 most expensive contract calls.
 
 Cost is estimated based on weighted operations:
@@ -73,9 +74,9 @@ func loadSimulationResponse(cmd *cobra.Command, id string) (*simulator.Simulatio
 		}
 		defer store.Close()
 
-		data, err := store.Load(cmd.Context(), id)
+		data, err := resolveSessionInput(cmd.Context(), store, id)
 		if err != nil {
-			return nil, fmt.Errorf("session '%s' not found: %w", id, err)
+			return nil, err
 		}
 		return data.ToSimulationResponse()
 	}

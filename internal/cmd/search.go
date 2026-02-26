@@ -19,8 +19,9 @@ var (
 )
 
 var searchCmd = &cobra.Command{
-	Use:   "search",
-	Short: "Search through saved debugging sessions",
+	Use:     "search",
+	GroupID: "management",
+	Short:   "Search through saved debugging sessions",
 	Long: `Search through the history of debugging sessions to find past transactions,
 errors, or events. Supports regex patterns for flexible matching.
 

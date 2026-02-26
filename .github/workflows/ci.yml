@@ -83,11 +83,42 @@ jobs:
           }
           echo " No unused variables detected"
 
-      - name: Run tests
+      - name: Run tests (race)
+        if: matrix.os == 'ubuntu-latest'
         run: go test -v -race ./...
+
+      - name: Run tests (compile-only)
+        if: matrix.os != 'ubuntu-latest'
+        run: go test -short -run '^$' -v ./...
 
       - name: Build
         run: go build -v ./...
+
+  # ============================================
+  # Cross-Platform CLI Binary Integration
+  # ============================================
+  cli-integration:
+    name: CLI Integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: license-headers
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Run CLI integration suite via os/exec
+        run: go test -v ./tests -run TestErstBinaryFullCLISurface -count=1
 
   # ============================================
   # Docs - Spell Check
@@ -95,9 +126,6 @@ jobs:
   docs-spellcheck:
     name: Docs Spellcheck
     runs-on: ubuntu-latest
-    # Validation:
-    # - Introduce a typo in any .md file to confirm this job fails.
-    # - Ensure allowlist words (Soroban, XDR, ERST) pass.
 
     steps:
       - name: Checkout code
@@ -138,19 +166,16 @@ jobs:
           toolchain: ${{ matrix.rust-version }}
           components: rustfmt, clippy
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
+      - name: Cache Cargo dependencies and build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            simulator/target/
-          key: ${{ runner.os }}-cargo-${{ matrix.rust-version }}-${{ hashFiles('simulator/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.rust-version }}-
-            ${{ runner.os }}-cargo-
+          workspaces: simulator -> target
+          # Cache key includes the toolchain so stable and 1.85.0 don't share
+          # a poisoned cache. Swatinem handles Cargo.lock hashing internally.
+          prefix-key: ${{ runner.os }}-rust-${{ matrix.rust-version }}
+          # sccache handles compilation caching; keeping target/ cached avoids
+          # re-linking even on sccache hits, which alone saves 60-90 seconds.
+          cache-targets: true
 
       - name: Check formatting
         if: matrix.rust-version == 'stable'

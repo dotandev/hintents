@@ -11,6 +11,35 @@ import (
 	internalErrors "github.com/dotandev/hintents/internal/errors"
 )
 
+func TestSimulationRequestBuilder_WithRestorePreamble(t *testing.T) {
+	builder := NewSimulationRequestBuilder()
+
+	preamble := map[string]interface{}{
+		"foo":   "bar",
+		"count": 42,
+	}
+
+	req, err := builder.
+		WithEnvelopeXDR("envelope").
+		WithResultMetaXDR("result").
+		WithRestorePreamble(preamble).
+		Build()
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if req.RestorePreamble == nil {
+		t.Fatalf("expected RestorePreamble to be set")
+	}
+	if req.RestorePreamble["foo"] != "bar" {
+		t.Errorf("expected RestorePreamble['foo'] to be 'bar', got: %v", req.RestorePreamble["foo"])
+	}
+	if req.RestorePreamble["count"] != 42 {
+		t.Errorf("expected RestorePreamble['count'] to be 42, got: %v", req.RestorePreamble["count"])
+	}
+}
+
 func TestSimulationRequestBuilder_Basic(t *testing.T) {
 	builder := NewSimulationRequestBuilder()
 
@@ -60,6 +89,35 @@ func TestSimulationRequestBuilder_WithLedgerEntry(t *testing.T) {
 
 	if req.LedgerEntries["key2"] != "value2" {
 		t.Errorf("expected ledger entry 'key2' to be 'value2', got: %s", req.LedgerEntries["key2"])
+	}
+}
+
+func TestSimulationRequestBuilder_WithRestorePreamble(t *testing.T) {
+	builder := NewSimulationRequestBuilder()
+
+	preamble := map[string]interface{}{
+		"foo":   "bar",
+		"count": 42,
+	}
+
+	req, err := builder.
+		WithEnvelopeXDR("envelope").
+		WithResultMetaXDR("result").
+		WithRestorePreamble(preamble).
+		Build()
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if req.RestorePreamble == nil {
+		t.Fatalf("expected RestorePreamble to be set")
+	}
+	if req.RestorePreamble["foo"] != "bar" {
+		t.Errorf("expected RestorePreamble['foo'] to be 'bar', got: %v", req.RestorePreamble["foo"])
+	}
+	if req.RestorePreamble["count"] != 42 {
+		t.Errorf("expected RestorePreamble['count'] to be 42, got: %v", req.RestorePreamble["count"])
 	}
 }
 

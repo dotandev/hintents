@@ -17,12 +17,14 @@ import (
 )
 
 var (
-	newWasmPath string
+	newWasmPath         string
+	upgradeOptimizeFlag bool
 )
 
 var upgradeCmd = &cobra.Command{
-	Use:   "simulate-upgrade <transaction-hash> --new-wasm <path>",
-	Short: "Simulate a transaction with upgraded contract code",
+	Use:     "simulate-upgrade <transaction-hash> --new-wasm <path>",
+	GroupID: "utility",
+	Short:   "Simulate a transaction with upgraded contract code",
 	Long: `Replay a transaction but replace the contract code with a new WASM file.
 This allows verifying if a planned upgrade will break existing functionality.
 
@@ -41,7 +43,15 @@ Example:
 		if err != nil {
 			return errors.WrapValidationError(fmt.Sprintf("failed to read WASM file: %v", err))
 		}
+		optimizedWasmBytes, report, err := optimizeWasmBytesIfRequested(newWasmBytes, upgradeOptimizeFlag)
+		if err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("failed to optimize WASM: %v", err))
+		}
+		newWasmBytes = optimizedWasmBytes
 		fmt.Printf("Loaded new WASM code: %d bytes\n", len(newWasmBytes))
+		if upgradeOptimizeFlag {
+			printOptimizationReport(report)
+		}
 
 		// 2. Setup Client
 		opts := []rpc.ClientOption{
@@ -55,6 +65,7 @@ Example:
 		if err != nil {
 			return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
 		}
+		registerCacheFlushHook()
 
 		// 3. Fetch Transaction
 		fmt.Printf("Fetching transaction: %s from %s\n", txHash, networkFlag)
@@ -92,6 +103,8 @@ Example:
 		if err != nil {
 			return errors.WrapSimulatorNotFound(err.Error())
 		}
+		registerRunnerCloseHook("upgrade-simulator-runner", runner)
+		defer func() { _ = runner.Close() }()
 
 		simReq := &simulator.SimulationRequest{
 			EnvelopeXdr:   resp.EnvelopeXdr,
@@ -100,7 +113,7 @@ Example:
 		}
 
 		fmt.Println("Running simulation with upgraded code...")
-		result, err := runner.Run(simReq)
+		result, err := runner.Run(cmd.Context(), simReq)
 		if err != nil {
 			return errors.WrapSimulationFailed(err, "")
 		}
@@ -113,11 +126,14 @@ Example:
 
 func init() {
 	upgradeCmd.Flags().StringVar(&newWasmPath, "new-wasm", "", "Path to the new WASM file")
+	upgradeCmd.Flags().BoolVar(&upgradeOptimizeFlag, "optimize", false, "Run dead-code elimination on the new WASM before simulation")
 	// Reuse network flags from debug.go if possible, but they are var blocks there.
 	// Since they are in the same package, we can reuse the variables 'networkFlag' and 'rpcURLFlag'
 	// BUT we need to register flags for THIS command too.
 	upgradeCmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use")
 	upgradeCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL")
+
+	_ = upgradeCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
 
 	rootCmd.AddCommand(upgradeCmd)
 }

@@ -22,8 +22,9 @@ var (
 )
 
 var fuzzCmd = &cobra.Command{
-	Use:   "fuzz",
-	Short: "Fuzz test XDR inputs against Soroban contracts",
+	Use:     "fuzz",
+	GroupID: "testing",
+	Short:   "Fuzz test XDR inputs against Soroban contracts",
 	Long: `Perform fuzzing of XDR inputs to discover edge cases and potential crashes
 in Soroban contract execution.
 

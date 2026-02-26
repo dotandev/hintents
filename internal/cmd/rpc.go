@@ -18,8 +18,9 @@ var (
 )
 
 var rpcCmd = &cobra.Command{
-	Use:   "rpc",
-	Short: "Manage and monitor RPC endpoints",
+	Use:     "rpc",
+	GroupID: "utility",
+	Short:   "Manage and monitor RPC endpoints",
 }
 
 var rpcHealthCmd = &cobra.Command{
@@ -28,15 +29,19 @@ var rpcHealthCmd = &cobra.Command{
 	Short:   "Check the health of configured RPC endpoints",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		urls := []string{}
+		cfg, cfgErr := config.Load()
+		timeout := 15 * time.Second
 		if rpcHealthURLFlag != "" {
 			urls = strings.Split(rpcHealthURLFlag, ",")
 		} else {
-			cfg, err := config.Load()
-			if err == nil {
+			if cfgErr == nil {
 				if len(cfg.RpcUrls) > 0 {
 					urls = cfg.RpcUrls
 				} else if cfg.RpcUrl != "" {
 					urls = []string{cfg.RpcUrl}
+				}
+				if cfg.RequestTimeout > 0 {
+					timeout = time.Duration(cfg.RequestTimeout) * time.Second
 				}
 			}
 		}
@@ -48,17 +53,15 @@ var rpcHealthCmd = &cobra.Command{
 		fmt.Println("[STATS] RPC Endpoint Status:")
 		fmt.Println()
 
-		client := &http.Client{
-			Timeout: 5 * time.Second,
-		}
+		client := &http.Client{Timeout: timeout}
 
 		for i, url := range urls {
 			url = strings.TrimSpace(url)
 			if url == "" {
 				continue
 			}
-			start := time.Now()
 
+			start := time.Now()
 			status := "[OK]"
 			success := true
 			errStr := ""
@@ -78,7 +81,6 @@ var rpcHealthCmd = &cobra.Command{
 			}
 
 			duration := time.Since(start)
-
 			if success {
 				fmt.Printf("  [%d]  %s\n", i+1, url)
 				fmt.Printf("      Status: %s\n", status)

@@ -5,6 +5,7 @@ package rpc
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -12,12 +13,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestGetLedgerHeader_Integration_Testnet tests fetching a real ledger from Stellar testnet
-// This test requires network access and is skipped in short mode
-func TestGetLedgerHeader_Integration_Testnet(t *testing.T) {
+func requireNetworkIntegration(t *testing.T) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	if os.Getenv("ERST_RUN_INTEGRATION_TESTS") != "1" {
+		t.Skip("skipping live-network integration test (set ERST_RUN_INTEGRATION_TESTS=1 to enable)")
+	}
+}
+
+// TestGetLedgerHeader_Integration_Testnet tests fetching a real ledger from Stellar testnet
+// This test requires network access and is skipped in short mode
+func TestGetLedgerHeader_Integration_Testnet(t *testing.T) {
+	requireNetworkIntegration(t)
 
 	client, err := NewClient(WithNetwork(Testnet))
 	require.NoError(t, err)
@@ -64,9 +73,7 @@ func TestGetLedgerHeader_Integration_Testnet(t *testing.T) {
 
 // TestGetLedgerHeader_Integration_FutureLedger tests handling of future ledgers
 func TestGetLedgerHeader_Integration_FutureLedger(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
+	requireNetworkIntegration(t)
 
 	client, err := NewClient(WithNetwork(Testnet))
 	require.NoError(t, err)
@@ -86,9 +93,7 @@ func TestGetLedgerHeader_Integration_FutureLedger(t *testing.T) {
 
 // TestGetLedgerHeader_Integration_MultipleNetworks tests that different networks work
 func TestGetLedgerHeader_Integration_MultipleNetworks(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
+	requireNetworkIntegration(t)
 
 	tests := []struct {
 		network  Network
@@ -129,9 +134,7 @@ func TestGetLedgerHeader_Integration_MultipleNetworks(t *testing.T) {
 
 // TestGetLedgerHeader_Integration_RecentLedger attempts to fetch a very recent ledger
 func TestGetLedgerHeader_Integration_RecentLedger(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
+	requireNetworkIntegration(t)
 
 	client, err := NewClient(WithNetwork(Testnet))
 	require.NoError(t, err)

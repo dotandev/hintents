@@ -19,8 +19,9 @@ var (
 )
 
 var traceCmd = &cobra.Command{
-	Use:   "trace <trace-file>",
-	Short: "Interactive trace navigation and debugging",
+	Use:     "trace <trace-file>",
+	GroupID: "core",
+	Short:   "Interactive trace navigation and debugging",
 	Long: `Launch an interactive trace viewer for bi-directional navigation through execution traces.
 
 The trace viewer allows you to:
@@ -75,5 +76,8 @@ Example:
 func init() {
 	traceCmd.Flags().StringVarP(&traceFile, "file", "f", "", "Trace file to load")
 	traceCmd.Flags().StringVar(&traceThemeFlag, "theme", "", "Color theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
+
+	_ = traceCmd.RegisterFlagCompletionFunc("theme", completeThemeFlag)
+
 	rootCmd.AddCommand(traceCmd)
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/dotandev/hintents/internal/errors"
@@ -31,13 +32,14 @@ var validNetworks = map[string]bool{
 
 // Config represents the general configuration for erst
 type Config struct {
-	RpcUrl        string   `json:"rpc_url,omitempty"`
-	RpcUrls       []string `json:"rpc_urls,omitempty"`
-	Network       Network  `json:"network,omitempty"`
-	SimulatorPath string   `json:"simulator_path,omitempty"`
-	LogLevel      string   `json:"log_level,omitempty"`
-	CachePath     string   `json:"cache_path,omitempty"`
-	RPCToken      string   `json:"rpc_token,omitempty"`
+	RpcUrl            string   `json:"rpc_url,omitempty"`
+	RpcUrls           []string `json:"rpc_urls,omitempty"`
+	Network           Network  `json:"network,omitempty"`
+	NetworkPassphrase string   `json:"network_passphrase,omitempty"`
+	SimulatorPath     string   `json:"simulator_path,omitempty"`
+	LogLevel          string   `json:"log_level,omitempty"`
+	CachePath         string   `json:"cache_path,omitempty"`
+	RPCToken          string   `json:"rpc_token,omitempty"`
 	// CrashReporting enables opt-in anonymous crash reporting.
 	// Set via crash_reporting = true in config or ERST_CRASH_REPORTING=true.
 	CrashReporting bool `json:"crash_reporting,omitempty"`
@@ -47,14 +49,21 @@ type Config struct {
 	// CrashSentryDSN is a Sentry Data Source Name for crash reporting.
 	// Set via crash_sentry_dsn in config or ERST_SENTRY_DSN.
 	CrashSentryDSN string `json:"crash_sentry_dsn,omitempty"`
+	// RequestTimeout is the HTTP request timeout in seconds for all RPC calls.
+	// Set via request_timeout in config or ERST_REQUEST_TIMEOUT.
+	// Defaults to 15 seconds.
+	RequestTimeout int `json:"request_timeout,omitempty"`
 }
 
+const defaultRequestTimeout = 15
+
 var defaultConfig = &Config{
-	RpcUrl:        "https://soroban-testnet.stellar.org",
-	Network:       NetworkTestnet,
-	SimulatorPath: "",
-	LogLevel:      "info",
-	CachePath:     filepath.Join(os.ExpandEnv("$HOME"), ".erst", "cache"),
+	RpcUrl:         "https://soroban-testnet.stellar.org",
+	Network:        NetworkTestnet,
+	SimulatorPath:  "",
+	LogLevel:       "info",
+	CachePath:      filepath.Join(os.ExpandEnv("$HOME"), ".erst", "cache"),
+	RequestTimeout: defaultRequestTimeout,
 }
 
 // GetGeneralConfigPath returns the path to the general configuration file
@@ -91,20 +100,29 @@ func LoadConfig() (*Config, error) {
 	return config, nil
 }
 
-// Load loads the configuration from environment variables and TOML files
+// Load loads the configuration from environment variables and TOML files.
+// The lifecycle follows three distinct phases: load, merge defaults, validate.
 func Load() (*Config, error) {
+	// Phase 1: Load from sources (env vars, then TOML file).
 	cfg := &Config{
-		RpcUrl:         getEnv("ERST_RPC_URL", defaultConfig.RpcUrl),
-		Network:        Network(getEnv("ERST_NETWORK", string(defaultConfig.Network))),
-		SimulatorPath:  getEnv("ERST_SIMULATOR_PATH", defaultConfig.SimulatorPath),
-		LogLevel:       getEnv("ERST_LOG_LEVEL", defaultConfig.LogLevel),
-		CachePath:      getEnv("ERST_CACHE_PATH", defaultConfig.CachePath),
+		RpcUrl:         getEnv("ERST_RPC_URL", ""),
+		Network:        Network(getEnv("ERST_NETWORK", "")),
+		SimulatorPath:  getEnv("ERST_SIMULATOR_PATH", ""),
+		LogLevel:       getEnv("ERST_LOG_LEVEL", ""),
+		CachePath:      getEnv("ERST_CACHE_PATH", ""),
 		RPCToken:       getEnv("ERST_RPC_TOKEN", ""),
 		CrashEndpoint:  getEnv("ERST_CRASH_ENDPOINT", ""),
 		CrashSentryDSN: getEnv("ERST_SENTRY_DSN", ""),
+		RequestTimeout: defaultRequestTimeout,
 	}
 
-	// ERST_CRASH_REPORTING is a boolean env var; parse it explicitly.
+	// ERST_REQUEST_TIMEOUT is an integer env var; parse it explicitly.
+	if v := os.Getenv("ERST_REQUEST_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.RequestTimeout = n
+		}
+	}
+
 	switch strings.ToLower(os.Getenv("ERST_CRASH_REPORTING")) {
 	case "1", "true", "yes":
 		cfg.CrashReporting = true
@@ -115,17 +133,16 @@ func Load() (*Config, error) {
 		for i := range cfg.RpcUrls {
 			cfg.RpcUrls[i] = strings.TrimSpace(cfg.RpcUrls[i])
 		}
-	} else if urlsEnv := os.Getenv("STELLAR_RPC_URLS"); urlsEnv != "" {
-		cfg.RpcUrls = strings.Split(urlsEnv, ",")
-		for i := range cfg.RpcUrls {
-			cfg.RpcUrls[i] = strings.TrimSpace(cfg.RpcUrls[i])
-		}
 	}
 
 	if err := cfg.loadFromFile(); err != nil {
 		return nil, err
 	}
 
+	// Phase 2: Merge defaults for any fields still unset.
+	cfg.MergeDefaults()
+
+	// Phase 3: Validate.
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -204,6 +221,8 @@ func (c *Config) parseTOML(content string) error {
 			}
 		case "network":
 			c.Network = Network(value)
+		case "network_passphrase":
+			c.NetworkPassphrase = value
 		case "simulator_path":
 			c.SimulatorPath = value
 		case "log_level":
@@ -218,6 +237,10 @@ func (c *Config) parseTOML(content string) error {
 			c.CrashEndpoint = value
 		case "crash_sentry_dsn":
 			c.CrashSentryDSN = value
+		case "request_timeout":
+			if n, err := strconv.Atoi(value); err == nil && n > 0 {
+				c.RequestTimeout = n
+			}
 		}
 	}
 
@@ -251,15 +274,23 @@ func SaveConfig(config *Config) error {
 }
 
 func (c *Config) Validate() error {
+	return RunValidators(c, DefaultValidators())
+}
+
+// MergeDefaults fills zero-value fields with their defaults.
+func (c *Config) MergeDefaults() {
 	if c.RpcUrl == "" {
-		return errors.WrapValidationError("rpc_url cannot be empty")
+		c.RpcUrl = defaultConfig.RpcUrl
 	}
-
-	if c.Network != "" && !validNetworks[string(c.Network)] {
-		return errors.WrapInvalidNetwork(string(c.Network))
+	if c.Network == "" {
+		c.Network = defaultConfig.Network
 	}
-
-	return nil
+	if c.LogLevel == "" {
+		c.LogLevel = defaultConfig.LogLevel
+	}
+	if c.CachePath == "" {
+		c.CachePath = defaultConfig.CachePath
+	}
 }
 
 func (c *Config) NetworkURL() string {
@@ -285,19 +316,26 @@ func (c *Config) String() string {
 }
 
 func getEnv(key, defaultValue string) string {
+	// Only allow environment variables that are explicitly namespaced with ERST_
+	if !strings.HasPrefix(key, "ERST_") {
+		return defaultValue
+	}
+
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
+
 	return defaultValue
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		RpcUrl:        defaultConfig.RpcUrl,
-		Network:       defaultConfig.Network,
-		SimulatorPath: defaultConfig.SimulatorPath,
-		LogLevel:      defaultConfig.LogLevel,
-		CachePath:     defaultConfig.CachePath,
+		RpcUrl:         defaultConfig.RpcUrl,
+		Network:        defaultConfig.Network,
+		SimulatorPath:  defaultConfig.SimulatorPath,
+		LogLevel:       defaultConfig.LogLevel,
+		CachePath:      defaultConfig.CachePath,
+		RequestTimeout: defaultConfig.RequestTimeout,
 	}
 }
 
@@ -323,5 +361,10 @@ func (c *Config) WithLogLevel(level string) *Config {
 
 func (c *Config) WithCachePath(path string) *Config {
 	c.CachePath = path
+	return c
+}
+
+func (c *Config) WithRequestTimeout(seconds int) *Config {
+	c.RequestTimeout = seconds
 	return c
 }

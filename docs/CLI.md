@@ -22,6 +22,49 @@ erst [command]
 
 ---
 
+## erst generate-bindings
+
+Generate TypeScript bindings for a Soroban smart contract. Creates strongly-typed client libraries with erst integration.
+
+### Usage
+
+```bash
+erst generate-bindings <wasm-file> [flags]
+```
+
+### Examples
+
+```bash
+# Basic usage
+erst generate-bindings contract.wasm
+
+# With custom output and package name
+erst generate-bindings contract.wasm --output ./src/bindings --package my-contract
+
+# With contract ID and network
+erst generate-bindings contract.wasm \
+  --contract-id CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHAGCN4B2 \
+  --network testnet
+```
+
+### Options
+
+```
+  -h, --help                help for generate-bindings
+  -o, --output string       Output directory (defaults to current directory)
+  -p, --package string      Package name (defaults to WASM filename)
+      --contract-id string  Contract ID for network calls
+  -n, --network string      Stellar network (testnet, mainnet, futurenet) (default "testnet")
+```
+
+### Arguments
+
+| Argument | Description |
+| :--- | :--- |
+| `<wasm-file>` | Path to the compiled Soroban contract WASM file |
+
+---
+
 ## erst debug
 
 Debug a failed Soroban transaction. Fetches a transaction envelope from the Stellar network and prepares it for simulation.
@@ -52,6 +95,21 @@ erst debug --network testnet <tx-hash>
 | Argument | Description |
 | :--- | :--- |
 | `<transaction-hash>` | The hash of the transaction to debug. |
+
+### Interrupt and Shutdown Behavior
+
+When `erst` receives `Ctrl+C` (`SIGINT`) or `SIGTERM` during polling or simulation:
+
+- Active command execution is canceled immediately.
+- Shutdown hooks run once in deterministic order.
+- RPC cache flush is attempted as best-effort.
+- Active `erst-sim` child process groups are terminated gracefully (`SIGTERM`), then force-killed (`SIGKILL`) if they do not exit within the grace timeout.
+- The CLI exits with code `130`.
+
+Repeated interrupt handling:
+
+- First interrupt starts graceful shutdown.
+- A second interrupt during shutdown forces immediate exit with code `130`.
 
 ---
 

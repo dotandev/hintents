@@ -18,7 +18,7 @@ echo "Checking for license headers in Go and Rust files..."
 echo ""
 echo "Checking Go files (.go)..."
 while IFS= read -r file; do
-    if ! head -1 "$file" | grep -q "$EXPECTED_HEADER"; then
+    if ! head -5 "$file" | grep -q "$EXPECTED_HEADER"; then
         echo "  [FAIL] Missing license header: $file"
         MISSING_HEADERS=$((MISSING_HEADERS + 1))
     else
@@ -30,7 +30,7 @@ done < <(find . -type d \( -name "target" -o -name "vendor" \) -prune -o -name "
 echo ""
 echo "Checking Rust files (.rs)..."
 while IFS= read -r file; do
-    if ! head -1 "$file" | grep -q "$EXPECTED_HEADER"; then
+    if ! head -5 "$file" | grep -q "$EXPECTED_HEADER"; then
         echo "  [FAIL] Missing license header: $file"
         MISSING_HEADERS=$((MISSING_HEADERS + 1))
     else

@@ -12,9 +12,9 @@ import (
 func TestIntegration_SuggestionEngineWithDecoder(t *testing.T) {
 	// Simulate a scenario where we have XDR events from a failed transaction
 	// In a real scenario, these would come from DecodeEvents()
-	
+
 	engine := NewSuggestionEngine()
-	
+
 	// Scenario 1: Contract not initialized
 	t.Run("UninitializedContract", func(t *testing.T) {
 		events := []DecodedEvent{
@@ -36,7 +36,7 @@ func TestIntegration_SuggestionEngineWithDecoder(t *testing.T) {
 		}
 
 		suggestions := engine.AnalyzeEvents(events)
-		
+
 		if len(suggestions) == 0 {
 			t.Fatal("Expected suggestions for uninitialized contract")
 		}
@@ -106,7 +106,7 @@ func TestIntegration_SuggestionEngineWithDecoder(t *testing.T) {
 		}
 
 		suggestions := engine.AnalyzeCallTree(callTree)
-		
+
 		if len(suggestions) < 2 {
 			t.Errorf("Expected at least 2 suggestions, got %d", len(suggestions))
 		}
@@ -152,7 +152,7 @@ func TestIntegration_SuggestionEngineWithDecoder(t *testing.T) {
 		}
 
 		suggestions := engine.AnalyzeEvents(events)
-		
+
 		if len(suggestions) != 0 {
 			t.Errorf("Expected no suggestions for successful transaction, got %d", len(suggestions))
 		}
@@ -201,7 +201,7 @@ func TestIntegration_CustomRuleWorkflow(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeEvents(events)
-	
+
 	if len(suggestions) == 0 {
 		t.Fatal("Expected custom rule to trigger")
 	}
@@ -230,7 +230,7 @@ func TestIntegration_RealWorldScenario(t *testing.T) {
 	// 1. Contract wasn't initialized
 	// 2. User didn't have enough balance
 	// 3. Authorization was missing
-	
+
 	callTree := &CallNode{
 		ContractID: "token_contract",
 		Function:   "transfer",
@@ -254,7 +254,7 @@ func TestIntegration_RealWorldScenario(t *testing.T) {
 	}
 
 	suggestions := engine.AnalyzeCallTree(callTree)
-	
+
 	// Should get initialization suggestion
 	if len(suggestions) == 0 {
 		t.Fatal("Expected suggestions for failed transaction")
@@ -262,7 +262,7 @@ func TestIntegration_RealWorldScenario(t *testing.T) {
 
 	// Format for display
 	output := FormatSuggestions(suggestions)
-	
+
 	// Verify output is helpful for junior developers
 	if !strings.Contains(output, "Potential Fixes") {
 		t.Error("Output should clearly mark suggestions")

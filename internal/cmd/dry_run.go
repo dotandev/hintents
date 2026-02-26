@@ -28,8 +28,9 @@ var (
 // provides a deterministic estimate based on the simulator's reported resource usage, intended as a
 // safe lower bound / guidance for setting fee/budget.
 var dryRunCmd = &cobra.Command{
-	Use:   "dry-run <tx.xdr>",
-	Short: "Pre-submission dry run to estimate Soroban transaction cost",
+	Use:     "dry-run <tx.xdr>",
+	GroupID: "testing",
+	Short:   "Pre-submission dry run to estimate Soroban transaction cost",
 	Long: `Replay a local transaction envelope (not yet on chain) against current network state.
 
 This command:
@@ -55,6 +56,8 @@ func init() {
 	dryRunCmd.Flags().StringVarP(&dryRunNetworkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
 	dryRunCmd.Flags().StringVar(&dryRunRPCURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
 	dryRunCmd.Flags().StringVar(&dryRunRPCTokenFlag, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
+
+	_ = dryRunCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
 
 	rootCmd.AddCommand(dryRunCmd)
 }
@@ -93,8 +96,14 @@ func runDryRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
 	}
+	registerCacheFlushHook()
 
 	ctx := cmd.Context()
+
+	if checkErr := client.CheckStaleness(ctx, dryRunNetworkFlag); checkErr != nil {
+		// Optional: you can print this to stderr if you want to see why the check failed
+		// fmt.Fprintf(os.Stderr, "Note: Could not verify node freshness: %v\n", checkErr)
+	}
 
 	// Preferred path: Soroban RPC preflight (simulateTransaction)
 	if preflight, err := client.SimulateTransaction(ctx, envXdrB64); err == nil {
@@ -125,10 +134,17 @@ func runDryRun(cmd *cobra.Command, args []string) error {
 		return errors.WrapRPCConnectionFailed(err)
 	}
 
+	// Warn if the fetched ledger entries exceed the Soroban network size limit.
+	// The network rejects transactions whose footprint exceeds 1 MiB, so there
+	// is no point invoking the simulator — the tx will never land on-chain.
+	simulator.WarnLedgerEntriesSizeToStderr(ledgerEntries)
+
 	runner, err := simulator.NewRunner("", false)
 	if err != nil {
 		return errors.WrapSimulatorNotFound(err.Error())
 	}
+	registerRunnerCloseHook("dry-run-simulator-runner", runner)
+	defer func() { _ = runner.Close() }()
 
 	// The current Rust simulator requires a non-empty result_meta_xdr.
 	// For dry-run we don't have it (tx not on-chain), so we use a placeholder.
@@ -138,37 +154,16 @@ func runDryRun(cmd *cobra.Command, args []string) error {
 		LedgerEntries: ledgerEntries,
 	}
 
-	resp, err := runner.Run(simReq)
+	gas, err := simulator.EstimateGas(runner, simReq)
+	resp, err := runner.Run(ctx, simReq)
 	if err != nil {
-		return errors.WrapSimulationFailed(err, "")
+		return errors.WrapSimulationFailed(fmt.Errorf("gas estimation: %w", err), "")
 	}
 
-	if resp.BudgetUsage == nil {
-		return errors.WrapSimulationLogicError("simulator did not return budget usage")
-	}
-
-	est, err := estimateFeeFromBudget(*resp.BudgetUsage)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Estimated required fee (stroops): %d\n", est)
-	fmt.Printf("Budget usage: CPU=%d, MEM=%d\n", resp.BudgetUsage.CPUInstructions, resp.BudgetUsage.MemoryBytes)
+	fmt.Printf("Estimated required fee (stroops): %d\n", gas.EstimatedFeeLowerBound)
+	fmt.Printf("Budget usage: CPU=%d, MEM=%d\n", gas.CPUCost, gas.MemoryCost)
 
 	return nil
-}
-
-func estimateFeeFromBudget(b simulator.BudgetUsage) (int64, error) {
-	// Conservative heuristic for now.
-	// TODO: Replace with exact network pricing once fee config is exposed by public RPC.
-	// Base fee + CPU + memory components.
-	const base int64 = 100
-	cpu := int64(b.CPUInstructions / 10000)   // 1 stroop per 10k insns
-	mem := int64(b.MemoryBytes / (64 * 1024)) // 1 stroop per 64KiB
-	if cpu < 0 || mem < 0 {
-		return 0, errors.WrapSimulationLogicError("invalid budget usage")
-	}
-	return base + cpu + mem, nil
 }
 
 func bytesTrimSpace(b []byte) []byte {

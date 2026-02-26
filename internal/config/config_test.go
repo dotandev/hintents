@@ -164,15 +164,17 @@ network = "testnet"`,
 			"TOML with all fields",
 			`rpc_url = "https://custom.com"
 network = "futurenet"
+network_passphrase = "Test SDF Future Network ; October 2022"
 simulator_path = "/path/to/sim"
 log_level = "debug"
 cache_path = "/custom/cache"`,
 			&Config{
-				RpcUrl:        "https://custom.com",
-				Network:       NetworkFuturenet,
-				SimulatorPath: "/path/to/sim",
-				LogLevel:      "debug",
-				CachePath:     "/custom/cache",
+				RpcUrl:            "https://custom.com",
+				Network:           NetworkFuturenet,
+				NetworkPassphrase: "Test SDF Future Network ; October 2022",
+				SimulatorPath:     "/path/to/sim",
+				LogLevel:          "debug",
+				CachePath:         "/custom/cache",
 			},
 		},
 		{
@@ -217,6 +219,10 @@ network = "testnet"`,
 
 			if cfg.Network != tt.want.Network {
 				t.Errorf("Network: expected %s, got %s", tt.want.Network, cfg.Network)
+			}
+
+			if cfg.NetworkPassphrase != tt.want.NetworkPassphrase {
+				t.Errorf("NetworkPassphrase: expected %s, got %s", tt.want.NetworkPassphrase, cfg.NetworkPassphrase)
 			}
 
 			if cfg.SimulatorPath != tt.want.SimulatorPath {
@@ -265,6 +271,31 @@ func TestLoadFromEnvironment(t *testing.T) {
 
 	if cfg.LogLevel != "debug" {
 		t.Errorf("expected LogLevel from env, got %s", cfg.LogLevel)
+	}
+}
+
+func TestGetEnv_RequiresErstPrefix(t *testing.T) {
+	// Ensure non-ERST env keys are ignored by getEnv
+	origStellar := os.Getenv("STELLAR_RPC_URL")
+	origErst := os.Getenv("ERST_RPC_URL")
+	defer func() {
+		os.Setenv("STELLAR_RPC_URL", origStellar)
+		os.Setenv("ERST_RPC_URL", origErst)
+	}()
+
+	os.Setenv("STELLAR_RPC_URL", "https://stellar.example.com")
+	os.Unsetenv("ERST_RPC_URL")
+
+	// getEnv should return the default when asked for non-ERST key
+	def := "https://default.example.com"
+	if got := getEnv("STELLAR_RPC_URL", def); got != def {
+		t.Errorf("expected getEnv to return default for non-ERST key, got %s", got)
+	}
+
+	// But should return value for ERST_ key
+	os.Setenv("ERST_RPC_URL", "https://erst.example.com")
+	if got := getEnv("ERST_RPC_URL", def); got != "https://erst.example.com" {
+		t.Errorf("expected getEnv to read ERST_ env var, got %s", got)
 	}
 }
 
@@ -445,5 +476,93 @@ func TestLoad_CrashReportingOffByDefault(t *testing.T) {
 
 	if cfg.CrashReporting {
 		t.Error("CrashReporting should be off by default")
+	}
+}
+
+// ---- RequestTimeout config --------------------------------------------------
+
+func TestDefaultConfig_RequestTimeout(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.RequestTimeout != 15 {
+		t.Errorf("expected default RequestTimeout=15, got %d", cfg.RequestTimeout)
+	}
+}
+
+func TestLoad_RequestTimeoutFromEnv(t *testing.T) {
+	orig := os.Getenv("ERST_REQUEST_TIMEOUT")
+	defer os.Setenv("ERST_REQUEST_TIMEOUT", orig)
+
+	os.Setenv("ERST_REQUEST_TIMEOUT", "30")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RequestTimeout != 30 {
+		t.Errorf("expected RequestTimeout=30 from env, got %d", cfg.RequestTimeout)
+	}
+}
+
+func TestLoad_RequestTimeoutInvalidEnvIgnored(t *testing.T) {
+	orig := os.Getenv("ERST_REQUEST_TIMEOUT")
+	defer os.Setenv("ERST_REQUEST_TIMEOUT", orig)
+
+	os.Setenv("ERST_REQUEST_TIMEOUT", "notanumber")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RequestTimeout != 15 {
+		t.Errorf("expected default RequestTimeout=15 for invalid env value, got %d", cfg.RequestTimeout)
+	}
+}
+
+func TestLoad_RequestTimeoutZeroEnvIgnored(t *testing.T) {
+	orig := os.Getenv("ERST_REQUEST_TIMEOUT")
+	defer os.Setenv("ERST_REQUEST_TIMEOUT", orig)
+
+	os.Setenv("ERST_REQUEST_TIMEOUT", "0")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RequestTimeout != 15 {
+		t.Errorf("expected default RequestTimeout=15 for zero env value, got %d", cfg.RequestTimeout)
+	}
+}
+
+func TestParseTOML_RequestTimeout(t *testing.T) {
+	content := `rpc_url = "https://test.com"
+network = "testnet"
+request_timeout = 60`
+
+	cfg := &Config{}
+	if err := cfg.parseTOML(content); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RequestTimeout != 60 {
+		t.Errorf("expected RequestTimeout=60 from TOML, got %d", cfg.RequestTimeout)
+	}
+}
+
+func TestParseTOML_RequestTimeoutInvalidIgnored(t *testing.T) {
+	content := `rpc_url = "https://test.com"
+request_timeout = -5`
+
+	cfg := &Config{}
+	if err := cfg.parseTOML(content); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RequestTimeout != 0 {
+		t.Errorf("expected RequestTimeout unchanged for negative value, got %d", cfg.RequestTimeout)
+	}
+}
+
+func TestWithRequestTimeout(t *testing.T) {
+	cfg := NewConfig("https://test.com", NetworkTestnet).WithRequestTimeout(45)
+	if cfg.RequestTimeout != 45 {
+		t.Errorf("expected RequestTimeout=45, got %d", cfg.RequestTimeout)
 	}
 }

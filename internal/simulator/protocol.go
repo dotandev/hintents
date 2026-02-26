@@ -17,6 +17,11 @@ type Protocol struct {
 	Features map[string]interface{}
 }
 
+const (
+	keccak256FixedCalibration   uint64 = 3072
+	keccak256PerByteCalibration uint64 = 74
+)
+
 var protocols = map[uint32]*Protocol{
 	20: {
 		Version: 20,
@@ -29,8 +34,8 @@ var protocols = map[uint32]*Protocol{
 			"resource_calibration": &ResourceCalibration{
 				SHA256Fixed:      3738,
 				SHA256PerByte:    37,
-				Keccak256Fixed:   3766,
-				Keccak256PerByte: 63,
+				Keccak256Fixed:   keccak256FixedCalibration,
+				Keccak256PerByte: keccak256PerByteCalibration,
 				Ed25519Fixed:     377524,
 			},
 		},
@@ -47,8 +52,8 @@ var protocols = map[uint32]*Protocol{
 			"resource_calibration": &ResourceCalibration{
 				SHA256Fixed:      3738,
 				SHA256PerByte:    37,
-				Keccak256Fixed:   3766,
-				Keccak256PerByte: 63,
+				Keccak256Fixed:   keccak256FixedCalibration,
+				Keccak256PerByte: keccak256PerByteCalibration,
 				Ed25519Fixed:     377524,
 			},
 		},
@@ -66,8 +71,8 @@ var protocols = map[uint32]*Protocol{
 			"resource_calibration": &ResourceCalibration{
 				SHA256Fixed:      3738,
 				SHA256PerByte:    37,
-				Keccak256Fixed:   3766,
-				Keccak256PerByte: 63,
+				Keccak256Fixed:   keccak256FixedCalibration,
+				Keccak256PerByte: keccak256PerByteCalibration,
 				Ed25519Fixed:     377524,
 			},
 		},

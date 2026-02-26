@@ -4,29 +4,40 @@
 package cmd
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
 var (
-	initForceFlag   bool
-	initNetworkName string
+	initForceFlag             bool
+	initNetworkName           string
+	initRPCURLFlag            string
+	initNetworkPassphraseFlag string
+	initInteractiveFlag       bool
 )
 
 var initCmd = &cobra.Command{
-	Use:   "init [directory]",
-	Short: "Scaffold a local Erst debugging workspace",
+	Use:     "init [directory]",
+	GroupID: "development",
+	Short:   "Scaffold a local Erst debugging workspace",
 	Long: `Create project-local scaffolding for Erst debugging workflows.
 
 This command generates:
   - erst.toml
   - .gitignore entries for local artifacts
-  - a small directory structure for traces, snapshots, overrides, and WASM files`,
+  - a small directory structure for traces, snapshots, overrides, and WASM files
+
+When run in an interactive terminal, it launches a setup wizard to configure
+the preferred RPC URL and network passphrase.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		targetDir := "."
@@ -34,25 +45,87 @@ This command generates:
 			targetDir = args[0]
 		}
 
-		if !isValidInitNetwork(initNetworkName) {
-			return fmt.Errorf("invalid network %q (valid: public, testnet, futurenet, standalone)", initNetworkName)
+		opts := initScaffoldOptions{
+			Force:             initForceFlag,
+			Network:           initNetworkName,
+			RPCURL:            initRPCURLFlag,
+			NetworkPassphrase: initNetworkPassphraseFlag,
 		}
 
-		if err := scaffoldErstProject(targetDir, initScaffoldOptions{
-			Force:   initForceFlag,
-			Network: initNetworkName,
-		}); err != nil {
+		if !isValidInitNetwork(opts.Network) {
+			return fmt.Errorf("invalid network %q (valid: public, testnet, futurenet, standalone)", opts.Network)
+		}
+
+		if shouldRunInitWizard(cmd, initInteractiveFlag) {
+			if err := runInitWizard(cmd, &opts); err != nil {
+				return err
+			}
+		}
+
+		if err := scaffoldErstProject(targetDir, opts); err != nil {
 			return err
 		}
 
-		fmt.Printf("Initialized Erst project scaffold in %s\n", targetDir)
+		fmt.Fprintf(cmd.OutOrStdout(), "Initialized Erst project scaffold in %s\n", targetDir)
 		return nil
 	},
 }
 
 type initScaffoldOptions struct {
-	Force   bool
-	Network string
+	Force             bool
+	Network           string
+	RPCURL            string
+	NetworkPassphrase string
+}
+
+func shouldRunInitWizard(cmd *cobra.Command, interactive bool) bool {
+	if !interactive {
+		return false
+	}
+
+	inFile, ok := cmd.InOrStdin().(*os.File)
+	if !ok {
+		return false
+	}
+
+	return isatty.IsTerminal(inFile.Fd())
+}
+
+func runInitWizard(cmd *cobra.Command, opts *initScaffoldOptions) error {
+	reader := bufio.NewReader(cmd.InOrStdin())
+	out := cmd.OutOrStdout()
+
+	fmt.Fprintln(out, "Erst init setup wizard")
+	fmt.Fprintln(out, "Press Enter to accept defaults.")
+
+	rpcURL, err := promptWithDefault(reader, out, "Preferred Soroban RPC URL", defaultRPCURLForNetwork(opts.Network, opts.RPCURL))
+	if err != nil {
+		return err
+	}
+	passphrase, err := promptWithDefault(reader, out, "Network passphrase", defaultPassphraseForNetwork(opts.Network, opts.NetworkPassphrase))
+	if err != nil {
+		return err
+	}
+
+	opts.RPCURL = rpcURL
+	opts.NetworkPassphrase = passphrase
+
+	return nil
+}
+
+func promptWithDefault(reader *bufio.Reader, out io.Writer, prompt, defaultValue string) (string, error) {
+	fmt.Fprintf(out, "%s [%s]: ", prompt, defaultValue)
+	input, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return defaultValue, nil
+	}
+
+	return value, nil
 }
 
 func scaffoldErstProject(targetDir string, opts initScaffoldOptions) error {
@@ -78,7 +151,7 @@ func scaffoldErstProject(targetDir string, opts initScaffoldOptions) error {
 		}
 	}
 
-	if err := writeScaffoldFile(filepath.Join(root, "erst.toml"), renderProjectErstToml(opts.Network), opts.Force); err != nil {
+	if err := writeScaffoldFile(filepath.Join(root, "erst.toml"), renderProjectErstToml(opts), opts.Force); err != nil {
 		return err
 	}
 
@@ -135,7 +208,11 @@ func ensureGitignoreBlock(path, block string) error {
 	return nil
 }
 
-func renderProjectErstToml(network string) string {
+func defaultRPCURLForNetwork(network, override string) string {
+	if strings.TrimSpace(override) != "" {
+		return strings.TrimSpace(override)
+	}
+
 	if network == "" {
 		network = "testnet"
 	}
@@ -150,17 +227,52 @@ func renderProjectErstToml(network string) string {
 		rpcURL = "https://soroban-testnet.stellar.org"
 	}
 
+	return rpcURL
+}
+
+func defaultPassphraseForNetwork(network, override string) string {
+	if strings.TrimSpace(override) != "" {
+		return strings.TrimSpace(override)
+	}
+
+	if network == "" {
+		network = "testnet"
+	}
+
+	passphrase := map[string]string{
+		"public":     "Public Global Stellar Network ; September 2015",
+		"testnet":    "Test SDF Network ; September 2015",
+		"futurenet":  "Test SDF Future Network ; October 2022",
+		"standalone": "Standalone Network ; February 2017",
+	}[network]
+	if passphrase == "" {
+		passphrase = "Test SDF Network ; September 2015"
+	}
+
+	return passphrase
+}
+
+func renderProjectErstToml(opts initScaffoldOptions) string {
+	network := opts.Network
+	if network == "" {
+		network = "testnet"
+	}
+
+	rpcURL := defaultRPCURLForNetwork(network, opts.RPCURL)
+	passphrase := defaultPassphraseForNetwork(network, opts.NetworkPassphrase)
+
 	return fmt.Sprintf(`# Erst project configuration for local debugging workflows
 # CLI flags and environment variables override these values.
 
-rpc_url = "%s"
-network = "%s"
+rpc_url = %s
+network = %s
+network_passphrase = %s
 log_level = "info"
 cache_path = ".erst/cache"
 
 # Optional: point to a locally built simulator binary
 # simulator_path = "./erst-sim"
-`, rpcURL, network)
+`, strconv.Quote(rpcURL), strconv.Quote(network), strconv.Quote(passphrase))
 }
 
 func renderProjectGitignoreBlock() string {
@@ -188,6 +300,12 @@ func isValidInitNetwork(network string) bool {
 
 func init() {
 	initCmd.Flags().BoolVar(&initForceFlag, "force", false, "Overwrite generated files when they already exist")
+	initCmd.Flags().BoolVar(&initInteractiveFlag, "interactive", true, "Run an interactive setup wizard for RPC URL and network passphrase")
 	initCmd.Flags().StringVar(&initNetworkName, "network", "testnet", "Default network to write into erst.toml (public, testnet, futurenet, standalone)")
+	initCmd.Flags().StringVar(&initRPCURLFlag, "rpc-url", "", "RPC URL to write into erst.toml (skips wizard default for this value)")
+	initCmd.Flags().StringVar(&initNetworkPassphraseFlag, "network-passphrase", "", "Network passphrase to write into erst.toml (skips wizard default for this value)")
+
+	_ = initCmd.RegisterFlagCompletionFunc("network", completeInitNetworkFlag)
+
 	rootCmd.AddCommand(initCmd)
 }
