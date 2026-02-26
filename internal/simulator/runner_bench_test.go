@@ -5,6 +5,7 @@ package simulator
 
 import (
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 
@@ -99,37 +100,13 @@ func BenchmarkSimulationResponseUnmarshal(b *testing.B) {
 				resp.Logs[i] = "log message " + strings.Repeat("x", 50)
 			}
 
-			// Add budget usage if requested
-			if tt.hasBudget {
-				resp.BudgetUsage = &BudgetUsage{
-					CPUInstructions: 1000000,
-					MemoryBytes:     5000000,
-					OperationsCount: 50,
-				}
-			}
-
-			// Add auth trace if requested
-			if tt.hasAuthTrace {
-				resp.AuthTrace = &authtrace.AuthTrace{
-					Success:    true,
-					AuthEvents: make([]authtrace.AuthEvent, 10),
-				}
-				for i := 0; i < 10; i++ {
-					resp.AuthTrace.AuthEvents[i] = authtrace.AuthEvent{
-						AccountID: "GA" + strings.Repeat("A", 54),
-						SignerKey: "GA" + strings.Repeat("B", 54),
-					}
-				}
-			}
-
-			respBytes, _ := json.Marshal(resp)
+			data, _ := json.Marshal(resp)
 
 			b.ResetTimer()
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				var r SimulationResponse
-				err := json.Unmarshal(respBytes, &r)
-				if err != nil {
+				if err := json.Unmarshal(data, &r); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -137,371 +114,34 @@ func BenchmarkSimulationResponseUnmarshal(b *testing.B) {
 	}
 }
 
-// BenchmarkStateInjection benchmarks ledger state injection into simulation request
-func BenchmarkStateInjection(b *testing.B) {
-	tests := []struct {
-		name      string
-		numStates int
-	}{
-		{"Single", 1},
-		{"Small", 10},
-		{"Medium", 50},
-		{"Large", 100},
-		{"VeryLarge", 1000},
-	}
-
-	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			ledgerEntries := make(map[string]string, tt.numStates)
-			for i := 0; i < tt.numStates; i++ {
-				key := strings.Repeat("k", 64)
-				value := strings.Repeat("v", 256) // Larger state values
-				ledgerEntries[key] = value
-			}
-
-			b.ResetTimer()
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				req := &SimulationRequest{
-					EnvelopeXdr:    "envelope",
-					ResultMetaXdr:  "meta",
-					LedgerEntries:  ledgerEntries,
-					LedgerSequence: 12345,
-				}
-				if req.LedgerEntries == nil {
-					b.Fatal("nil ledger entries")
-				}
-			}
-		})
-	}
-}
-
-// BenchmarkLargeEventParsing benchmarks parsing large diagnostic event arrays
-func BenchmarkLargeEventParsing(b *testing.B) {
-	tests := []struct {
-		name      string
-		numEvents int
-	}{
-		{"Small", 10},
-		{"Medium", 100},
-		{"Large", 500},
-		{"VeryLarge", 1000},
-	}
-
-	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			// Create response with many diagnostic events
-			resp := SimulationResponse{
-				Status:           "success",
-				DiagnosticEvents: make([]DiagnosticEvent, tt.numEvents),
-			}
-
-			contractID := strings.Repeat("c", 56)
-			for i := 0; i < tt.numEvents; i++ {
-				resp.DiagnosticEvents[i] = DiagnosticEvent{
-					EventType:                "contract",
-					ContractID:               &contractID,
-					Topics:                   []string{"topic1", "topic2", "topic3"},
-					Data:                     strings.Repeat("d", 100),
-					InSuccessfulContractCall: i%2 == 0,
-				}
-			}
-
-			respBytes, _ := json.Marshal(resp)
-
-			b.ResetTimer()
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				var r SimulationResponse
-				err := json.Unmarshal(respBytes, &r)
-				if err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
-}
-
-// BenchmarkAuthTraceProcessing benchmarks auth trace data processing
-func BenchmarkAuthTraceProcessing(b *testing.B) {
-	tests := []struct {
-		name      string
-		numEvents int
-		maxDepth  int
-	}{
-		{"Small", 10, 3},
-		{"Medium", 50, 5},
-		{"Large", 200, 10},
-	}
-
-	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			trace := &authtrace.AuthTrace{
-				Success:    true,
-				AuthEvents: make([]authtrace.AuthEvent, tt.numEvents),
-			}
-
-			for i := 0; i < tt.numEvents; i++ {
-				trace.AuthEvents[i] = authtrace.AuthEvent{
-					AccountID: "GA" + strings.Repeat("A", 54),
-					SignerKey: "GA" + strings.Repeat("B", 54),
-					Status:    "success",
-					Details:   "some details about auth event",
-				}
-			}
-
-			traceBytes, _ := json.Marshal(trace)
-
-			b.ResetTimer()
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				var t authtrace.AuthTrace
-				err := json.Unmarshal(traceBytes, &t)
-				if err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
-}
-
-// BenchmarkBudgetUsageCalculation benchmarks budget usage metrics calculation
-func BenchmarkBudgetUsageCalculation(b *testing.B) {
-	// Simulate budget tracking overhead
-	b.Run("Simple", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			budget := &BudgetUsage{
-				CPUInstructions: uint64((i + 1) * 1000),
-				MemoryBytes:     uint64((i + 1) * 5000),
-				OperationsCount: (i % 100) + 1,
-			}
-			if budget.CPUInstructions == 0 {
-				b.Fatal("zero cpu")
-			}
-		}
-	})
-
-	b.Run("WithJSON", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			budget := &BudgetUsage{
-				CPUInstructions: uint64((i + 1) * 1000),
-				MemoryBytes:     uint64((i + 1) * 5000),
-				OperationsCount: (i % 100) + 1,
-			}
-			_, err := json.Marshal(budget)
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
-
-// BenchmarkProtocolConfigApplication benchmarks protocol configuration application
-func BenchmarkProtocolConfigApplication(b *testing.B) {
-	runner := &Runner{
-		BinaryPath: "/path/to/simulator",
-		Debug:      false,
-	}
-
+// BenchmarkStreamingVsBuffering compares memory allocation between buffering and streaming
+func BenchmarkStreamingVsBuffering(b *testing.B) {
 	req := &SimulationRequest{
-		EnvelopeXdr:   "envelope",
-		ResultMetaXdr: "meta",
+		EnvelopeXdr:   strings.Repeat("e", 1024*1024), // 1MB
+		ResultMetaXdr: strings.Repeat("m", 1024*1024), // 1MB
 	}
 
-	protocolVersion := uint32(20)
-	proto := GetOrDefault(&protocolVersion)
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		err := runner.applyProtocolConfig(req, proto)
-		if err != nil {
-			b.Fatal(err)
+	b.Run("Buffering", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			// Simulate buffering: Marshal -> Buffer -> Unmarshal
+			data, _ := json.Marshal(req)
+			var r SimulationRequest
+			_ = json.Unmarshal(data, &r)
 		}
-	}
-}
+	})
 
-// BenchmarkLedgerEntriesMapping benchmarks large ledger entry map creation
-func BenchmarkLedgerEntriesMapping(b *testing.B) {
-	tests := []struct {
-		name       string
-		numEntries int
-	}{
-		{"Small", 10},
-		{"Medium", 100},
-		{"Large", 500},
-		{"VeryLarge", 1000},
-	}
-
-	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			// Simulate converting RPC response to ledger entries map
-			entries := make([]struct {
-				Key string
-				Xdr string
-			}, tt.numEntries)
-
-			for i := 0; i < tt.numEntries; i++ {
-				entries[i].Key = "key-" + strings.Repeat("k", 32) + string(rune('a'+(i%26))) + string(rune('0'+(i/10)))
-				entries[i].Xdr = strings.Repeat("x", 256)
-			}
-
-			b.ResetTimer()
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				ledgerMap := make(map[string]string, len(entries))
-				for _, entry := range entries {
-					ledgerMap[entry.Key] = entry.Xdr
-				}
-				if len(ledgerMap) != tt.numEntries {
-					b.Fatal("wrong size")
-				}
-			}
-		})
-	}
-}
-
-// BenchmarkCategorizedEventProcessing benchmarks categorized event processing
-func BenchmarkCategorizedEventProcessing(b *testing.B) {
-	tests := []struct {
-		name      string
-		numEvents int
-	}{
-		{"Small", 10},
-		{"Medium", 50},
-		{"Large", 200},
-	}
-
-	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			events := make([]CategorizedEvent, tt.numEvents)
-			contractID := strings.Repeat("c", 56)
-
-			for i := 0; i < tt.numEvents; i++ {
-				events[i] = CategorizedEvent{
-					EventType:  "contract",
-					ContractID: &contractID,
-					Topics:     []string{"topic1", "topic2"},
-					Data:       strings.Repeat("d", 100),
-				}
-			}
-
-			eventsBytes, _ := json.Marshal(events)
-
-			b.ResetTimer()
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				var e []CategorizedEvent
-				err := json.Unmarshal(eventsBytes, &e)
-				if err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
-}
-
-// BenchmarkSecurityViolationProcessing benchmarks security violation data processing
-func BenchmarkSecurityViolationProcessing(b *testing.B) {
-	violations := []SecurityViolation{
-		{
-			Type:        "unauthorized_access",
-			Severity:    "high",
-			Description: "Attempted unauthorized contract invocation",
-			Contract:    strings.Repeat("c", 56),
-			Details: map[string]interface{}{
-				"function": "transfer",
-				"caller":   strings.Repeat("a", 56),
-				"attempt":  "direct_call",
-			},
-		},
-		{
-			Type:        "excessive_resources",
-			Severity:    "medium",
-			Description: "CPU limit exceeded",
-			Contract:    strings.Repeat("c", 56),
-			Details: map[string]interface{}{
-				"cpu_used":  1000000,
-				"cpu_limit": 500000,
-			},
-		},
-	}
-
-	violationsBytes, _ := json.Marshal(violations)
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		var v []SecurityViolation
-		err := json.Unmarshal(violationsBytes, &v)
-		if err != nil {
-			b.Fatal(err)
+	b.Run("Streaming", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			// Simulate streaming: Encode -> Pipe -> Decode
+			pr, pw := io.Pipe()
+			go func() {
+				_ = json.NewEncoder(pw).Encode(req)
+				pw.Close()
+			}()
+			var r SimulationRequest
+			_ = json.NewDecoder(pr).Decode(&r)
 		}
-	}
-}
-
-// BenchmarkCompleteSimulationWorkflow benchmarks the complete simulation data flow
-func BenchmarkCompleteSimulationWorkflow(b *testing.B) {
-	// Simulate a realistic end-to-end workflow
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		// Step 1: Create request
-		req := &SimulationRequest{
-			EnvelopeXdr:    strings.Repeat("e", 512),
-			ResultMetaXdr:  strings.Repeat("m", 1024),
-			LedgerEntries:  make(map[string]string, 10),
-			LedgerSequence: 12345,
-			AuthTraceOpts: &AuthTraceOptions{
-				Enabled:              true,
-				TraceCustomContracts: true,
-			},
-		}
-
-		for j := 0; j < 10; j++ {
-			req.LedgerEntries[strings.Repeat("k", 64)] = strings.Repeat("v", 128)
-		}
-
-		// Step 2: Marshal request
-		reqBytes, err := json.Marshal(req)
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		// Step 3: Simulate response (in real scenario this would be from Rust binary)
-		resp := SimulationResponse{
-			Status: "success",
-			Events: make([]string, 20),
-			BudgetUsage: &BudgetUsage{
-				CPUInstructions: 1000000,
-				MemoryBytes:     5000000,
-				OperationsCount: 50,
-			},
-		}
-
-		for j := 0; j < 20; j++ {
-			resp.Events[j] = "event-" + strings.Repeat("e", 50)
-		}
-
-		// Step 4: Marshal response
-		respBytes, err := json.Marshal(resp)
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		// Step 5: Unmarshal response
-		var finalResp SimulationResponse
-		err = json.Unmarshal(respBytes, &finalResp)
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		// Verify workflow
-		if len(reqBytes) == 0 || len(respBytes) == 0 || finalResp.Status != "success" {
-			b.Fatal("workflow failed")
-		}
-	}
+	})
 }

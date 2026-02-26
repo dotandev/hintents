@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/dotandev/hintents/internal/errors"
 )
@@ -75,8 +76,21 @@ func GetGeneralConfigPath() (string, error) {
 	return filepath.Join(configDir, "config.json"), nil
 }
 
+var (
+	_generalConfig     *Config
+	_generalConfigErr  error
+	_generalConfigOnce sync.Once
+)
+
 // LoadConfig loads the general configuration from disk (JSON format)
 func LoadConfig() (*Config, error) {
+	_generalConfigOnce.Do(func() {
+		_generalConfig, _generalConfigErr = loadConfigInternal()
+	})
+	return _generalConfig, _generalConfigErr
+}
+
+func loadConfigInternal() (*Config, error) {
 	configPath, err := GetGeneralConfigPath()
 	if err != nil {
 		return nil, err
@@ -100,8 +114,21 @@ func LoadConfig() (*Config, error) {
 	return config, nil
 }
 
+var (
+	_config     *Config
+	_configErr  error
+	_configOnce sync.Once
+)
+
 // Load loads the configuration from environment variables and TOML files
 func Load() (*Config, error) {
+	_configOnce.Do(func() {
+		_config, _configErr = loadInternal()
+	})
+	return _config, _configErr
+}
+
+func loadInternal() (*Config, error) {
 	cfg := &Config{
 		RpcUrl:         getEnv("ERST_RPC_URL", defaultConfig.RpcUrl),
 		Network:        Network(getEnv("ERST_NETWORK", string(defaultConfig.Network))),

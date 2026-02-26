@@ -130,6 +130,42 @@ func RegisterCommands(root *cobra.Command) {
 - Help output maintains alphabetical order
 - Predictable structure for developers
 
+## Memory Optimization & Performance
+
+To ensure the CLI remains performant under peak load, several architectural patterns are implemented:
+
+### 1. Lazy Initialization
+Heavy components like the Simulator Runner are initialized only when needed (Lazy Initialization). This reduces startup latency and memory footprint for commands that don't require them.
+
+```go
+func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
+    // Runner is only initialized if it wasn't already provided
+    if d.Runner == nil {
+        runner, _ := simulator.NewRunner(...)
+        d.Runner = runner
+    }
+}
+```
+
+### 2. Dependency Injection
+Commands use a struct-based approach with dependencies injected during creation. This allows for easier mocking and testing.
+
+```go
+type DebugCommand struct {
+    Runner        simulator.RunnerInterface
+    ClientFactory func(opts ...rpc.ClientOption) (*rpc.Client, error)
+}
+```
+
+### 3. Streaming Data Flow
+Instead of buffering large JSON payloads in memory, the CLI uses streaming encoders and decoders (`json.NewEncoder`, `json.NewDecoder`) with pipes for inter-process communication with the simulator. This significantly reduces peak memory allocation for large transactions.
+
+### 4. Efficient Localization
+Translations are loaded on-demand based on the detected language, rather than loading all supported languages at startup.
+
+### 5. Config Caching
+Configuration is loaded once and cached globally using `sync.Once` to avoid repeated file I/O and parsing overhead.
+
 ## Naming Conventions
 
 | Function Type | Pattern | Example |

@@ -191,28 +191,57 @@ func (r *Runner) Run(req *SimulationRequest) (*SimulationResponse, error) {
 		req.Timestamp = r.MockTime
 	}
 
-	inputBytes, err := json.Marshal(req)
+	cmd := exec.Command(r.BinaryPath)
+
+	// Use pipes to stream data and avoid large buffer allocations
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		return nil, errors.WrapSimCrash(err, "failed to create stdin pipe")
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, errors.WrapSimCrash(err, "failed to create stdout pipe")
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, errors.WrapSimCrash(err, "failed to start simulator")
+	}
+
+	// Stream request to stdin in a separate goroutine to prevent deadlock
+	encErrCh := make(chan error, 1)
+	go func() {
+		defer close(encErrCh)
+		defer stdin.Close()
+		if err := json.NewEncoder(stdin).Encode(req); err != nil {
+			encErrCh <- err
+		}
+	}()
+
+	var resp SimulationResponse
+	// Stream response from stdout
+	decErr := json.NewDecoder(stdout).Decode(&resp)
+
+	// Wait for command to finish
+	cmdErr := cmd.Wait()
+
+	// Check encoding error first
+	if err := <-encErrCh; err != nil {
 		logger.Logger.Error("Failed to marshal simulation request", "error", err)
 		return nil, errors.WrapMarshalFailed(err)
 	}
 
-	cmd := exec.Command(r.BinaryPath)
-	cmd.Stdin = bytes.NewReader(inputBytes)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		logger.Logger.Error("Simulator execution failed", "error", err, "stderr", stderr.String())
-		return nil, errors.WrapSimCrash(err, stderr.String())
+	// Check command error (e.g. crash)
+	if cmdErr != nil {
+		logger.Logger.Error("Simulator execution failed", "error", cmdErr, "stderr", stderr.String())
+		return nil, errors.WrapSimCrash(cmdErr, stderr.String())
 	}
 
-	var resp SimulationResponse
-	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
-		logger.Logger.Error("Failed to unmarshal response", "error", err)
-		return nil, errors.WrapUnmarshalFailed(err, stdout.String())
+	// Check decoding error
+	if decErr != nil {
+		logger.Logger.Error("Failed to unmarshal response", "error", decErr)
+		return nil, errors.WrapUnmarshalFailed(decErr, stderr.String())
 	}
 
 	// If the simulator returned a logical error inside the response payload,

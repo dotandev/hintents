@@ -207,45 +207,13 @@ fn main() {
     // 2. Log that we started
     tracing::info!(event = "simulator_started", "Simulator initializing...");
 
-    // Read JSON from Stdin
-    let mut buffer = String::new();
-    if let Err(e) = std::io::stdin().read_to_string(&mut buffer) {
-        let err_msg = format!("Failed to read stdin: {}", e);
-        let res = SimulationResponse {
-            status: "error".to_string(),
-            error: Some(err_msg.clone()),
-    if let Err(e) = io::stdin().read_to_string(&mut buffer) {
-        let res = SimulationResponse {
-            status: "error".to_string(),
-            error: Some(format!("Failed to read stdin: {e}")),
-            events: vec![],
-            diagnostic_events: vec![],
-            categorized_events: vec![],
-            logs: vec![],
-            flamegraph: None,
-            optimization_report: None,
-            budget_usage: None,
-            source_location: None,
-            stack_trace: None,
-        };
-        if let Ok(json) = serde_json::to_string(&res) {
-            println!("{}", json);
-        } else {
-            eprintln!("Failed to serialize error response");
-            println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
-        }
-        eprintln!("{}", err_msg);
-        eprintln!("Failed to read stdin: {e}");
-        return;
-    }
-
-    // Parse Request
-    let request: SimulationRequest = match serde_json::from_str(&buffer) {
+    // Parse Request directly from Stdin (Streaming)
+    let request: SimulationRequest = match serde_json::from_reader(std::io::stdin()) {
         Ok(req) => req,
         Err(e) => {
             let res = SimulationResponse {
                 status: "error".to_string(),
-                error: Some(format!("Invalid JSON: {e}")),
+                error: Some(format!("Invalid JSON or Read Error: {e}")),
                 events: vec![],
                 diagnostic_events: vec![],
                 categorized_events: vec![],
@@ -257,7 +225,13 @@ fn main() {
                 stack_trace: None,
                 wasm_offset: None,
             };
-            println!("{}", serde_json::to_string(&res).expect("Failed to serialize error response"));
+            // Serialize error response
+            if let Ok(json) = serde_json::to_string(&res) {
+                println!("{}", json);
+            } else {
+                eprintln!("Failed to serialize error response");
+                println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+            }
             return;
         }
     };

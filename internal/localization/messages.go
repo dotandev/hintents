@@ -136,14 +136,21 @@ var ChineseMessages = map[string]string{
 }
 
 func LoadTranslations() error {
+	// Always load English as default
 	if err := RegisterMessages(English, EnglishMessages); err != nil {
 		return err
 	}
-	if err := RegisterMessages(Spanish, SpanishMessages); err != nil {
-		return err
+
+	lang := detectLanguage()
+	if lang == English {
+		return nil
 	}
-	if err := RegisterMessages(Chinese, ChineseMessages); err != nil {
-		return err
+
+	if lang == Spanish {
+		return RegisterMessages(Spanish, SpanishMessages)
+	}
+	if lang == Chinese {
+		return RegisterMessages(Chinese, ChineseMessages)
 	}
 	return nil
 }
