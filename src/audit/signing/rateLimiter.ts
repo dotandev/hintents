@@ -7,7 +7,12 @@ import * as os from 'os';
  * It uses a sliding window stored in a file in the user's home directory.
  */
 export class HsmRateLimiter {
-    private static readonly LIMIT_FILE = path.join(os.homedir(), '.erst', 'audit_hsm_calls.json');
+    private static getLimitFile(): string {
+        return (
+            process.env.ERST_AUDIT_HSM_RATE_LIMIT_FILE ||
+            path.join(os.homedir(), '.erst', 'audit_hsm_calls.json')
+        );
+    }
     private static readonly WINDOW_MS = 60000; // 1 minute window
     private static readonly DEFAULT_MAX_RPM = 1000;
 
@@ -20,7 +25,8 @@ export class HsmRateLimiter {
         const maxRpm = this.getMaxRpm();
 
         // Ensure config directory exists
-        const dir = path.dirname(this.LIMIT_FILE);
+        const limitFile = this.getLimitFile();
+        const dir = path.dirname(limitFile);
         if (!fs.existsSync(dir)) {
             try {
                 fs.mkdirSync(dir, { recursive: true });
@@ -37,9 +43,9 @@ export class HsmRateLimiter {
         let history: number[] = [];
 
         // Read existing history
-        if (fs.existsSync(this.LIMIT_FILE)) {
+        if (fs.existsSync(limitFile)) {
             try {
-                const data = fs.readFileSync(this.LIMIT_FILE, 'utf8');
+                const data = fs.readFileSync(limitFile, 'utf8');
                 history = JSON.parse(data);
             } catch {
                 // Corrupt or empty file, reset history
@@ -62,7 +68,7 @@ export class HsmRateLimiter {
 
         // Save updated history
         try {
-            fs.writeFileSync(this.LIMIT_FILE, JSON.stringify(history), 'utf8');
+            fs.writeFileSync(limitFile, JSON.stringify(history), 'utf8');
         } catch (err) {
             console.warn('Could not save rate limiting stats:', err);
         }

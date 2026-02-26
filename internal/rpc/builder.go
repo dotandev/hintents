@@ -17,6 +17,7 @@ import (
 type ClientOption func(*clientBuilder) error
 
 type clientBuilder struct {
+
 	network      Network
 	token        string
 	horizonURL   string
@@ -25,12 +26,26 @@ type clientBuilder struct {
 	cacheEnabled bool
 	config       *NetworkConfig
 	httpClient   httpclient.HTTPClient
+
+	network        Network
+	token          string
+	horizonURL     string
+	sorobanURL     string
+	altURLs        []string
+	cacheEnabled   bool
+	config         *NetworkConfig
+	httpClient     *http.Client
+	requestTimeout time.Duration
+
 }
+
+const defaultHTTPTimeout = 15 * time.Second
 
 func newBuilder() *clientBuilder {
 	return &clientBuilder{
-		network:      Mainnet,
-		cacheEnabled: true,
+		network:        Mainnet,
+		cacheEnabled:   true,
+		requestTimeout: defaultHTTPTimeout,
 	}
 }
 
@@ -111,7 +126,20 @@ func WithCacheEnabled(enabled bool) ClientOption {
 	}
 }
 
+
 // IMPORTANT: Public signature unchanged
+
+// WithRequestTimeout sets a custom HTTP request timeout for all RPC calls.
+// Use this to override the default 15-second timeout, for example on slow connections.
+// A value of 0 disables the timeout (not recommended for production use).
+func WithRequestTimeout(d time.Duration) ClientOption {
+	return func(b *clientBuilder) error {
+		b.requestTimeout = d
+		return nil
+	}
+}
+
+
 func WithHTTPClient(client *http.Client) ClientOption {
 	return func(b *clientBuilder) error {
 		b.httpClient = httpclient.New(client)
@@ -195,7 +223,7 @@ func (b *clientBuilder) build() (*Client, error) {
 	}
 
 	if b.httpClient == nil {
-		b.httpClient = createHTTPClient(b.token)
+		b.httpClient = createHTTPClient(b.token, b.requestTimeout)
 	}
 
 	if len(b.altURLs) == 0 && b.horizonURL != "" {

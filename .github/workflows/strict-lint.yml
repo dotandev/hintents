@@ -81,19 +81,20 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Configure sccache
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+
+      - name: Cache Cargo dependencies and build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            simulator/target/
-          key: ${{ runner.os }}-cargo-strict-${{ hashFiles('simulator/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-strict-
-            ${{ runner.os }}-cargo-
+          workspaces: simulator -> target
+          prefix-key: ${{ runner.os }}-rust-strict-stable
+          cache-targets: true
 
       - name: Check formatting
         run: |
@@ -120,6 +121,9 @@ jobs:
             exit 1
           }
           echo " Clippy checks passed"
+
+      - name: Print sccache stats
+        run: sccache --show-stats
 
   # ============================================
   # Summary

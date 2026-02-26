@@ -69,7 +69,12 @@ fn send_error(msg: String) {
         stack_trace: Some(trace),
         wasm_offset: None,
     };
-    println!("{}", serde_json::to_string(&res).unwrap());
+    if let Ok(json) = serde_json::to_string(&res) {
+        println!("{}", json);
+    } else {
+        eprintln!("Failed to serialize error response");
+        println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+    }
     std::process::exit(1);
 }
 
@@ -223,7 +228,12 @@ fn main() {
             source_location: None,
             stack_trace: None,
         };
-        println!("{}", serde_json::to_string(&res).unwrap());
+        if let Ok(json) = serde_json::to_string(&res) {
+            println!("{}", json);
+        } else {
+            eprintln!("Failed to serialize error response");
+            println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+        }
         eprintln!("{}", err_msg);
         eprintln!("Failed to read stdin: {e}");
         return;
@@ -466,9 +476,8 @@ fn main() {
                 match host.get_events() {
                     Ok(evs) => {
                         let raw_events: Vec<String> =
-                            evs.0.iter().map(|e| format!("{:?}", e)).collect();
-                        let diag_events: Vec<DiagnosticEvent> = evs
-                            .0
+                            (evs.0).iter().map(|e| format!("{:?}", e)).collect();
+                        let diag_events: Vec<DiagnosticEvent> = (evs.0)
                             .iter()
                             .map(|event| {
                                 let event_type = match &event.event.type_ {
@@ -504,40 +513,10 @@ fn main() {
                                     contract_id,
                                     topics,
                                     data,
-                                    in_successful_contract_call: event.failed_call,
-                                    wasm_instruction,
-                                    // failed_call=true means the call failed;
-                                    // negate to get "was this a successful call?".
                                     in_successful_contract_call: !event.failed_call,
+                                    wasm_instruction,
                                 }
-                                soroban_env_host::xdr::ContractEventType::Diagnostic => {
-                                    "diagnostic".to_string()
-                                }
-                            };
-
-                            let contract_id = event
-                                .event
-                                .contract_id
-                                .as_ref()
-                                .map(|contract_id| format!("{contract_id:?}"));
-
-                            let (topics, data) = match &event.event.body {
-                                soroban_env_host::xdr::ContractEventBody::V0(v0) => {
-                                    let topics: Vec<String> =
-                                        v0.topics.iter().map(|t| format!("{t:?}")).collect();
-                                    let data = format!("{:?}", v0.data);
-                                    (topics, data)
-                                }
-                            };
-
-                            DiagnosticEvent {
-                                event_type,
-                                contract_id,
-                                topics,
-                                data,
-                                in_successful_contract_call: event.failed_call,
-                            }
-                        })
+                            })
                         .collect();
                     (raw_events, diag_events)
                 }
@@ -591,7 +570,12 @@ fn main() {
                         source_location: None,
                     };
 
-                    println!("{}", serde_json::to_string(&response).unwrap());
+                    if let Ok(json) = serde_json::to_string(&response) {
+                        println!("{}", json);
+                    } else {
+                        eprintln!("Failed to serialize simulation response");
+                        println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+                    }
                     return;
                 }
             }
@@ -616,7 +600,13 @@ fn main() {
                     .and_then(|loc| serde_json::to_string(&loc).ok()),
             };
 
-            println!("{}", serde_json::to_string(&response).unwrap());
+            if let Ok(json) = serde_json::to_string(&response) {
+                println!("{}", json);
+            } else {
+                eprintln!("Failed to serialize simulation response");
+                println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+            }
+        }
         Ok(Err(host_error)) => {
             // Host error during execution (e.g., contract trap, validation failure)
             let error_msg = format!("{:?}", host_error);
@@ -648,9 +638,8 @@ fn main() {
                 match host.get_events() {
                     Ok(evs) => {
                         let raw_events: Vec<String> =
-                            evs.0.iter().map(|e| format!("{:?}", e)).collect();
-                        let diag_events: Vec<DiagnosticEvent> = evs
-                            .0
+                            (evs.0).iter().map(|e| format!("{:?}", e)).collect();
+                        let diag_events: Vec<DiagnosticEvent> = (evs.0)
                             .iter()
                             .map(|event| {
                                 let event_type = match &event.event.type_ {
@@ -769,15 +758,14 @@ fn main() {
 
             let response = SimulationResponse {
                 status: "error".to_string(),
-                error: Some(serde_json::to_string(&structured_error).unwrap()),
+                error: serde_json::to_string(&structured_error).unwrap_or_else(|e| {
+                    eprintln!("Failed to serialize structured error: {}", e);
+                    format!("Internal error during error serialization: {}", e)
+                }),
                 events: vec![],
                 diagnostic_events: vec![],
                 categorized_events: vec![],
                 logs: vec![format!("Stack trace:\n{}", trace_display)],
-                events,
-                diagnostic_events,
-                categorized_events,
-                logs: vec![],
                 flamegraph: None,
                 optimization_report: None,
                 budget_usage: None,
@@ -785,7 +773,12 @@ fn main() {
                 stack_trace: Some(wasm_trace),
                 wasm_offset,
             };
-            println!("{}", serde_json::to_string(&response).unwrap());
+            if let Ok(json) = serde_json::to_string(&response) {
+                println!("{}", json);
+            } else {
+                eprintln!("Failed to serialize host error response");
+                println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+            }
         }
         Err(panic_info) => {
             let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
@@ -812,7 +805,12 @@ fn main() {
                 stack_trace: Some(wasm_trace),
                 wasm_offset: None,
             };
-            println!("{}", serde_json::to_string(&response).unwrap());
+            if let Ok(json) = serde_json::to_string(&response) {
+                println!("{}", json);
+            } else {
+                eprintln!("Failed to serialize panic response");
+                println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+            }
         }
     }
 }
@@ -829,6 +827,10 @@ fn extract_wasm_offset(error_msg: &str) -> Option<u64> {
             if let Ok(offset) = u64::from_str_radix(&hex_part[..end], 16) {
                 return Some(offset);
             }
+        }
+    }
+}
+
 /// Translate a raw soroban / WASM error string into a user-friendly description.
 ///
 /// Protocol 21 standardised the set of VM trap codes emitted by the host.
