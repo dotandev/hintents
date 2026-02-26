@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dotandev/hintents/internal/errors"
+	"github.com/dotandev/hintents/internal/signer"
 )
 
 // AttestationCertificate represents a single X.509 certificate in the
@@ -65,7 +66,22 @@ type GenerateOptions struct {
 // Generate creates a signed audit log from the simulation results.
 // If opts is non-nil and contains a HardwareAttestation, the attestation
 // chain is embedded and covered by the signature.
+//
+// Deprecated: prefer GenerateWithSigner which accepts an explicit
+// signer.Signer implementation. This wrapper creates a temporary
+// InMemorySigner from the hex key for backward compatibility.
 func Generate(txHash string, envelopeXdr, resultMetaXdr string, events, logs []string, privateKeyHex string, opts *GenerateOptions) (*AuditLog, error) {
+	s, err := signer.NewInMemorySigner(privateKeyHex)
+	if err != nil {
+		return nil, errors.WrapValidationError(fmt.Sprintf("invalid private key: %v", err))
+	}
+	return GenerateWithSigner(txHash, envelopeXdr, resultMetaXdr, events, logs, s, opts)
+}
+
+// GenerateWithSigner creates a signed audit log using the provided Signer
+// implementation. The signer may be an InMemorySigner or a Pkcs11Signer;
+// the private key material is never accessed directly.
+func GenerateWithSigner(txHash string, envelopeXdr, resultMetaXdr string, events, logs []string, s signer.Signer, opts *GenerateOptions) (*AuditLog, error) {
 	// 1. Construct Payload
 	payload := Payload{
 		EnvelopeXdr:   envelopeXdr,
@@ -96,26 +112,16 @@ func Generate(txHash string, envelopeXdr, resultMetaXdr string, events, logs []s
 	hash := sha256.Sum256(payloadBytes)
 	traceHashHex := hex.EncodeToString(hash[:])
 
-	// 4. Parse Private Key
-	privKeyBytes, err := hex.DecodeString(privateKeyHex)
+	// 4. Sign the Trace Hash via the Signer interface
+	signature, err := s.Sign(hash[:])
 	if err != nil {
-		return nil, errors.WrapValidationError(fmt.Sprintf("invalid private key hex: %v", err))
+		return nil, errors.WrapValidationError(fmt.Sprintf("signing failed: %v", err))
 	}
 
-	if len(privKeyBytes) != ed25519.PrivateKeySize && len(privKeyBytes) != ed25519.SeedSize {
-		return nil, errors.WrapValidationError(fmt.Sprintf("invalid private key length: %d", len(privKeyBytes)))
+	pubKey, err := s.PublicKey()
+	if err != nil {
+		return nil, errors.WrapValidationError(fmt.Sprintf("failed to retrieve public key: %v", err))
 	}
-
-	var privateKey ed25519.PrivateKey
-	if len(privKeyBytes) == ed25519.SeedSize {
-		privateKey = ed25519.NewKeyFromSeed(privKeyBytes)
-	} else {
-		privateKey = ed25519.PrivateKey(privKeyBytes)
-	}
-
-	// 5. Sign the Trace Hash
-	// We sign the hash of the payload to ensure integrity.
-	signature := ed25519.Sign(privateKey, hash[:])
 
 	auditLog := &AuditLog{
 		Version:         "1.1.0",
@@ -123,7 +129,7 @@ func Generate(txHash string, envelopeXdr, resultMetaXdr string, events, logs []s
 		TransactionHash: txHash,
 		TraceHash:       traceHashHex,
 		Signature:       hex.EncodeToString(signature),
-		PublicKey:       hex.EncodeToString(privateKey.Public().(ed25519.PublicKey)),
+		PublicKey:       hex.EncodeToString(pubKey),
 		Payload:         payload,
 	}
 

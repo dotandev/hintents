@@ -78,19 +78,19 @@ Environment-based configuration with support for:
 ### Alternative Considerations
 
 #### Direct Vendor APIs
-- ❌ **Rejected**: Vendor lock-in
-- ❌ **Rejected**: Maintenance overhead
-- ❌ **Rejected**: Inconsistent interfaces
+- [FAIL] **Rejected**: Vendor lock-in
+- [FAIL] **Rejected**: Maintenance overhead
+- [FAIL] **Rejected**: Inconsistent interfaces
 
 #### Cloud KMS Services
-- ❌ **Rejected**: Network dependency
-- ❌ **Rejected**: Additional complexity
-- ❌ **Rejected**: Latency concerns
+- [FAIL] **Rejected**: Network dependency
+- [FAIL] **Rejected**: Additional complexity
+- [FAIL] **Rejected**: Latency concerns
 
 #### In-Memory Only
-- ❌ **Rejected**: Security concerns
-- ❌ **Rejected**: No key persistence
-- ❌ **Rejected**: Limited scalability
+- [FAIL] **Rejected**: Security concerns
+- [FAIL] **Rejected**: No key persistence
+- [FAIL] **Rejected**: Limited scalability
 
 ## Implementation Details
 
@@ -228,10 +228,10 @@ let signature = sign_data(&functions, session, key_handle, data)?;
 ## Migration Strategy
 
 ### Phase 1: Foundation (Current)
-- ✅ Implement generic Signer interface
-- ✅ Add software signer implementations
-- ✅ Create PKCS#11 signer
-- ✅ Add configuration and factory
+- [OK] Implement generic Signer interface
+- [OK] Add software signer implementations
+- [OK] Create PKCS#11 signer
+- [OK] Add configuration and factory
 
 ### Phase 2: Integration
 - 🔄 Integrate with existing simulator components
@@ -240,10 +240,10 @@ let signature = sign_data(&functions, session, key_handle, data)?;
 - 🔄 Add comprehensive testing
 
 ### Phase 3: Enhancement
-- 📋 Add attestation chain support
-- 📋 Implement key rotation utilities
-- 📋 Add monitoring and metrics
-- 📋 Support additional algorithms
+- [LIST] Add attestation chain support
+- [LIST] Implement key rotation utilities
+- [LIST] Add monitoring and metrics
+- [LIST] Support additional algorithms
 
 ### Migration Path
 

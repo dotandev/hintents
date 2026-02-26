@@ -75,4 +75,7 @@ func init() {
 	xdrCmd.Flags().StringVar(&xdrType, "type", "ledger-entry", "XDR type: ledger-entry, diagnostic-event")
 
 	_ = xdrCmd.MarkFlagRequired("data")
+
+	_ = xdrCmd.RegisterFlagCompletionFunc("format", completeXDRFormatFlag)
+	_ = xdrCmd.RegisterFlagCompletionFunc("type", completeXDRTypeFlag)
 }

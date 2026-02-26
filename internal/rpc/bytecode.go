@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -154,6 +155,97 @@ func FetchContractBytecode(ctx context.Context, c *Client, contractIDStr string)
 	}
 	logger.Logger.Debug("Fetched contract bytecode on demand", "contract_id", contractIDStr, "cached", true)
 	return entries, nil
+}
+
+// WasmBytesFromContractCodeEntry parses a base64-encoded ContractCode ledger entry
+// and returns the raw WASM bytecode.
+func WasmBytesFromContractCodeEntry(entryXDR string) ([]byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(entryXDR)
+	if err != nil {
+		return nil, fmt.Errorf("decode contract code entry: %w", err)
+	}
+	var entry xdr.LedgerEntry
+	if err := entry.UnmarshalBinary(raw); err != nil {
+		return nil, fmt.Errorf("unmarshal ledger entry: %w", err)
+	}
+	if entry.Data.Type != xdr.LedgerEntryTypeContractCode || entry.Data.ContractCode == nil {
+		return nil, fmt.Errorf("not a contract code entry")
+	}
+	return entry.Data.ContractCode.Code, nil
+}
+
+// FetchHistoricalContractBytecode retrieves the WASM bytecode for a contract as it
+// appeared in a specific transaction's result metadata. This enables auditing a
+// contract's code at a particular version by referencing the deploy or upgrade
+// transaction hash. It returns the raw WASM bytes and the hex-encoded code hash.
+func FetchHistoricalContractBytecode(ctx context.Context, c *Client, contractIDStr string, txHash string) ([]byte, string, error) {
+	txResp, err := c.GetTransaction(ctx, txHash)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetch transaction %s: %w", txHash, err)
+	}
+	if txResp.ResultMetaXdr == "" {
+		return nil, "", errors.WrapValidationError(fmt.Sprintf("transaction %s has no result metadata", txHash))
+	}
+
+	entries, err := ExtractLedgerEntriesFromMeta(txResp.ResultMetaXdr)
+	if err != nil {
+		return nil, "", fmt.Errorf("extract ledger entries from meta: %w", err)
+	}
+
+	cid, err := decodeContractID(contractIDStr)
+	if err != nil {
+		return nil, "", err
+	}
+
+	instanceKey, err := LedgerKeyForContractInstance(cid)
+	if err != nil {
+		return nil, "", fmt.Errorf("build instance key: %w", err)
+	}
+	instanceKeyB64, err := EncodeLedgerKey(instanceKey)
+	if err != nil {
+		return nil, "", fmt.Errorf("encode instance key: %w", err)
+	}
+
+	instanceEntry, ok := entries[instanceKeyB64]
+	if !ok {
+		return nil, "", errors.WrapValidationError(
+			fmt.Sprintf("contract instance not found in transaction metadata for %s", contractIDStr),
+		)
+	}
+
+	codeHash, err := ContractCodeHashFromInstanceEntry(instanceEntry)
+	if err != nil {
+		return nil, "", fmt.Errorf("get code hash from instance: %w", err)
+	}
+
+	codeKey := xdr.LedgerKey{
+		Type:         xdr.LedgerEntryTypeContractCode,
+		ContractCode: &xdr.LedgerKeyContractCode{Hash: codeHash},
+	}
+	codeKeyB64, err := EncodeLedgerKey(codeKey)
+	if err != nil {
+		return nil, "", fmt.Errorf("encode code key: %w", err)
+	}
+
+	codeEntry, ok := entries[codeKeyB64]
+	if !ok {
+		return nil, "", errors.WrapValidationError(
+			fmt.Sprintf("contract code not found in transaction metadata for hash %x", codeHash),
+		)
+	}
+
+	wasmBytes, err := WasmBytesFromContractCodeEntry(codeEntry)
+	if err != nil {
+		return nil, "", fmt.Errorf("extract wasm bytes: %w", err)
+	}
+
+	hashHex := hex.EncodeToString(codeHash[:])
+	logger.Logger.Debug("Fetched historical contract bytecode",
+		"contract_id", contractIDStr,
+		"tx_hash", txHash,
+		"code_hash", hashHex,
+	)
+	return wasmBytes, hashHex, nil
 }
 
 // FetchBytecodeForTraceContractCalls collects unique contract IDs from diagnostic events,

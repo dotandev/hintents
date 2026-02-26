@@ -220,5 +220,7 @@ func init() {
 	reportCmd.Flags().StringVar(&reportOutput, "output", ".", "Output directory for reports")
 	reportCmd.Flags().StringVar(&reportFile, "file", "", "Trace file to analyze")
 
+	_ = reportCmd.RegisterFlagCompletionFunc("format", completeReportFormatFlag)
+
 	rootCmd.AddCommand(reportCmd)
 }

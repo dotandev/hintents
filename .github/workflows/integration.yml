@@ -1,0 +1,125 @@
+name: Integration Tests – Cross-Platform Binary
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main", "develop"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Matrix: Linux · macOS Intel · macOS Apple Silicon · Windows
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  integration:
+    name: Integration / ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false          # run all platforms even if one fails
+      matrix:
+        include:
+          - os: Linux
+            runner: ubuntu-24.04
+            binary_suffix: ""
+            go_arch: amd64
+
+          - os: macOS-Intel
+            runner: macos-13     # Intel runner
+            binary_suffix: ""
+            go_arch: amd64
+
+          - os: macOS-Apple-Silicon
+            runner: macos-14     # M-series ARM runner
+            binary_suffix: ""
+            go_arch: arm64
+
+          - os: Windows
+            runner: windows-2022
+            binary_suffix: ".exe"
+            go_arch: amd64
+
+    env:
+      # Allow the test suite to find the compiled binary without hard-coding a path.
+      ERST_BINARY: ${{ github.workspace }}/erst${{ matrix.binary_suffix }}
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── Go toolchain ──────────────────────────────────────────────────────
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # ── Rust toolchain (for the Soroban simulator) ─────────────────────────
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust build artefacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: simulator -> target
+
+      # ── Build erst binary ──────────────────────────────────────────────────
+      - name: Build erst (Go CLI)
+        run: |
+          go build -v -o "${{ env.ERST_BINARY }}" ./cmd/erst
+
+      # ── Build Rust simulator ───────────────────────────────────────────────
+      - name: Build erst-sim (Rust simulator)
+        working-directory: simulator
+        run: cargo build --release
+
+      # ── Verify binary is executable ────────────────────────────────────────
+      - name: Smoke-test binary (--version)
+        run: ${{ env.ERST_BINARY }} --version
+
+      # ── Unit tests (fast gate before integration) ─────────────────────────
+      - name: Run Go unit tests
+        run: go test -v -race ./...
+
+      # ── Integration test suite ─────────────────────────────────────────────
+      - name: Run integration tests
+        run: |
+          go test -v -race -timeout 120s ./integration/...
+        env:
+          ERST_BINARY: ${{ env.ERST_BINARY }}
+
+      # ── Upload test results on failure ────────────────────────────────────
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.os }}
+          path: |
+            **/*.log
+            **/test-output.txt
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Summary job – required status check for branch protection
+  # ─────────────────────────────────────────────────────────────────────────
+  integration-complete:
+    name: Integration complete
+    runs-on: ubuntu-24.04
+    needs: integration
+    if: always()
+    steps:
+      - name: Check all matrix jobs passed
+        run: |
+          if [ "${{ needs.integration.result }}" != "success" ]; then
+            echo "One or more platform integration jobs failed."
+            exit 1
+          fi
+          echo "All platform integration jobs passed."

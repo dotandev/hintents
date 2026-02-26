@@ -16,6 +16,11 @@ type MethodTimer interface {
 	Stop(err error)
 }
 
+var (
+	_ MethodTelemetry = (*noopMethodTelemetry)(nil)
+	_ MethodTimer     = (*noopMethodTimer)(nil)
+)
+
 type noopMethodTelemetry struct{}
 
 func (noopMethodTelemetry) StartMethodTimer(_ context.Context, _ string, _ map[string]string) MethodTimer {

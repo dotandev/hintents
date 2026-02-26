@@ -14,6 +14,11 @@ import (
 // TrapType categorizes different types of traps/errors
 type TrapType string
 
+// SourceLocation is an alias for dwarf.SourceLocation, re-exported for
+// convenience so callers within this package and its tests can refer to
+// SourceLocation directly without qualifying the dwarf package name.
+type SourceLocation = dwarf.SourceLocation
+
 const (
 	TrapMemoryOutOfBounds TrapType = "memory_out_of_bounds"
 	TrapIndexOutOfBounds  TrapType = "index_out_of_bounds"
@@ -26,6 +31,31 @@ const (
 
 // TrapInfo contains information about a trap that occurred during execution
 type TrapInfo struct {
+	Type           TrapType               // Type of trap
+	Message        string                 // Error message
+	SourceLocation *dwarf.SourceLocation  // Source location if available
+	LocalVars      []LocalVarInfo         // Local variables at trap point
+	Function       string                 // Function where trap occurred
+	CallStack      []string               // Call stack at trap point
+	// InlinedChain holds the resolved inlined-subroutine chain from outermost
+	// to innermost when the fault occurred inside compiler-inlined code.
+	// When non-empty the innermost entry describes the actual fault site and
+	// each preceding entry is the inlining caller.  SourceLocation is updated
+	// to point at the innermost fault site so downstream consumers that do not
+	// understand inlining still get a correct location.
+	InlinedChain []InlinedFrame
+}
+
+// InlinedFrame describes one level of an inlined call chain.
+type InlinedFrame struct {
+	// Function is the name of the inlined function at this level.
+	Function string
+	// CallSite is the location inside the caller where the inlining was
+	// requested (i.e. where the call was written in the caller's source).
+	CallSite dwarf.SourceLocation
+	// InlinedAt is the location inside the inlined function's own source
+	// where execution was when the fault occurred.
+	InlinedAt dwarf.SourceLocation
 	Type           TrapType              // Type of trap
 	Message        string                // Error message
 	SourceLocation *dwarf.SourceLocation // Source location if available
@@ -87,7 +117,7 @@ func (td *TrapDetector) DetectTrap(state *ExecutionState) *TrapInfo {
 	}
 
 	// Try to get source location from DWARF
-	if td.dwarfParser != nil && state.Arguments != nil {
+	if td.dwarfParser != nil {
 		// Use function address if available (would need to be extracted from trace)
 		// For now, we'll try to find the subprogram based on the function name
 		subprograms, _ := td.dwarfParser.GetSubprograms()
@@ -98,6 +128,10 @@ func (td *TrapDetector) DetectTrap(state *ExecutionState) *TrapInfo {
 					Line: sp.Line,
 				}
 				trap.LocalVars = td.extractLocalVars(&sp)
+
+				// Resolve inlined subroutines so we can pin the fault to the
+				// actual inlined code rather than the enclosing caller.
+				td.resolveInlinedChain(trap, sp.LowPC, &sp)
 				break
 			}
 		}
@@ -199,6 +233,64 @@ func (td *TrapDetector) extractLocalVars(sp *dwarf.SubprogramInfo) []LocalVarInf
 	return vars
 }
 
+// resolveInlinedChain queries the DWARF parser for inlined subroutines inside
+// the given concrete subprogram.  When inlined frames are found:
+//
+//   - trap.InlinedChain is populated from outermost caller to innermost inlined body.
+//   - trap.SourceLocation is updated to point at the innermost inlined body's own
+//     source location so callers that are unaware of inlining still get the most
+//     accurate fault location.
+//   - trap.Function is updated to the innermost inlined function name so the
+//     displayed function name reflects where the fault occurred, not the caller.
+//
+// If no inlined frames are found the trap is left unchanged.
+func (td *TrapDetector) resolveInlinedChain(trap *TrapInfo, addr uint64, sp *dwarf.SubprogramInfo) {
+	if td.dwarfParser == nil {
+		return
+	}
+
+	chain, err := td.dwarfParser.ResolveInlinedChain(addr)
+	if err != nil || len(chain) == 0 {
+		return
+	}
+
+	frames := make([]InlinedFrame, 0, len(chain))
+	for _, il := range chain {
+		frames = append(frames, InlinedFrame{
+			Function:  displayName(il.Name, il.DemangledName),
+			CallSite:  il.CallSite,
+			InlinedAt: il.InlinedLocation,
+		})
+	}
+	trap.InlinedChain = frames
+
+	// Point SourceLocation at the innermost inlined body so the fault site is
+	// shown accurately instead of the enclosing caller's entry point.
+	innermost := frames[len(frames)-1]
+	if innermost.InlinedAt.File != "" || innermost.InlinedAt.Line != 0 {
+		trap.SourceLocation = &dwarf.SourceLocation{
+			File:   innermost.InlinedAt.File,
+			Line:   innermost.InlinedAt.Line,
+			Column: innermost.InlinedAt.Column,
+		}
+	}
+
+	// Update the reported function name to the innermost inlined function so it
+	// is clear to the developer that the fault occurred inside inlined code and
+	// not in the outer caller.
+	if innermost.Function != "" {
+		trap.Function = innermost.Function
+	}
+}
+
+// displayName returns DemangledName when non-empty, falling back to Name.
+func displayName(name, demangled string) string {
+	if demangled != "" {
+		return demangled
+	}
+	return name
+}
+
 // FindTrapPoint finds the step where a trap occurred in the trace
 func (td *TrapDetector) FindTrapPoint(trace *ExecutionTrace) *TrapInfo {
 	for i := range trace.States {
@@ -269,6 +361,26 @@ func FormatTrapInfo(trap *TrapInfo) string {
 		sb.WriteString("\n" + visualizer.Symbol("wrench") + " Function: ")
 		sb.WriteString(trap.Function)
 		sb.WriteString("\n")
+	}
+
+	// Inlined call chain – only shown when the fault occurred inside inlined code.
+	// The chain is displayed from outermost caller to innermost inlined body so
+	// the developer can trace the path from their written call-site down to the
+	// precise inlined instruction that faulted.
+	if len(trap.InlinedChain) > 0 {
+		sb.WriteString("\n" + visualizer.Symbol("list") + " Inlined Call Chain (outermost to fault site):\n")
+		for i, frame := range trap.InlinedChain {
+			sb.WriteString(fmt.Sprintf("  %d: %s", i, frame.Function))
+			// Show where inside the caller the inlining was requested.
+			if frame.CallSite.File != "" || frame.CallSite.Line != 0 {
+				sb.WriteString(fmt.Sprintf(" (called from %s:%d)", frame.CallSite.File, frame.CallSite.Line))
+			}
+			// Show the inlined body's own fault location.
+			if frame.InlinedAt.File != "" || frame.InlinedAt.Line != 0 {
+				sb.WriteString(fmt.Sprintf(" [inlined at %s:%d]", frame.InlinedAt.File, frame.InlinedAt.Line))
+			}
+			sb.WriteString("\n")
+		}
 	}
 
 	// Local variables

@@ -274,6 +274,31 @@ func TestLoadFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestGetEnv_RequiresErstPrefix(t *testing.T) {
+	// Ensure non-ERST env keys are ignored by getEnv
+	origStellar := os.Getenv("STELLAR_RPC_URL")
+	origErst := os.Getenv("ERST_RPC_URL")
+	defer func() {
+		os.Setenv("STELLAR_RPC_URL", origStellar)
+		os.Setenv("ERST_RPC_URL", origErst)
+	}()
+
+	os.Setenv("STELLAR_RPC_URL", "https://stellar.example.com")
+	os.Unsetenv("ERST_RPC_URL")
+
+	// getEnv should return the default when asked for non-ERST key
+	def := "https://default.example.com"
+	if got := getEnv("STELLAR_RPC_URL", def); got != def {
+		t.Errorf("expected getEnv to return default for non-ERST key, got %s", got)
+	}
+
+	// But should return value for ERST_ key
+	os.Setenv("ERST_RPC_URL", "https://erst.example.com")
+	if got := getEnv("ERST_RPC_URL", def); got != "https://erst.example.com" {
+		t.Errorf("expected getEnv to read ERST_ env var, got %s", got)
+	}
+}
+
 func TestLoadTOMLFile(t *testing.T) {
 	tmpdir := t.TempDir()
 	configPath := filepath.Join(tmpdir, "test.toml")

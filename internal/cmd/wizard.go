@@ -45,5 +45,8 @@ var wizardCmd = &cobra.Command{
 func init() {
 	wizardCmd.Flags().StringP("account", "a", "", "Stellar account address")
 	wizardCmd.Flags().StringP("network", "n", string(rpc.Mainnet), "Network (testnet, mainnet, futurenet)")
+
+	_ = wizardCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
+
 	rootCmd.AddCommand(wizardCmd)
 }

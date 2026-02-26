@@ -65,6 +65,7 @@ Example:
 		if err != nil {
 			return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
 		}
+		registerCacheFlushHook()
 
 		// 3. Fetch Transaction
 		fmt.Printf("Fetching transaction: %s from %s\n", txHash, networkFlag)
@@ -102,6 +103,8 @@ Example:
 		if err != nil {
 			return errors.WrapSimulatorNotFound(err.Error())
 		}
+		registerRunnerCloseHook("upgrade-simulator-runner", runner)
+		defer func() { _ = runner.Close() }()
 
 		simReq := &simulator.SimulationRequest{
 			EnvelopeXdr:   resp.EnvelopeXdr,
@@ -110,7 +113,7 @@ Example:
 		}
 
 		fmt.Println("Running simulation with upgraded code...")
-		result, err := runner.Run(simReq)
+		result, err := runner.Run(cmd.Context(), simReq)
 		if err != nil {
 			return errors.WrapSimulationFailed(err, "")
 		}
@@ -129,6 +132,8 @@ func init() {
 	// BUT we need to register flags for THIS command too.
 	upgradeCmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use")
 	upgradeCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL")
+
+	_ = upgradeCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
 
 	rootCmd.AddCommand(upgradeCmd)
 }

@@ -15,12 +15,12 @@ import (
 
 // MockRunner implements simulator.RunnerInterface for testing
 type MockRunner struct {
-	RunFunc func(*simulator.SimulationRequest) (*simulator.SimulationResponse, error)
+	RunFunc func(context.Context, *simulator.SimulationRequest) (*simulator.SimulationResponse, error)
 }
 
-func (m *MockRunner) Run(req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+func (m *MockRunner) Run(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
 	if m.RunFunc != nil {
-		return m.RunFunc(req)
+		return m.RunFunc(ctx, req)
 	}
 	return &simulator.SimulationResponse{
 		Status: "success",
@@ -29,19 +29,20 @@ func (m *MockRunner) Run(req *simulator.SimulationRequest) (*simulator.Simulatio
 	}, nil
 }
 
-func newTestRPCClient(t *testing.T) *rpc.Client {
-	t.Helper()
+func (m *MockRunner) Close() error { return nil }
 
-	client, err := rpc.NewClient(rpc.WithNetwork(rpc.Testnet))
+func mustTestRPCClient(t *testing.T) *rpc.Client {
+	t.Helper()
+	c, err := rpc.NewClient(rpc.WithNetwork(rpc.Testnet))
 	if err != nil {
 		t.Fatalf("failed to create rpc client: %v", err)
 	}
-	return client
+	return c
 }
 
 func TestNewSession(t *testing.T) {
 	runner := &MockRunner{}
-	rpcClient := newTestRPCClient(t)
+	rpcClient := mustTestRPCClient(t)
 
 	session := NewSession(runner, rpcClient, rpc.Testnet)
 
@@ -64,7 +65,7 @@ func TestNewSession(t *testing.T) {
 
 func TestGetStateSummary(t *testing.T) {
 	runner := &MockRunner{}
-	rpcClient := newTestRPCClient(t)
+	rpcClient := mustTestRPCClient(t)
 	session := NewSession(runner, rpcClient, rpc.Testnet)
 
 	// Add some entries
@@ -90,7 +91,7 @@ func TestGetStateSummary(t *testing.T) {
 
 func TestSaveAndLoadState(t *testing.T) {
 	runner := &MockRunner{}
-	rpcClient := newTestRPCClient(t)
+	rpcClient := mustTestRPCClient(t)
 	session := NewSession(runner, rpcClient, rpc.Testnet)
 
 	// Set up some state
@@ -131,7 +132,7 @@ func TestSaveAndLoadState(t *testing.T) {
 
 func TestResetState(t *testing.T) {
 	runner := &MockRunner{}
-	rpcClient := newTestRPCClient(t)
+	rpcClient := mustTestRPCClient(t)
 	session := NewSession(runner, rpcClient, rpc.Testnet)
 
 	// Set initial state
@@ -175,7 +176,7 @@ func TestResetState(t *testing.T) {
 
 func TestInvoke(t *testing.T) {
 	runner := &MockRunner{
-		RunFunc: func(req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+		RunFunc: func(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
 			return &simulator.SimulationResponse{
 				Status: "success",
 				Events: []string{"transfer_event"},
@@ -184,7 +185,7 @@ func TestInvoke(t *testing.T) {
 		},
 	}
 
-	rpcClient := newTestRPCClient(t)
+	rpcClient := mustTestRPCClient(t)
 	session := NewSession(runner, rpcClient, rpc.Testnet)
 
 	ctx := context.Background()
@@ -201,7 +202,7 @@ func TestInvoke(t *testing.T) {
 
 func TestUpdateLedgerState(t *testing.T) {
 	runner := &MockRunner{}
-	rpcClient := newTestRPCClient(t)
+	rpcClient := mustTestRPCClient(t)
 	session := NewSession(runner, rpcClient, rpc.Testnet)
 
 	initialSequence := session.ledgerSequence
@@ -226,7 +227,7 @@ func TestUpdateLedgerState(t *testing.T) {
 
 func TestLoadStateInvalidFile(t *testing.T) {
 	runner := &MockRunner{}
-	rpcClient := newTestRPCClient(t)
+	rpcClient := mustTestRPCClient(t)
 	session := NewSession(runner, rpcClient, rpc.Testnet)
 
 	err := session.LoadState("nonexistent.json")
@@ -237,7 +238,7 @@ func TestLoadStateInvalidFile(t *testing.T) {
 
 func TestLoadStateInvalidJSON(t *testing.T) {
 	runner := &MockRunner{}
-	rpcClient := newTestRPCClient(t)
+	rpcClient := mustTestRPCClient(t)
 	session := NewSession(runner, rpcClient, rpc.Testnet)
 
 	// Create invalid JSON file

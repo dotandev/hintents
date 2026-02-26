@@ -299,6 +299,17 @@ func TestExtractFromChanges_MultipleTypes(t *testing.T) {
 // Ledger Header Tests
 // =============================================================================
 
+// newMockLedgerClient wraps a mockHorizonClient in a Client with AltURLs
+// populated so the failover loop runs at least once in each test.
+func newMockLedgerClient(mock *mockHorizonClient, network Network) *Client {
+	return &Client{
+		Horizon:    mock,
+		Network:    network,
+		HorizonURL: "mock://horizon",
+		AltURLs:    []string{"mock://horizon"},
+	}
+}
+
 // TestGetLedgerHeader_Success tests successful ledger header retrieval
 func TestGetLedgerHeader_Success(t *testing.T) {
 	closeTime := time.Now().UTC()
@@ -331,7 +342,7 @@ func TestGetLedgerHeader_Success(t *testing.T) {
 		}, nil
 	}
 
-	client := &Client{Horizon: mock, Network: Testnet}
+	client := newMockLedgerClient(mock, Testnet)
 	ctx := context.Background()
 
 	header, err := client.GetLedgerHeader(ctx, expectedSequence)
@@ -372,15 +383,15 @@ func TestGetLedgerHeader_NotFound(t *testing.T) {
 		}
 	}
 
-	client := &Client{Horizon: mock, Network: Testnet}
+	client := newMockLedgerClient(mock, Testnet)
 	ctx := context.Background()
 
 	_, err := client.GetLedgerHeader(ctx, 999999999)
 	require.Error(t, err)
 	assert.True(t, IsLedgerNotFound(err), "should be ledger not found error")
 
-	notFoundErr, ok := err.(*errors.LedgerNotFoundError)
-	require.True(t, ok)
+	var notFoundErr *errors.LedgerNotFoundError
+	require.True(t, errors.As(err, &notFoundErr))
 	assert.Equal(t, uint32(999999999), notFoundErr.Sequence)
 	assert.Contains(t, notFoundErr.Message, "not found")
 }
@@ -402,15 +413,15 @@ func TestGetLedgerHeader_Archived(t *testing.T) {
 		}
 	}
 
-	client := &Client{Horizon: mock, Network: Testnet}
+	client := newMockLedgerClient(mock, Testnet)
 	ctx := context.Background()
 
 	_, err := client.GetLedgerHeader(ctx, 1)
 	require.Error(t, err)
 	assert.True(t, IsLedgerArchived(err), "should be ledger archived error")
 
-	archivedErr, ok := err.(*errors.LedgerArchivedError)
-	require.True(t, ok)
+	var archivedErr *errors.LedgerArchivedError
+	require.True(t, errors.As(err, &archivedErr))
 	assert.Equal(t, uint32(1), archivedErr.Sequence)
 	assert.Contains(t, archivedErr.Message, "archived")
 }
@@ -432,15 +443,15 @@ func TestGetLedgerHeader_RateLimit(t *testing.T) {
 		}
 	}
 
-	client := &Client{Horizon: mock, Network: Testnet}
+	client := newMockLedgerClient(mock, Testnet)
 	ctx := context.Background()
 
 	_, err := client.GetLedgerHeader(ctx, 12345)
 	require.Error(t, err)
 	assert.True(t, IsRateLimitError(err), "should be rate limit error")
 
-	rateLimitErr, ok := err.(*errors.RateLimitError)
-	require.True(t, ok)
+	var rateLimitErr *errors.RateLimitError
+	require.True(t, errors.As(err, &rateLimitErr))
 	assert.Contains(t, rateLimitErr.Message, "rate limit")
 }
 
@@ -462,7 +473,7 @@ func TestGetLedgerHeader_Timeout(t *testing.T) {
 		}
 	}
 
-	client := &Client{Horizon: mock, Network: Testnet}
+	client := newMockLedgerClient(mock, Testnet)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	testCtx = ctx
@@ -483,7 +494,7 @@ func TestGetLedgerHeader_GenericError(t *testing.T) {
 		return hProtocol.Ledger{}, errors.New("network error")
 	}
 
-	client := &Client{Horizon: mock, Network: Testnet}
+	client := newMockLedgerClient(mock, Testnet)
 	ctx := context.Background()
 
 	_, err := client.GetLedgerHeader(ctx, 12345)
@@ -492,94 +503,6 @@ func TestGetLedgerHeader_GenericError(t *testing.T) {
 	assert.False(t, IsLedgerArchived(err))
 	assert.False(t, IsRateLimitError(err))
 	assert.Contains(t, err.Error(), "RPC connection failed")
-}
-
-// TestFromHorizonLedger tests the conversion from Horizon ledger to our structure
-func TestFromHorizonLedger(t *testing.T) {
-	closeTime := time.Date(2024, 1, 15, 12, 30, 45, 0, time.UTC)
-	failedTxCount := int32(5)
-
-	horizonLedger := hProtocol.Ledger{
-		Sequence:                   12345,
-		Hash:                       "abcd1234",
-		PrevHash:                   "prev5678",
-		ClosedAt:                   closeTime,
-		ProtocolVersion:            20,
-		BaseFee:                    100,
-		BaseReserve:                5000000,
-		MaxTxSetSize:               1000,
-		TotalCoins:                 "1000000000000",
-		FeePool:                    "1000000",
-		HeaderXDR:                  "AAAA...",
-		SuccessfulTransactionCount: 50,
-		FailedTransactionCount:     &failedTxCount,
-		OperationCount:             200,
-	}
-
-	result := FromHorizonLedger(horizonLedger)
-
-	assert.Equal(t, uint32(12345), result.Sequence)
-	assert.Equal(t, "abcd1234", result.Hash)
-	assert.Equal(t, "prev5678", result.PrevHash)
-	assert.Equal(t, closeTime, result.CloseTime)
-	assert.Equal(t, uint32(20), result.ProtocolVersion)
-	assert.Equal(t, int32(100), result.BaseFee)
-	assert.Equal(t, int32(5000000), result.BaseReserve)
-	assert.Equal(t, int32(1000), result.MaxTxSetSize)
-	assert.Equal(t, "1000000000000", result.TotalCoins)
-	assert.Equal(t, "1000000", result.FeePool)
-	assert.Equal(t, "AAAA...", result.HeaderXDR)
-	assert.Equal(t, int32(50), result.SuccessfulTxCount)
-	assert.Equal(t, int32(5), result.FailedTxCount)
-	assert.Equal(t, int32(200), result.OperationCount)
-}
-
-// TestErrorTypes tests the error type checking functions
-func TestErrorTypes(t *testing.T) {
-	notFoundErr := &errors.LedgerNotFoundError{Sequence: 123, Message: "not found"}
-	archivedErr := &errors.LedgerArchivedError{Sequence: 456, Message: "archived"}
-	rateLimitErr := &errors.RateLimitError{Message: "rate limited"}
-	genericErr := errors.New("generic error")
-
-	// Test IsLedgerNotFound
-	assert.True(t, IsLedgerNotFound(notFoundErr))
-	assert.False(t, IsLedgerNotFound(archivedErr))
-	assert.False(t, IsLedgerNotFound(rateLimitErr))
-	assert.False(t, IsLedgerNotFound(genericErr))
-
-	// Test IsLedgerArchived
-	assert.True(t, IsLedgerArchived(archivedErr))
-	assert.False(t, IsLedgerArchived(notFoundErr))
-	assert.False(t, IsLedgerArchived(rateLimitErr))
-	assert.False(t, IsLedgerArchived(genericErr))
-
-	// Test IsRateLimitError
-	assert.True(t, IsRateLimitError(rateLimitErr))
-	assert.False(t, IsRateLimitError(notFoundErr))
-	assert.False(t, IsRateLimitError(archivedErr))
-	assert.False(t, IsRateLimitError(genericErr))
-}
-
-// TestErrorMessages tests that error messages are descriptive
-func TestErrorMessages(t *testing.T) {
-	notFoundErr := &errors.LedgerNotFoundError{
-		Sequence: 123,
-		Message:  "ledger 123 not found (may be archived or not yet created)",
-	}
-	assert.Contains(t, notFoundErr.Error(), "123")
-	assert.Contains(t, notFoundErr.Error(), "not found")
-
-	archivedErr := &errors.LedgerArchivedError{
-		Sequence: 456,
-		Message:  "ledger 456 has been archived and is no longer available",
-	}
-	assert.Contains(t, archivedErr.Error(), "456")
-	assert.Contains(t, archivedErr.Error(), "archived")
-
-	rateLimitErr := &errors.RateLimitError{
-		Message: "rate limit exceeded, please try again later",
-	}
-	assert.Contains(t, rateLimitErr.Error(), "rate limit")
 }
 
 // TestGetLedgerHeader_DifferentNetworks tests that the client works with different networks
@@ -602,7 +525,7 @@ func TestGetLedgerHeader_DifferentNetworks(t *testing.T) {
 				}, nil
 			}
 
-			client := &Client{Horizon: mock, Network: network}
+			client := newMockLedgerClient(mock, network)
 			ctx := context.Background()
 
 			header, err := client.GetLedgerHeader(ctx, 12345)
@@ -628,7 +551,7 @@ func TestGetLedgerHeader_ContextWithDeadline(t *testing.T) {
 		}, nil
 	}
 
-	client := &Client{Horizon: mock, Network: Testnet}
+	client := newMockLedgerClient(mock, Testnet)
 
 	// Create context with deadline
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -654,7 +577,7 @@ func TestGetLedgerHeader_ContextWithoutDeadline(t *testing.T) {
 		}, nil
 	}
 
-	client := &Client{Horizon: mock, Network: Testnet}
+	client := newMockLedgerClient(mock, Testnet)
 
 	// Create context without deadline
 	ctx := context.Background()

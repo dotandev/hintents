@@ -185,7 +185,6 @@ func (tr *TreeRenderer) Render() string {
 
 	// Render scrollbar indicator if needed
 	if len(tr.nodes) > visibleRows {
-		_ = int(float64(tr.scrollOffset) / float64(len(tr.nodes)-visibleRows) * float64(visibleRows))
 		scrollLine := fmt.Sprintf("─ Showing %d-%d of %d lines (↑↓ navigate, click [+/-] to expand) ─",
 			startRow+1, endRow, len(tr.nodes))
 		output.WriteString(scrollLine)

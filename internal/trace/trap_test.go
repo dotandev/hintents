@@ -387,6 +387,175 @@ func TestNewTrapDetector(t *testing.T) {
 	_ = td2
 }
 
+// =============================================================================
+// Inlined function handling tests
+// =============================================================================
+
+// TestInlinedFrame tests the InlinedFrame struct.
+func TestInlinedFrame(t *testing.T) {
+	frame := InlinedFrame{
+		Function: "check_balance",
+		CallSite: SourceLocation{
+			File:   "token.rs",
+			Line:   42,
+			Column: 5,
+		},
+		InlinedAt: SourceLocation{
+			File:   "balance.rs",
+			Line:   10,
+		},
+	}
+
+	if frame.Function != "check_balance" {
+		t.Errorf("Function = %q, want %q", frame.Function, "check_balance")
+	}
+	if frame.CallSite.File != "token.rs" {
+		t.Errorf("CallSite.File = %q, want %q", frame.CallSite.File, "token.rs")
+	}
+	if frame.CallSite.Line != 42 {
+		t.Errorf("CallSite.Line = %d, want 42", frame.CallSite.Line)
+	}
+	if frame.InlinedAt.File != "balance.rs" {
+		t.Errorf("InlinedAt.File = %q, want %q", frame.InlinedAt.File, "balance.rs")
+	}
+}
+
+// TestFormatTrapInfo_WithInlinedChain verifies that FormatTrapInfo includes the
+// inlined call chain section when TrapInfo.InlinedChain is populated.
+func TestFormatTrapInfo_WithInlinedChain(t *testing.T) {
+	trap := &TrapInfo{
+		Type:    TrapIndexOutOfBounds,
+		Message: "index out of bounds: len=5, index=10",
+		Function: "check_balance",
+		SourceLocation: &SourceLocation{
+			File: "balance.rs",
+			Line: 10,
+		},
+		InlinedChain: []InlinedFrame{
+			{
+				Function: "transfer",
+				CallSite: SourceLocation{File: "token.rs", Line: 55},
+				InlinedAt: SourceLocation{File: "balance.rs", Line: 10},
+			},
+			{
+				Function: "check_balance",
+				CallSite: SourceLocation{File: "balance.rs", Line: 10},
+				InlinedAt: SourceLocation{File: "balance.rs", Line: 22},
+			},
+		},
+	}
+
+	output := FormatTrapInfo(trap)
+
+	// The output must mention the inlined chain section header.
+	if !contains(output, "Inlined Call Chain") {
+		t.Error("expected output to contain 'Inlined Call Chain'")
+	}
+	// Both function names must appear.
+	if !contains(output, "transfer") {
+		t.Error("expected output to contain 'transfer'")
+	}
+	if !contains(output, "check_balance") {
+		t.Error("expected output to contain 'check_balance'")
+	}
+	// Call-site file must appear.
+	if !contains(output, "token.rs") {
+		t.Error("expected output to contain 'token.rs'")
+	}
+	// Inlined-at file must appear.
+	if !contains(output, "balance.rs") {
+		t.Error("expected output to contain 'balance.rs'")
+	}
+}
+
+// TestFormatTrapInfo_NoInlinedChain verifies that FormatTrapInfo does not emit
+// the inlined chain section when InlinedChain is empty.
+func TestFormatTrapInfo_NoInlinedChain(t *testing.T) {
+	trap := &TrapInfo{
+		Type:    TrapPanic,
+		Message: "contract panicked",
+		Function: "transfer",
+	}
+
+	output := FormatTrapInfo(trap)
+
+	if contains(output, "Inlined Call Chain") {
+		t.Error("expected output NOT to contain 'Inlined Call Chain' when chain is empty")
+	}
+}
+
+// TestResolveInlinedChain_NoDwarfParser verifies that resolveInlinedChain
+// returns without modifying the trap when no DWARF parser is set.
+func TestResolveInlinedChain_NoDwarfParser(t *testing.T) {
+	td := &TrapDetector{dwarfParser: nil}
+
+	trap := &TrapInfo{
+		Type:     TrapPanic,
+		Message:  "panic",
+		Function: "transfer",
+		SourceLocation: &SourceLocation{
+			File: "token.rs",
+			Line: 10,
+		},
+	}
+	originalFunc := trap.Function
+	originalFile := trap.SourceLocation.File
+
+	td.resolveInlinedChain(trap, 0x1000, nil)
+
+	if trap.Function != originalFunc {
+		t.Errorf("Function changed unexpectedly: %q -> %q", originalFunc, trap.Function)
+	}
+	if trap.SourceLocation.File != originalFile {
+		t.Errorf("SourceLocation.File changed unexpectedly")
+	}
+	if len(trap.InlinedChain) != 0 {
+		t.Errorf("expected empty InlinedChain, got %d frames", len(trap.InlinedChain))
+	}
+}
+
+// TestTrapInfo_InlinedChainFieldExists ensures TrapInfo has the InlinedChain
+// field and that it defaults to nil (not allocated) for zero-value structs.
+func TestTrapInfo_InlinedChainFieldExists(t *testing.T) {
+	var trap TrapInfo
+	if trap.InlinedChain != nil {
+		t.Error("expected nil InlinedChain for zero-value TrapInfo")
+	}
+
+	trap.InlinedChain = []InlinedFrame{
+		{Function: "foo"},
+	}
+	if len(trap.InlinedChain) != 1 {
+		t.Errorf("expected 1 frame, got %d", len(trap.InlinedChain))
+	}
+}
+
+// TestDetectTrap_FunctionUpdatedFromInlined verifies that DetectTrap does not
+// crash when called without DWARF data and still returns a populated TrapInfo.
+func TestDetectTrap_FunctionUpdatedFromInlined(t *testing.T) {
+	td := &TrapDetector{dwarfParser: nil}
+
+	state := &ExecutionState{
+		Error:    "index out of bounds: len=3, index=5",
+		Function: "swap",
+	}
+
+	trap := td.DetectTrap(state)
+	if trap == nil {
+		t.Fatal("expected non-nil TrapInfo")
+	}
+	if trap.Function != "swap" {
+		t.Errorf("Function = %q, want %q", trap.Function, "swap")
+	}
+	if trap.Type != TrapIndexOutOfBounds {
+		t.Errorf("Type = %v, want %v", trap.Type, TrapIndexOutOfBounds)
+	}
+	// Without DWARF data no inlined chain can be resolved.
+	if len(trap.InlinedChain) != 0 {
+		t.Errorf("expected empty InlinedChain without DWARF data, got %d frames", len(trap.InlinedChain))
+	}
+}
+
 // Helper function to check if string contains substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))

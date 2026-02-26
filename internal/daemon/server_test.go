@@ -121,3 +121,48 @@ func TestServer_StartStop(t *testing.T) {
 		t.Fatalf("Server start failed: %v", err)
 	}
 }
+
+func TestServer_GetContractCode(t *testing.T) {
+	t.Setenv("ERST_SIM_PATH", os.Args[0])
+
+	server, err := NewServer(Config{
+		Network: string(stellarrpc.Testnet),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/rpc", nil)
+	var resp GetContractCodeResponse
+	err = server.GetContractCode(req, &GetContractCodeRequest{
+		ContractID: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+		TxHash:     "fake-tx-hash",
+	}, &resp)
+
+	if err == nil {
+		t.Error("Expected error for fake transaction hash")
+	}
+}
+
+func TestServer_GetContractCode_Auth(t *testing.T) {
+	t.Setenv("ERST_SIM_PATH", os.Args[0])
+
+	server, err := NewServer(Config{
+		Network:   string(stellarrpc.Testnet),
+		AuthToken: "secret-token",
+	})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/rpc", nil)
+	var resp GetContractCodeResponse
+	err = server.GetContractCode(req, &GetContractCodeRequest{
+		ContractID: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+		TxHash:     "test-hash",
+	}, &resp)
+
+	if err == nil {
+		t.Error("Expected auth error without token")
+	}
+}

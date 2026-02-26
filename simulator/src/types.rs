@@ -23,6 +23,7 @@ pub struct SimulationRequest {
     pub timestamp: String,
     pub mock_base_fee: Option<u32>,
     pub mock_gas_price: Option<u64>,
+    pub mock_signature_verification: Option<bool>,
     #[serde(default)]
     pub enable_coverage: bool,
     #[serde(default)]

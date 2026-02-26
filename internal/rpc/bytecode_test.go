@@ -103,3 +103,60 @@ func TestContractCodeHashFromInstanceEntry_NotContractData(t *testing.T) {
 		t.Error("expected error for non-contract-data entry")
 	}
 }
+
+func TestWasmBytesFromContractCodeEntry_Valid(t *testing.T) {
+	wasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	var hash xdr.Hash
+	copy(hash[:], make([]byte, 32))
+	entry := xdr.LedgerEntry{
+		Data: xdr.LedgerEntryData{
+			Type: xdr.LedgerEntryTypeContractCode,
+			ContractCode: &xdr.ContractCodeEntry{
+				Hash: hash,
+				Code: wasm,
+			},
+		},
+	}
+	raw, err := entry.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	b64 := base64.StdEncoding.EncodeToString(raw)
+	got, err := WasmBytesFromContractCodeEntry(b64)
+	if err != nil {
+		t.Fatalf("WasmBytesFromContractCodeEntry: %v", err)
+	}
+	if len(got) != len(wasm) {
+		t.Fatalf("expected %d bytes, got %d", len(wasm), len(got))
+	}
+	for i := range wasm {
+		if got[i] != wasm[i] {
+			t.Errorf("byte %d: expected %02x, got %02x", i, wasm[i], got[i])
+		}
+	}
+}
+
+func TestWasmBytesFromContractCodeEntry_InvalidBase64(t *testing.T) {
+	_, err := WasmBytesFromContractCodeEntry("!!!")
+	if err == nil {
+		t.Error("expected error for invalid base64")
+	}
+}
+
+func TestWasmBytesFromContractCodeEntry_NotContractCode(t *testing.T) {
+	entry := xdr.LedgerEntry{
+		Data: xdr.LedgerEntryData{
+			Type: xdr.LedgerEntryTypeAccount,
+			Account: &xdr.AccountEntry{
+				AccountId: xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H"),
+				Balance:   100,
+			},
+		},
+	}
+	raw, _ := entry.MarshalBinary()
+	b64 := base64.StdEncoding.EncodeToString(raw)
+	_, err := WasmBytesFromContractCodeEntry(b64)
+	if err == nil {
+		t.Error("expected error for non-contract-code entry")
+	}
+}

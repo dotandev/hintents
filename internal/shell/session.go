@@ -85,7 +85,7 @@ func (s *Session) Invoke(ctx context.Context, contractID, function string, args 
 	}
 
 	// Execute simulation
-	resp, err := s.runner.Run(req)
+	resp, err := s.runner.Run(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("simulation failed: %w", err)
 	}

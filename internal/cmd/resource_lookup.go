@@ -23,6 +23,106 @@ func resourceNotFoundError(suggestion string) error {
 	return fmt.Errorf("Resource not found.")
 }
 
+// resolvePartialID returns the matching candidate when input is a unique
+// case-insensitive prefix. If zero or more than one candidate matches, it
+// returns an empty string.
+func resolvePartialID(input string, candidates []string) string {
+	in := strings.ToLower(strings.TrimSpace(input))
+	if in == "" {
+		return ""
+	}
+
+	var match string
+	for _, c := range candidates {
+		if strings.HasPrefix(strings.ToLower(c), in) {
+			if match != "" {
+				return "" // ambiguous
+			}
+			match = c
+		}
+	}
+	return match
+}
+
+// resolveByTxHash returns the session ID whose transaction hash starts with
+// the given prefix. Returns empty when the prefix is ambiguous or absent.
+func resolveByTxHash(input string, sessions []*session.SessionData) string {
+	in := strings.ToLower(strings.TrimSpace(input))
+	if in == "" {
+		return ""
+	}
+
+	var match string
+	for _, s := range sessions {
+		if s == nil || s.TxHash == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(s.TxHash), in) {
+			if match != "" {
+				return "" // ambiguous
+			}
+			match = s.ID
+		}
+	}
+	return match
+}
+
+// resolveSessionInput attempts to load a session by trying, in order:
+//  1. Exact ID match
+//  2. Unique prefix match against session IDs
+//  3. Unique prefix match against transaction hashes
+//  4. Fuzzy suggestion via Levenshtein distance
+//
+// It returns the resolved session or an error with a "Did you mean?" hint.
+func resolveSessionInput(ctx context.Context, store *session.Store, input string) (*session.SessionData, error) {
+	// 1. Exact ID
+	data, err := store.Load(ctx, input)
+	if err == nil {
+		return data, nil
+	}
+
+	sessions, listErr := store.List(ctx, sessionLookupListLimit)
+	if listErr != nil {
+		return nil, fmt.Errorf("failed to list sessions: %w", listErr)
+	}
+
+	ids := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		if s != nil && s.ID != "" {
+			ids = append(ids, s.ID)
+		}
+	}
+
+	// 2. Unique prefix match on IDs
+	if match := resolvePartialID(input, ids); match != "" {
+		resolved, loadErr := store.Load(ctx, match)
+		if loadErr == nil {
+			return resolved, nil
+		}
+	}
+
+	// 3. Unique prefix match on tx hashes
+	if match := resolveByTxHash(input, sessions); match != "" {
+		resolved, loadErr := store.Load(ctx, match)
+		if loadErr == nil {
+			return resolved, nil
+		}
+	}
+
+	// 4. Fuzzy suggestion (IDs + tx hashes)
+	candidates := make([]string, 0, len(ids)*2)
+	candidates = append(candidates, ids...)
+	for _, s := range sessions {
+		if s != nil && s.TxHash != "" {
+			candidates = append(candidates, s.TxHash)
+		}
+	}
+	suggestion := closestStringMatch(input, candidates)
+	return nil, resourceNotFoundError(suggestion)
+}
+
+// suggestSessionID returns the closest session ID for a failed lookup.
+// Kept for backward compatibility; new callers should use resolveSessionInput.
 func suggestSessionID(ctx context.Context, store *session.Store, input string) (string, error) {
 	sessions, err := store.List(ctx, sessionLookupListLimit)
 	if err != nil {

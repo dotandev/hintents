@@ -88,22 +88,22 @@ pub struct SourceMapCacheEntry {
 ### Alternative Considerations
 
 #### JSON Serialization
-- ❌ **Rejected**: Slower performance, larger file sizes
-- ❌ **Rejected**: Text-based parsing overhead
+- [FAIL] **Rejected**: Slower performance, larger file sizes
+- [FAIL] **Rejected**: Text-based parsing overhead
 
 #### Database Storage (SQLite, etc.)
-- ❌ **Rejected**: Adds dependency complexity
-- ❌ **Rejected**: Overkill for simple key-value cache
-- ❌ **Rejected**: Migration and maintenance overhead
+- [FAIL] **Rejected**: Adds dependency complexity
+- [FAIL] **Rejected**: Overkill for simple key-value cache
+- [FAIL] **Rejected**: Migration and maintenance overhead
 
 #### In-Memory Cache Only
-- ❌ **Rejected**: Doesn't survive process restarts
-- ❌ **Rejected**: Memory consumption issues with large mappings
+- [FAIL] **Rejected**: Doesn't survive process restarts
+- [FAIL] **Rejected**: Memory consumption issues with large mappings
 
 #### Different Hash Algorithms (MD5, SHA1)
-- ❌ **Rejected**: MD5 has known collision vulnerabilities
-- ❌ **Rejected**: SHA1 is deprecated for security applications
-- ✅ **Chosen**: SHA256 provides best security/performance balance
+- [FAIL] **Rejected**: MD5 has known collision vulnerabilities
+- [FAIL] **Rejected**: SHA1 is deprecated for security applications
+- [OK] **Chosen**: SHA256 provides best security/performance balance
 
 ## Implementation Details
 

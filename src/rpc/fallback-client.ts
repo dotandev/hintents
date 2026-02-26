@@ -5,6 +5,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { open, type FileHandle } from 'fs/promises';
 import { RPCConfig } from '../config/rpc-config';
 import { getLogger, LogCategory } from '../utils/logger';
+import { SDKContext, SDKResponse, SDKMiddleware, NextFn, composeMiddleware } from '../xdr/types';
 
 interface RPCEndpoint {
     url: string;
@@ -29,6 +30,7 @@ export class FallbackRPCClient {
     private config: RPCConfig;
     private clients: Map<string, AxiosInstance> = new Map();
     private static readonly DEFAULT_WASM_PATH_CHUNK_SIZE = 64;
+    private middlewares: SDKMiddleware[] = [];
 
     constructor(config: RPCConfig) {
         const logger = getLogger();
@@ -63,19 +65,57 @@ export class FallbackRPCClient {
         this.endpoints.forEach((ep, idx) => {
             logger.verboseIndent(LogCategory.RPC, `[${idx + 1}] ${ep.url}`);
         });
+
+        // Apply middleware from config
+        if (config.middleware) {
+            this.middlewares = [...config.middleware];
+        }
     }
 
     /**
-     * Make RPC request with automatic fallback
+     * Register a middleware to intercept SDK requests.
+     */
+    use(mw: SDKMiddleware): this {
+        this.middlewares.push(mw);
+        return this;
+    }
+
+    /**
+     * Make RPC request with automatic fallback, executing middleware chain.
      */
     async request<T = any>(path: string, options: { method?: 'GET' | 'POST', data?: any } = {}): Promise<T> {
-        const logger = getLogger();
         const method = options.method || 'POST';
         const data = options.data;
+
+        const ctx: SDKContext = {
+            path,
+            method,
+            data,
+            headers: this.config.headers,
+            metadata: {},
+        };
+
+        // Core handler performs fallback logic
+        const core: NextFn<T> = async (c) => this.executeFallback<T>(c);
+
+        if (this.middlewares.length === 0) {
+            const res = await core(ctx);
+            return res.data;
+        }
+
+        const chain = composeMiddleware<T>(this.middlewares, core);
+        const res = await chain(ctx);
+        return res.data;
+    }
+
+    /**
+     * Core fallback execution extracted for middleware composition.
+     */
+    private async executeFallback<T>(ctx: SDKContext): Promise<SDKResponse<T>> {
+        const logger = getLogger();
         const startTime = Date.now();
         let lastError: Error | null = null;
 
-        // Try each endpoint in order
         for (let attempt = 0; attempt < this.endpoints.length; attempt++) {
             const endpoint = this.getNextHealthyEndpoint();
 
@@ -86,53 +126,51 @@ export class FallbackRPCClient {
             try {
                 endpoint.totalRequests++;
 
-                // Verbose logging for request
-                logger.verbose(LogCategory.RPC, `→ ${method} ${path}`);
+                logger.verbose(LogCategory.RPC, `→ ${ctx.method} ${ctx.path}`);
                 logger.verboseIndent(LogCategory.RPC, `Endpoint: ${endpoint.url}`);
 
                 const requestStartTime = Date.now();
                 const client = this.clients.get(endpoint.url)!;
 
-                // Verbose: Payload size
-                const requestSize = data ? JSON.stringify(data).length : 0;
-                logger.verboseIndent(LogCategory.RPC, `${method} request to ${path}`);
+                const requestSize = ctx.data ? JSON.stringify(ctx.data).length : 0;
+                logger.verboseIndent(LogCategory.RPC, `${ctx.method} request to ${ctx.path}`);
                 logger.verboseIndent(LogCategory.RPC, `Request size: ${logger.formatBytes(requestSize)}`);
 
-                const response = await this.executeWithRetry(client, method, path, data);
+                const response = await this.executeWithRetry(client, ctx.method as 'GET' | 'POST', ctx.path, ctx.data);
 
                 const duration = Date.now() - requestStartTime;
                 this.updateMetrics(endpoint, duration, true);
 
-                // Success! Mark endpoint as healthy and reset to primary
                 this.markSuccess(endpoint);
-                this.currentIndex = 0; // Return to primary
+                this.currentIndex = 0;
 
                 const responseSize = response.data ? JSON.stringify(response.data).length : 0;
                 logger.verbose(LogCategory.RPC, `← Response received (${duration}ms)`);
                 logger.verboseIndent(LogCategory.RPC, `Status: ${response.status} ${response.statusText}`);
                 logger.verboseIndent(LogCategory.RPC, `Response size: ${logger.formatBytes(responseSize)}`);
 
-                return response.data;
+                return {
+                    data: response.data,
+                    status: response.status,
+                    duration,
+                    endpoint: endpoint.url,
+                    metadata: { ...ctx.metadata },
+                };
 
             } catch (error) {
                 lastError = error as Error;
                 const duration = Date.now() - startTime;
                 this.updateMetrics(endpoint, duration, false);
 
-                // Determine if this is a retryable error
                 if (this.isRetryableError(error)) {
                     logger.warn(`RPC request failed: ${endpoint.url}`);
 
-                    // Verbose error details
                     if (axios.isAxiosError(error)) {
                         logger.verbose(LogCategory.ERROR, `Request error: ${error.message}`);
                         if (error.code) logger.verboseIndent(LogCategory.ERROR, `Code: ${error.code}`);
                     }
 
-                    // Mark endpoint as failed
                     this.markFailure(endpoint);
-
-                    // Continue to next endpoint in fallback list
                     continue;
                 } else {
                     this.markFailure(endpoint);
@@ -141,7 +179,6 @@ export class FallbackRPCClient {
             }
         }
 
-        // All endpoints failed
         const totalDuration = Date.now() - startTime;
         logger.error(`All RPC endpoints failed after ${totalDuration}ms`);
         throw new Error(`All RPC endpoints failed: ${lastError?.message}`);

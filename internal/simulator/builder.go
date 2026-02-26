@@ -88,7 +88,7 @@ func (b *SimulationRequestBuilder) WithLedgerEntries(entries map[string]string) 
 	return b
 }
 
-// WithRestorePreamble sets optional restore preamble data used in restore simulations.
+// WithRestorePreamble sets restore preamble data for state restoration operations.
 func (b *SimulationRequestBuilder) WithRestorePreamble(preamble map[string]interface{}) *SimulationRequestBuilder {
 	b.restorePreamble = preamble
 	return b
@@ -122,7 +122,7 @@ func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 		req.LedgerEntries = b.ledgerEntries
 	}
 
-	// Only set restorePreamble if present
+	// Only set restore preamble if present
 	if b.restorePreamble != nil {
 		req.RestorePreamble = b.restorePreamble
 	}

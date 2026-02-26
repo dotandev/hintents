@@ -107,7 +107,8 @@ func init() {
 		"Colour theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
 	compareCmd.Flags().Uint32Var(&cmpProtoFlag, "protocol-version", 0,
 		"Override protocol version for both simulation passes (20, 21, 22, …)")
-
+	_ = compareCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
+	_ = compareCmd.RegisterFlagCompletionFunc("theme", completeThemeFlag)
 	rootCmd.AddCommand(compareCmd)
 }
 
@@ -249,14 +250,14 @@ func runBothPasses(
 	go func() {
 		defer wg.Done()
 		req := buildSimRequest(txResp, ledgerEntries, &localWasmPath, cmpArgsFlag)
-		localResult, localErr = runner.Run(req)
+		localResult, localErr = runner.Run(ctx, req)
 	}()
 
 	// Pass B – on-chain (no --wasm flag, uses whatever is in the ledger)
 	go func() {
 		defer wg.Done()
 		req := buildSimRequest(txResp, ledgerEntries, nil, nil)
-		onChainResult, onChainErr = runner.Run(req)
+		onChainResult, onChainErr = runner.Run(ctx, req)
 	}()
 
 	wg.Wait()

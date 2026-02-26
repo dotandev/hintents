@@ -57,7 +57,7 @@ PowerShell:
 	Run: func(cmd *cobra.Command, args []string) {
 		switch args[0] {
 		case "bash":
-			cmd.Root().GenBashCompletion(os.Stdout)
+			cmd.Root().GenBashCompletionV2(os.Stdout, true)
 		case "zsh":
 			cmd.Root().GenZshCompletion(os.Stdout)
 		case "fish":

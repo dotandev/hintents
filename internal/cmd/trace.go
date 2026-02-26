@@ -76,5 +76,8 @@ Example:
 func init() {
 	traceCmd.Flags().StringVarP(&traceFile, "file", "f", "", "Trace file to load")
 	traceCmd.Flags().StringVar(&traceThemeFlag, "theme", "", "Color theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
+
+	_ = traceCmd.RegisterFlagCompletionFunc("theme", completeThemeFlag)
+
 	rootCmd.AddCommand(traceCmd)
 }

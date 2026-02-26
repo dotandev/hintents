@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/dotandev/hintents/internal/config"
+	"github.com/dotandev/hintents/internal/decenstorage"
 	"github.com/dotandev/hintents/internal/decoder"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
@@ -48,17 +49,47 @@ var (
 	compareNetworkFlag  string
 	verbose             bool
 	wasmPath            string
+	wasmOptimizeFlag    bool
 	args                []string
+	themeFlag           string
 	noCacheFlag         bool
 	demoMode            bool
 	watchFlag           bool
 	watchTimeoutFlag    int
+	protocolVersionFlag  uint32
+	themeFlag            string
+	auditKeyFlag         string
+	publishIPFSFlag      bool
+	publishArweaveFlag   bool
+	ipfsNodeFlag         string
+	arweaveGatewayFlag   string
+	arweaveWalletFlag    string
+	protocolVersionFlag uint32
+	themeFlag           string
+	mockTimeFlag        int64
+	networkFlag        string
+	rpcURLFlag         string
+	rpcTokenFlag       string
+	tracingEnabled     bool
+	otlpExporterURL    string
+	generateTrace      bool
+	traceOutputFile    string
+	snapshotFlag       string
+	compareNetworkFlag string
+	verbose            bool
+	wasmPath           string
+	args               []string
+	noCacheFlag        bool
+	demoMode           bool
+	watchFlag          bool
+	watchTimeoutFlag   int
+	mockBaseFeeFlag    uint32
+	mockGasPriceFlag   uint64
 	themeFlag           string
 	mockTimeFlag        int64
 	protocolVersionFlag uint32
 	mockBaseFeeFlag     uint32
 	mockGasPriceFlag    uint64
-	wasmOptimizeFlag    bool
 )
 
 // DebugCommand holds dependencies for the debug command
@@ -73,8 +104,12 @@ func NewDebugCommand(runner simulator.RunnerInterface, opts ...func(*DebugComman
 		Runner:        runner,
 		ClientFactory: rpc.NewClient,
 	}
-	for _, opt := range opts {
-		opt(debugCmd)
+	registerCacheFlushHook()
+
+	fmt.Printf("Debugging transaction: %s\n", txHash)
+	fmt.Printf("Network: %s\n", networkFlag)
+	if rpcURLFlag != "" {
+		fmt.Printf("RPC URL: %s\n", rpcURLFlag)
 	}
 	return debugCmd.createCommand()
 }
@@ -195,8 +230,10 @@ Local WASM Replay Mode:
 	cmd.Flags().Uint32Var(&mockBaseFeeFlag, "mock-base-fee", 0, "Override base fee (stroops) for local fee sufficiency checks")
 	cmd.Flags().Uint64Var(&mockGasPriceFlag, "mock-gas-price", 0, "Override gas price multiplier for local fee sufficiency checks")
 
-	return cmd
-}
+		// Local WASM replay mode
+		if wasmPath != "" {
+			return runLocalWasmReplay(cmd.Context())
+		}
 
 func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 	if verbose {
@@ -238,6 +275,7 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 		}
 		defer cleanup()
 	}
+		registerCacheFlushHook()
 
 	// Start root span
 	tracer := telemetry.GetTracer()
@@ -304,6 +342,14 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 	if compareNetworkFlag != "" {
 		fmt.Printf("Comparing against Network: %s\n", compareNetworkFlag)
 	}
+			if err != nil {
+				if IsCancellation(err) {
+					spinner.StopWithMessage("Interrupted. Stopping watch...")
+					return err
+				}
+				spinner.StopWithError("Failed to poll for transaction")
+				return errors.WrapSimulationLogicError(fmt.Sprintf("watch mode error: %v", err))
+			}
 
 	// Fetch transaction details
 	if watchFlag {
@@ -362,6 +408,8 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 			return errors.WrapSimulatorNotFound(err.Error())
 		}
 	}
+		registerRunnerCloseHook("debug-simulator-runner", runner)
+		defer func() { _ = runner.Close() }()
 
 	// Determine timestamps to simulate
 	timestamps := []int64{TimestampFlag}
@@ -414,6 +462,15 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 				Timestamp:       ts,
 				ProtocolVersion: nil,
 			}
+				fmt.Printf("Running simulation on %s...\n", networkFlag)
+				simReq := &simulator.SimulationRequest{
+					EnvelopeXdr:     resp.EnvelopeXdr,
+					ResultMetaXdr:   resp.ResultMetaXdr,
+					LedgerEntries:   ledgerEntries,
+					Timestamp:       ts,
+					ProtocolVersion: nil,
+					Profile:         ProfileFlag,
+				}
 
 			// Apply protocol version override if specified
 			if protocolVersionFlag > 0 {
@@ -435,6 +492,17 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 				contractIDs := collectContractIDsFromDiagnosticEvents(simResp.DiagnosticEvents)
 				if len(contractIDs) > 0 {
 					_, _ = rpc.FetchBytecodeForTraceContractCalls(ctx, client, contractIDs, nil)
+				simResp, err = runner.Run(ctx, simReq)
+				if err != nil {
+					return errors.WrapSimulationFailed(err, "")
+				}
+				printSimulationResult(networkFlag, simResp)
+				// Fetch contract bytecode on demand for any contract calls in the trace; cache via RPC client
+				if client != nil && simResp != nil && len(simResp.DiagnosticEvents) > 0 {
+					contractIDs := collectContractIDsFromDiagnosticEvents(simResp.DiagnosticEvents)
+					if len(contractIDs) > 0 {
+						_, _ = rpc.FetchBytecodeForTraceContractCalls(ctx, client, contractIDs, nil)
+					}
 				}
 			}
 		} else {
@@ -453,6 +521,32 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 					entries, extractErr = client.GetLedgerEntries(ctx, keys)
 					if extractErr != nil {
 						primaryErr = extractErr
+						entries, extractErr = client.GetLedgerEntries(ctx, keys)
+						if extractErr != nil {
+							primaryErr = extractErr
+							return
+						}
+					}
+					primaryReq := &simulator.SimulationRequest{
+						EnvelopeXdr:   resp.EnvelopeXdr,
+						ResultMetaXdr: resp.ResultMetaXdr,
+						LedgerEntries: entries,
+						Timestamp:     ts,
+						Profile:       ProfileFlag,
+					}
+					applySimulationFeeMocks(primaryReq)
+					primaryResult, primaryErr = runner.Run(ctx, primaryReq)
+				}()
+
+				go func() {
+					defer wg.Done()
+					compareOpts := []rpc.ClientOption{
+						rpc.WithNetwork(rpc.Network(compareNetworkFlag)),
+						rpc.WithToken(rpcTokenFlag),
+					}
+					compareClient, clientErr := rpc.NewClient(compareOpts...)
+					if clientErr != nil {
+						compareErr = errors.WrapValidationError(fmt.Sprintf("failed to create compare client: %v", clientErr))
 						return
 					}
 				}
@@ -494,6 +588,30 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 						compareErr = extractErr
 						return
 					}
+						entries, extractErr = compareClient.GetLedgerEntries(ctx, keys)
+						if extractErr != nil {
+							compareErr = extractErr
+							return
+						}
+					}
+
+					compareReq := &simulator.SimulationRequest{
+						EnvelopeXdr:   resp.EnvelopeXdr,
+						ResultMetaXdr: compareResp.ResultMetaXdr,
+						LedgerEntries: entries,
+						Timestamp:     ts,
+						Profile:       ProfileFlag,
+					}
+					applySimulationFeeMocks(compareReq)
+					compareResult, compareErr = runner.Run(ctx, compareReq)
+				}()
+
+				wg.Wait()
+				if primaryErr != nil {
+					return errors.WrapRPCConnectionFailed(primaryErr)
+				}
+				if compareErr != nil {
+					return errors.WrapRPCConnectionFailed(compareErr)
 				}
 
 				compareReq := &simulator.SimulationRequest{
@@ -518,6 +636,34 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 				contractIDs := collectContractIDsFromDiagnosticEvents(primaryResult.DiagnosticEvents)
 				if len(contractIDs) > 0 {
 					_, _ = rpc.FetchBytecodeForTraceContractCalls(ctx, client, contractIDs, nil)
+			lastSimResp = simResp
+		}
+
+		if lastSimResp == nil {
+			return errors.WrapSimulationLogicError("no simulation results generated")
+		}
+
+		// Save flamegraph SVG with dark-mode CSS when profiling is enabled
+		if ProfileFlag && lastSimResp.Flamegraph != "" {
+			svgContent := visualizer.InjectDarkMode(lastSimResp.Flamegraph)
+			svgFilename := txHash + ".flamegraph.svg"
+			if err := os.WriteFile(svgFilename, []byte(svgContent), 0644); err != nil {
+				fmt.Printf("%s Failed to write flamegraph: %v\n", visualizer.Warning(), err)
+			} else {
+				fmt.Printf("%s Flamegraph saved: %s\n", visualizer.Success(), svgFilename)
+			}
+		}
+
+		// Analysis: Error Suggestions (Heuristic-based)
+		if len(lastSimResp.Events) > 0 {
+			suggestionEngine := decoder.NewSuggestionEngine()
+
+			// Decode events for analysis
+			callTree, err := decoder.DecodeEvents(lastSimResp.Events)
+			if err == nil && callTree != nil {
+				suggestions := suggestionEngine.AnalyzeCallTree(callTree)
+				if len(suggestions) > 0 {
+					fmt.Print(decoder.FormatSuggestions(suggestions))
 				}
 			}
 
@@ -631,6 +777,62 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 	fmt.Printf("\nSession created: %s\n", sessionData.ID)
 	fmt.Printf("Run 'erst session save' to persist this session.\n")
 	return nil
+		SetCurrentSession(sessionData)
+		fmt.Printf("\nSession created: %s\n", sessionData.ID)
+		fmt.Printf("Run 'erst session save' to persist this session.\n")
+
+		// Publish signed audit trail to decentralised storage when requested.
+		if publishIPFSFlag || publishArweaveFlag {
+			if auditKeyFlag == "" {
+				return errors.WrapCliArgumentRequired("audit-key")
+			}
+			auditLog, auditErr := Generate(
+				txHash,
+				resp.EnvelopeXdr,
+				resp.ResultMetaXdr,
+				lastSimResp.Events,
+				lastSimResp.Logs,
+				auditKeyFlag,
+			)
+			if auditErr != nil {
+				return fmt.Errorf("failed to generate audit log: %w", auditErr)
+			}
+			auditBytes, auditErr := json.Marshal(auditLog)
+			if auditErr != nil {
+				return fmt.Errorf("failed to marshal audit log: %w", auditErr)
+			}
+
+			pub := decenstorage.New(decenstorage.PublishConfig{
+				IPFSNode:       ipfsNodeFlag,
+				ArweaveGateway: arweaveGatewayFlag,
+				ArweaveWallet:  arweaveWalletFlag,
+			})
+
+			fmt.Printf("\n=== Decentralised Storage ===\n")
+
+			if publishIPFSFlag {
+				result, ipfsErr := pub.PublishIPFS(ctx, auditBytes)
+				if ipfsErr != nil {
+					fmt.Printf("IPFS publish failed: %v\n", ipfsErr)
+				} else {
+					fmt.Printf("IPFS CID : %s\n", result.CID)
+					fmt.Printf("IPFS URL : %s\n", result.URL)
+				}
+			}
+
+			if publishArweaveFlag {
+				result, arErr := pub.PublishArweave(ctx, auditBytes)
+				if arErr != nil {
+					fmt.Printf("Arweave publish failed: %v\n", arErr)
+				} else {
+					fmt.Printf("Arweave TXID : %s\n", result.TXID)
+					fmt.Printf("Arweave URL  : %s\n", result.URL)
+				}
+			}
+		}
+
+		return nil
+	},
 }
 
 
@@ -659,7 +861,7 @@ func runDemoMode(cmdArgs []string) error {
 	return nil
 }
 
-func runLocalWasmReplay() error {
+func runLocalWasmReplay(ctx context.Context) error {
 	fmt.Printf("%s  WARNING: Using Mock State (not mainnet data)\n", visualizer.Warning())
 	fmt.Println()
 	effectiveWasmPath := wasmPath
@@ -692,6 +894,8 @@ func runLocalWasmReplay() error {
 	if err != nil {
 		return errors.WrapSimulatorNotFound(err.Error())
 	}
+	registerRunnerCloseHook("local-wasm-simulator-runner", runner)
+	defer func() { _ = runner.Close() }()
 
 	// Create simulation request with local WASM
 	req := &simulator.SimulationRequest{
@@ -705,7 +909,7 @@ func runLocalWasmReplay() error {
 
 	// Run simulation
 	fmt.Printf("%s Executing contract locally...\n", visualizer.Symbol("play"))
-	resp, err := runner.Run(req)
+	resp, err := runner.Run(ctx, req)
 	if err != nil {
 		fmt.Printf("%s Technical failure: %v\n", visualizer.Error(), err)
 		return err
@@ -1067,15 +1271,29 @@ func init() {
 	debugCmd.Flags().StringVar(&wasmPath, "wasm", "", "Path to local WASM file for local replay (no network required)")
 	debugCmd.Flags().BoolVar(&wasmOptimizeFlag, "optimize", false, "Run dead-code elimination on local WASM before replay")
 	debugCmd.Flags().StringSliceVar(&args, "args", []string{}, "Mock arguments for local replay (JSON array of strings)")
+	debugCmd.Flags().StringVar(&themeFlag, "theme", "", "Output theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
 	debugCmd.Flags().BoolVar(&noCacheFlag, "no-cache", false, "Disable local ledger state caching")
 	debugCmd.Flags().BoolVar(&demoMode, "demo", false, "Print sample output (no network) - for testing color detection")
 	debugCmd.Flags().BoolVar(&watchFlag, "watch", false, "Poll for transaction on-chain before debugging")
 	debugCmd.Flags().IntVar(&watchTimeoutFlag, "watch-timeout", 30, "Timeout in seconds for watch mode")
+	debugCmd.Flags().Uint32Var(&protocolVersionFlag, "protocol-version", 0, "Override protocol version for simulation (20, 21, 22, etc)")
+	debugCmd.Flags().StringVar(&themeFlag, "theme", "", "Color theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
+	debugCmd.Flags().StringVar(&auditKeyFlag, "audit-key", "", "Ed25519 private key (hex) used to sign the audit trail")
+	debugCmd.Flags().BoolVar(&publishIPFSFlag, "publish-ipfs", false, "Pin signed audit trail to IPFS after simulation (requires --audit-key)")
+	debugCmd.Flags().BoolVar(&publishArweaveFlag, "publish-arweave", false, "Upload signed audit trail to Arweave after simulation (requires --audit-key)")
+	debugCmd.Flags().StringVar(&ipfsNodeFlag, "ipfs-node", "", "Kubo-compatible IPFS HTTP RPC node URL (default: http://localhost:5001 or ERST_IPFS_NODE env)")
+	debugCmd.Flags().StringVar(&arweaveGatewayFlag, "arweave-gateway", "", "Arweave HTTP gateway URL (default: https://arweave.net or ERST_ARWEAVE_GATEWAY env)")
+	debugCmd.Flags().StringVar(&arweaveWalletFlag, "arweave-wallet", "", "Path to Arweave JWK wallet file for signing data transactions (or ERST_ARWEAVE_WALLET env)")
+	debugCmd.Flags().Int64Var(&mockTimeFlag, "mock-time", 0, "Fix the ledger timestamp for deterministic local simulation (Unix epoch seconds); 0 = disabled")
 	debugCmd.Flags().StringVar(&themeFlag, "theme", "", "Output theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
 	debugCmd.Flags().Int64Var(&mockTimeFlag, "mock-time", 0, "Override ledger timestamp (Unix epoch) for simulation")
 	debugCmd.Flags().Uint32Var(&protocolVersionFlag, "protocol-version", 0, "Override protocol version for simulation")
 	debugCmd.Flags().Uint32Var(&mockBaseFeeFlag, "mock-base-fee", 0, "Override base fee (stroops) for local fee sufficiency checks")
 	debugCmd.Flags().Uint64Var(&mockGasPriceFlag, "mock-gas-price", 0, "Override gas price multiplier for local fee sufficiency checks")
+
+	_ = debugCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
+	_ = debugCmd.RegisterFlagCompletionFunc("compare-network", completeNetworkFlag)
+	_ = debugCmd.RegisterFlagCompletionFunc("theme", completeThemeFlag)
 
 	rootCmd.AddCommand(debugCmd)
 }

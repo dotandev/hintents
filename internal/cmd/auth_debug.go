@@ -111,5 +111,8 @@ func init() {
 	authDebugCmd.Flags().StringVar(&authRPCURLFlag, "rpc-url", "", "Custom Horizon RPC URL")
 	authDebugCmd.Flags().BoolVar(&authDetailedFlag, "detailed", false, "Show detailed analysis and missing signatures")
 	authDebugCmd.Flags().BoolVar(&authJSONOutputFlag, "json", false, "Output as JSON")
+
+	_ = authDebugCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
+
 	rootCmd.AddCommand(authDebugCmd)
 }

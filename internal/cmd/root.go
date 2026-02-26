@@ -4,7 +4,14 @@
 package cmd
 
 import (
+	"context"
+	"os"
+	"os/signal"
+	"sync/atomic"
+	"syscall"
+
 	"github.com/dotandev/hintents/internal/localization"
+	"github.com/dotandev/hintents/internal/shutdown"
 	"github.com/dotandev/hintents/internal/updater"
 	"github.com/spf13/cobra"
 )
@@ -59,7 +66,70 @@ Get started with 'erst debug --help' or visit the documentation.`,
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
-	return rootCmd.Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	coordinator := shutdown.NewCoordinator()
+	setShutdownCoordinator(coordinator)
+	defer clearShutdownCoordinator()
+
+	return executeWithSignals(ctx, stop, sigCh, coordinator, func(execCtx context.Context) error {
+		return rootCmd.ExecuteContext(execCtx)
+	})
+}
+
+var forceExit = os.Exit
+
+func executeWithSignals(
+	ctx context.Context,
+	stop context.CancelFunc,
+	sigCh <-chan os.Signal,
+	coordinator *shutdown.Coordinator,
+	execFn func(context.Context) error,
+) error {
+	var interrupted atomic.Bool
+	shutdownDone := make(chan struct{})
+
+	go func() {
+		defer close(shutdownDone)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-sigCh:
+				if interrupted.CompareAndSwap(false, true) {
+					stop()
+					shutdownComplete := make(chan struct{})
+					go func() {
+						runShutdownHooksWithTimeout(coordinator, shutdownTimeout)
+						close(shutdownComplete)
+					}()
+					select {
+					case <-shutdownComplete:
+					case <-sigCh:
+						forceExit(InterruptExitCode)
+					}
+					return
+				}
+				forceExit(InterruptExitCode)
+			}
+		}
+	}()
+
+	err := execFn(ctx)
+	stop()
+	<-shutdownDone
+
+	if interrupted.Load() {
+		_ = err
+		return ErrInterrupted
+	}
+
+	return err
 }
 
 // checkForUpdatesAsync runs the update check in a goroutine to not block CLI startup
