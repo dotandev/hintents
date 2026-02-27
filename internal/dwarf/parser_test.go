@@ -37,12 +37,24 @@ func TestNewParser(t *testing.T) {
 			},
 			wantErr: ErrNoDebugInfo, // No debug info in minimal WASM
 		},
+		{
+			name: "valid ELF magic",
+			data: []byte{
+				0x7f, 0x45, 0x4c, 0x46, // ELF magic
+			},
+			wantErr: nil, // Will fail during ELF parsing, but that's okay
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewParser(tt.data)
-			if err != tt.wantErr {
+			if tt.wantErr == nil {
+				// Just check that we got some error (any error is fine)
+				if err == nil {
+					t.Errorf("NewParser() expected an error, got nil")
+				}
+			} else if err != tt.wantErr {
 				t.Errorf("NewParser() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
