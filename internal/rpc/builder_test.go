@@ -6,6 +6,7 @@ package rpc
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 )
@@ -46,6 +47,55 @@ func TestWithInvalidHorizonURL(t *testing.T) {
 	_, err := NewClient(WithHorizonURL("invalid-url"))
 	if err == nil {
 		t.Fatal("expected error for invalid URL")
+	}
+}
+
+func TestWithCircuitBreaker(t *testing.T) {
+	client, err := NewClient(
+		WithNetwork(Testnet),
+		WithCircuitBreaker(10, 120*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client.circuitBreakerThreshold != 10 {
+		t.Errorf("expected circuit breaker threshold 10, got %d", client.circuitBreakerThreshold)
+	}
+	if client.circuitBreakerTimeout != 120*time.Second {
+		t.Errorf("expected circuit breaker timeout 120s, got %v", client.circuitBreakerTimeout)
+	}
+}
+
+func TestWithCircuitBreaker_InvalidThreshold(t *testing.T) {
+	_, err := NewClient(WithCircuitBreaker(0, 60*time.Second))
+	if err == nil {
+		t.Fatal("expected error for zero threshold")
+	}
+	if err.Error() != "circuit breaker failure threshold must be positive" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestWithCircuitBreaker_InvalidTimeout(t *testing.T) {
+	_, err := NewClient(WithCircuitBreaker(5, 0))
+	if err == nil {
+		t.Fatal("expected error for zero timeout")
+	}
+	if err.Error() != "circuit breaker timeout must be positive" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestWithCircuitBreaker_Defaults(t *testing.T) {
+	client, err := NewClient(WithNetwork(Testnet))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client.circuitBreakerThreshold != 5 {
+		t.Errorf("expected default circuit breaker threshold 5, got %d", client.circuitBreakerThreshold)
+	}
+	if client.circuitBreakerTimeout != 60*time.Second {
+		t.Errorf("expected default circuit breaker timeout 60s, got %v", client.circuitBreakerTimeout)
 	}
 }
 

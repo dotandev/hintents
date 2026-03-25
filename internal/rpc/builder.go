@@ -16,17 +16,19 @@ import (
 type ClientOption func(*clientBuilder) error
 
 type clientBuilder struct {
-	network         Network
-	token           string
-	horizonURL      string
-	sorobanURL      string
-	altURLs         []string
-	cacheEnabled    bool
-	methodTelemetry MethodTelemetry
-	config          *NetworkConfig
-	httpClient      *http.Client
-	requestTimeout  time.Duration
-	middlewares     []Middleware
+	network               Network
+	token                 string
+	horizonURL            string
+	sorobanURL            string
+	altURLs               []string
+	cacheEnabled          bool
+	methodTelemetry       MethodTelemetry
+	config                *NetworkConfig
+	httpClient            *http.Client
+	requestTimeout        time.Duration
+	circuitBreakerThreshold int
+	circuitBreakerTimeout   time.Duration
+	middlewares           []Middleware
 }
 
 const defaultHTTPTimeout = 15 * time.Second
@@ -146,6 +148,24 @@ func WithMethodTelemetry(telemetry MethodTelemetry) ClientOption {
 	}
 }
 
+// WithCircuitBreaker configures the circuit breaker thresholds for RPC client failover.
+// failureThreshold is the number of consecutive failures before opening the circuit.
+// timeout is the duration to wait before attempting to reset the circuit breaker.
+// Both values must be positive, otherwise an error is returned.
+func WithCircuitBreaker(failureThreshold int, timeout time.Duration) ClientOption {
+	return func(b *clientBuilder) error {
+		if failureThreshold <= 0 {
+			return fmt.Errorf("circuit breaker failure threshold must be positive")
+		}
+		if timeout <= 0 {
+			return fmt.Errorf("circuit breaker timeout must be positive")
+		}
+		b.circuitBreakerThreshold = failureThreshold
+		b.circuitBreakerTimeout = timeout
+		return nil
+	}
+}
+
 func WithMiddleware(middlewares ...Middleware) ClientOption {
 	return func(b *clientBuilder) error {
 		b.middlewares = append(b.middlewares, middlewares...)
@@ -244,22 +264,32 @@ func (b *clientBuilder) build() (*Client, error) {
 		b.altURLs = []string{b.horizonURL}
 	}
 
+	// Set default circuit breaker values if not configured
+	if b.circuitBreakerThreshold == 0 {
+		b.circuitBreakerThreshold = 5 // Default: 5 consecutive failures
+	}
+	if b.circuitBreakerTimeout == 0 {
+		b.circuitBreakerTimeout = 60 * time.Second // Default: 60 seconds
+	}
+
 	return &Client{
 		HorizonURL: b.horizonURL,
 		Horizon: &horizonclient.Client{
 			HorizonURL: b.horizonURL,
 			HTTP:       b.httpClient,
 		},
-		Network:         b.network,
-		SorobanURL:      b.sorobanURL,
-		AltURLs:         b.altURLs,
-		httpClient:      b.httpClient,
-		token:           b.token,
-		Config:          *b.config,
-		CacheEnabled:    b.cacheEnabled,
-		methodTelemetry: b.methodTelemetry,
-		failures:        make(map[string]int),
-		lastFailure:     make(map[string]time.Time),
-		middlewares:     b.middlewares,
+		Network:               b.network,
+		SorobanURL:            b.sorobanURL,
+		AltURLs:               b.altURLs,
+		httpClient:            b.httpClient,
+		token:                 b.token,
+		Config:                *b.config,
+		CacheEnabled:          b.cacheEnabled,
+		methodTelemetry:       b.methodTelemetry,
+		failures:              make(map[string]int),
+		lastFailure:           make(map[string]time.Time),
+		middlewares:           b.middlewares,
+		circuitBreakerThreshold: b.circuitBreakerThreshold,
+		circuitBreakerTimeout:   b.circuitBreakerTimeout,
 	}, nil
 }

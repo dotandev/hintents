@@ -110,21 +110,23 @@ func (f RoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // Client handles interactions with the Stellar Network
 type Client struct {
-	Horizon         horizonclient.ClientInterface
-	HorizonURL      string
-	Network         Network
-	SorobanURL      string
-	AltURLs         []string
-	currIndex       int
-	mu              sync.RWMutex
-	httpClient      *http.Client
-	token           string // stored for reference, not logged
-	Config          NetworkConfig
-	CacheEnabled    bool
-	methodTelemetry MethodTelemetry
-	failures        map[string]int
-	lastFailure     map[string]time.Time
-	middlewares     []Middleware
+	Horizon               horizonclient.ClientInterface
+	HorizonURL            string
+	Network               Network
+	SorobanURL            string
+	AltURLs               []string
+	currIndex             int
+	mu                    sync.RWMutex
+	httpClient            *http.Client
+	token                 string // stored for reference, not logged
+	Config                NetworkConfig
+	CacheEnabled          bool
+	methodTelemetry       MethodTelemetry
+	failures              map[string]int
+	lastFailure           map[string]time.Time
+	middlewares           []Middleware
+	circuitBreakerThreshold int
+	circuitBreakerTimeout   time.Duration
 	// rotateCount tracks how many times rotateURL has successfully switched
 	// the active provider.  This is useful for metrics/observability when the
 	// client is operating in a multi‑URL failover configuration.
@@ -197,12 +199,12 @@ func (c *Client) isHealthy(url string) bool {
 
 func (c *Client) isHealthyLocked(url string) bool {
 	fails := c.failures[url]
-	if fails < 5 {
+	if fails < c.circuitBreakerThreshold {
 		return true
 	}
 	last := c.lastFailure[url]
-	// Circuit opens for 60 seconds
-	if time.Since(last) > 60*time.Second {
+	// Circuit opens for the configured timeout duration
+	if time.Since(last) > c.circuitBreakerTimeout {
 		return true
 	}
 	return false

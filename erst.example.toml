@@ -38,6 +38,12 @@ log_level = "info"
 # Defaults to https://crash.erst.dev/v1/report when crash_reporting is true
 # and no Sentry DSN is set. Can also be set via ERST_CRASH_ENDPOINT.
 # crash_endpoint = "https://crash.erst.dev/v1/report"
+
+# Circuit Breaker Configuration
+# Controls automatic failover behavior when using multiple RPC endpoints
+# circuit_breaker_threshold = 5        # Number of consecutive failures before opening circuit
+# circuit_breaker_timeout = 60         # Seconds to wait before attempting reset
+
 # Audit HSM Configuration
 # ERST_PKCS11_MODULE = "/usr/lib/softhsm/libsofthsm2.so"
 # ERST_PKCS11_MAX_RPM = 1000 # Max requests per minute to protect HSM

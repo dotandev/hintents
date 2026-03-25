@@ -168,6 +168,18 @@ func (c *Config) parseTOML(content string) error {
 				return errors.WrapValidationError("request_timeout must be an integer")
 			}
 			c.RequestTimeout = n
+		case "circuit_breaker_threshold":
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				return errors.WrapValidationError("circuit_breaker_threshold must be an integer")
+			}
+			c.CircuitBreakerThreshold = n
+		case "circuit_breaker_timeout":
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				return errors.WrapValidationError("circuit_breaker_timeout must be an integer")
+			}
+			c.CircuitBreakerTimeout = n
 		}
 	}
 

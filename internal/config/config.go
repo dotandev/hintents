@@ -69,6 +69,14 @@ type Config struct {
 	// Set via request_timeout in config or ERST_REQUEST_TIMEOUT.
 	// Defaults to 15 seconds.
 	RequestTimeout int `json:"request_timeout,omitempty"`
+	// CircuitBreakerThreshold is the number of consecutive failures before opening the circuit breaker.
+	// Set via circuit_breaker_threshold in config or ERST_CIRCUIT_BREAKER_THRESHOLD.
+	// Defaults to 5 failures.
+	CircuitBreakerThreshold int `json:"circuit_breaker_threshold,omitempty"`
+	// CircuitBreakerTimeout is the duration in seconds the circuit breaker remains open before resetting.
+	// Set via circuit_breaker_timeout in config or ERST_CIRCUIT_BREAKER_TIMEOUT.
+	// Defaults to 60 seconds.
+	CircuitBreakerTimeout int `json:"circuit_breaker_timeout,omitempty"`
 }
 
 // CustomNetworkConfig is defined in networks.go
@@ -294,6 +302,19 @@ func (envParser) Parse(cfg *Config) error {
 		n, err := strconv.Atoi(v)
 		if err == nil && n > 0 {
 			cfg.RequestTimeout = n
+		}
+	}
+
+	if v := os.Getenv("ERST_CIRCUIT_BREAKER_THRESHOLD"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil && n > 0 {
+			cfg.CircuitBreakerThreshold = n
+		}
+	}
+	if v := os.Getenv("ERST_CIRCUIT_BREAKER_TIMEOUT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil && n > 0 {
+			cfg.CircuitBreakerTimeout = n
 		}
 	}
 
