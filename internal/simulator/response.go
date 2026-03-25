@@ -25,6 +25,31 @@ type SimulationResponse struct {
 	LinearMemoryDump  string               `json:"linear_memory_dump,omitempty"`
 }
 
+// GetDiagnosticEventsByContractID returns diagnostic events matching the contract ID.
+func (r *SimulationResponse) GetDiagnosticEventsByContractID(contractID string) []DiagnosticEvent {
+	var events []DiagnosticEvent
+	for _, e := range r.DiagnosticEvents {
+		if e.ContractID != nil && *e.ContractID == contractID {
+			events = append(events, e)
+		}
+	}
+	return events
+}
+
+// GetDiagnosticEventsByTopic returns diagnostic events containing the exactly matching base64 topic.
+func (r *SimulationResponse) GetDiagnosticEventsByTopic(topic string) []DiagnosticEvent {
+	var events []DiagnosticEvent
+	for _, e := range r.DiagnosticEvents {
+		for _, t := range e.Topics {
+			if t == topic {
+				events = append(events, e)
+				break
+			}
+		}
+	}
+	return events
+}
+
 type BudgetUsage struct {
 	CPUInstructions    uint64  `json:"cpu_instructions"`
 	MemoryBytes        uint64  `json:"memory_bytes"`

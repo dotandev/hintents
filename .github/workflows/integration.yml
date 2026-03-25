@@ -66,10 +66,14 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Reclaim runner temp space before Rust build
+        run: bash ./scripts/ci-clean-build-space.sh
+
       - name: Cache Rust build artefacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: simulator -> target
+          cache-targets: false
 
       # ── Build erst binary ──────────────────────────────────────────────────
       - name: Build erst (Go CLI)
@@ -106,6 +110,10 @@ jobs:
             **/*.log
             **/test-output.txt
           retention-days: 7
+
+      - name: Reclaim runner temp space after tests
+        if: always()
+        run: bash ./scripts/ci-clean-build-space.sh
 
   # ─────────────────────────────────────────────────────────────────────────
   # Summary job – required status check for branch protection
