@@ -10,25 +10,26 @@ import (
 	"time"
 
 	"github.com/dotandev/hintents/internal/errors"
+	"github.com/dotandev/hintents/internal/telemetry/methods"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 )
 
 type ClientOption func(*clientBuilder) error
 
 type clientBuilder struct {
-	network               Network
-	token                 string
-	horizonURL            string
-	sorobanURL            string
-	altURLs               []string
-	cacheEnabled          bool
-	methodTelemetry       MethodTelemetry
-	config                *NetworkConfig
-	httpClient            *http.Client
-	requestTimeout        time.Duration
+	network                 Network
+	token                   string
+	horizonURL              string
+	sorobanURL              string
+	altURLs                 []string
+	cacheEnabled            bool
+	methodTelemetry         methods.MethodTelemetry
+	config                  *NetworkConfig
+	httpClient              *http.Client
+	requestTimeout          time.Duration
 	circuitBreakerThreshold int
 	circuitBreakerTimeout   time.Duration
-	middlewares           []Middleware
+	middlewares             []Middleware
 }
 
 const defaultHTTPTimeout = 15 * time.Second
@@ -37,7 +38,7 @@ func newBuilder() *clientBuilder {
 	return &clientBuilder{
 		network:         Mainnet,
 		cacheEnabled:    true,
-		methodTelemetry: defaultMethodTelemetry(),
+		methodTelemetry: methods.DefaultMethodTelemetry(),
 		requestTimeout:  defaultHTTPTimeout,
 	}
 }
@@ -138,10 +139,10 @@ func WithHTTPClient(client *http.Client) ClientOption {
 
 // WithMethodTelemetry injects an optional telemetry hook for SDK method timings.
 // If nil is provided, a no-op implementation is used.
-func WithMethodTelemetry(telemetry MethodTelemetry) ClientOption {
+func WithMethodTelemetry(telemetry methods.MethodTelemetry) ClientOption {
 	return func(b *clientBuilder) error {
 		if telemetry == nil {
-			telemetry = defaultMethodTelemetry()
+			telemetry = methods.DefaultMethodTelemetry()
 		}
 		b.methodTelemetry = telemetry
 		return nil

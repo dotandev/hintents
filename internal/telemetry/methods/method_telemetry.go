@@ -1,7 +1,7 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-package rpc
+package methods
 
 import "context"
 
@@ -18,19 +18,21 @@ type MethodTimer interface {
 
 var (
 	_ MethodTelemetry = (*noopMethodTelemetry)(nil)
-	_ MethodTimer     = (*noopMethodTimer)(nil)
+	_ MethodTimer     = (*NoopMethodTimer)(nil)
 )
 
 type noopMethodTelemetry struct{}
 
 func (noopMethodTelemetry) StartMethodTimer(_ context.Context, _ string, _ map[string]string) MethodTimer {
-	return noopMethodTimer{}
+	return NoopMethodTimer{}
 }
 
-type noopMethodTimer struct{}
+type NoopMethodTimer struct{}
 
-func (noopMethodTimer) Stop(_ error) {}
+func (NoopMethodTimer) Stop(_ error) {}
 
-func defaultMethodTelemetry() MethodTelemetry {
+// DefaultMethodTelemetry returns a no-op implementation of MethodTelemetry.
+// Use this when you want to disable method telemetry.
+func DefaultMethodTelemetry() MethodTelemetry {
 	return noopMethodTelemetry{}
 }

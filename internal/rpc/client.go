@@ -17,8 +17,8 @@ import (
 
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/metrics"
-
 	"github.com/dotandev/hintents/internal/telemetry"
+	"github.com/dotandev/hintents/internal/telemetry/methods"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 	effects "github.com/stellar/go-stellar-sdk/protocols/horizon/effects"
@@ -110,21 +110,21 @@ func (f RoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // Client handles interactions with the Stellar Network
 type Client struct {
-	Horizon               horizonclient.ClientInterface
-	HorizonURL            string
-	Network               Network
-	SorobanURL            string
-	AltURLs               []string
-	currIndex             int
-	mu                    sync.RWMutex
-	httpClient            *http.Client
-	token                 string // stored for reference, not logged
-	Config                NetworkConfig
-	CacheEnabled          bool
-	methodTelemetry       MethodTelemetry
-	failures              map[string]int
-	lastFailure           map[string]time.Time
-	middlewares           []Middleware
+	Horizon                 horizonclient.ClientInterface
+	HorizonURL              string
+	Network                 Network
+	SorobanURL              string
+	AltURLs                 []string
+	currIndex               int
+	mu                      sync.RWMutex
+	httpClient              *http.Client
+	token                   string // stored for reference, not logged
+	Config                  NetworkConfig
+	CacheEnabled            bool
+	methodTelemetry         methods.MethodTelemetry
+	failures                map[string]int
+	lastFailure             map[string]time.Time
+	middlewares             []Middleware
 	circuitBreakerThreshold int
 	circuitBreakerTimeout   time.Duration
 	// rotateCount tracks how many times rotateURL has successfully switched
@@ -335,9 +335,9 @@ func (c *Client) getHTTPClient() *http.Client {
 	return http.DefaultClient
 }
 
-func (c *Client) startMethodTimer(ctx context.Context, method string, attributes map[string]string) MethodTimer {
+func (c *Client) startMethodTimer(ctx context.Context, method string, attributes map[string]string) methods.MethodTimer {
 	if c == nil || c.methodTelemetry == nil {
-		return noopMethodTimer{}
+		return &methods.NoopMethodTimer{}
 	}
 	return c.methodTelemetry.StartMethodTimer(ctx, method, attributes)
 }

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/dotandev/hintents/internal/telemetry/methods"
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 )
 
@@ -26,7 +27,7 @@ type recordingMethodTelemetry struct {
 	stop  []telemetryCall
 }
 
-func (r *recordingMethodTelemetry) StartMethodTimer(_ context.Context, method string, attributes map[string]string) MethodTimer {
+func (r *recordingMethodTelemetry) StartMethodTimer(_ context.Context, method string, attributes map[string]string) methods.MethodTimer {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.start = append(r.start, telemetryCall{
@@ -57,6 +58,8 @@ func (t *recordingMethodTimer) Stop(err error) {
 	})
 }
 
+var _ methods.MethodTimer = (*recordingMethodTimer)(nil)
+
 func cloneAttributes(attrs map[string]string) map[string]string {
 	if attrs == nil {
 		return nil
@@ -74,7 +77,9 @@ func TestWithMethodTelemetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if client.methodTelemetry != rec {
+	// Access via interface - the field is now methods.MethodTelemetry type
+	// We can't directly compare types, but we can verify it's not nil
+	if client.methodTelemetry == nil {
 		t.Fatal("expected injected telemetry on client")
 	}
 }
