@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package config
@@ -6,23 +6,30 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/dotandev/hintents/internal/rpc"
 )
 
+// setTestHomeDir sets both HOME (Unix) and USERPROFILE (Windows) to the given directory
+// and returns a cleanup function to restore the original values
+func setTestHomeDir(t *testing.T, tmpDir string) func() {
+	t.Helper()
+	originalHome := os.Getenv("HOME")
+	originalUserProfile := os.Getenv("USERPROFILE")
+	os.Setenv("HOME", tmpDir)
+	os.Setenv("USERPROFILE", tmpDir)
+	return func() {
+		os.Setenv("HOME", originalHome)
+		os.Setenv("USERPROFILE", originalUserProfile)
+	}
+}
+
 func TestAddAndGetCustomNetwork(t *testing.T) {
 	// Use a temporary directory for testing
 	tmpDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	originalUP := os.Getenv("USERPROFILE")
-	os.Setenv("HOME", tmpDir)
-	os.Setenv("USERPROFILE", tmpDir)
-	defer func() {
-		os.Setenv("HOME", originalHome)
-		os.Setenv("USERPROFILE", originalUP)
-	}()
+	cleanup := setTestHomeDir(t, tmpDir)
+	defer cleanup()
 
 	testConfig := rpc.NetworkConfig{
 		Name:              "local-dev",
@@ -53,14 +60,8 @@ func TestAddAndGetCustomNetwork(t *testing.T) {
 
 func TestListCustomNetworks(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	originalUP := os.Getenv("USERPROFILE")
-	os.Setenv("HOME", tmpDir)
-	os.Setenv("USERPROFILE", tmpDir)
-	defer func() {
-		os.Setenv("HOME", originalHome)
-		os.Setenv("USERPROFILE", originalUP)
-	}()
+	cleanup := setTestHomeDir(t, tmpDir)
+	defer cleanup()
 
 	// Add multiple networks
 	networks := []string{"local-dev", "staging", "private-net"}
@@ -88,14 +89,8 @@ func TestListCustomNetworks(t *testing.T) {
 
 func TestRemoveCustomNetwork(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	originalUP := os.Getenv("USERPROFILE")
-	os.Setenv("HOME", tmpDir)
-	os.Setenv("USERPROFILE", tmpDir)
-	defer func() {
-		os.Setenv("HOME", originalHome)
-		os.Setenv("USERPROFILE", originalUP)
-	}()
+	cleanup := setTestHomeDir(t, tmpDir)
+	defer cleanup()
 
 	testConfig := rpc.NetworkConfig{
 		Name:              "temp-network",
@@ -122,14 +117,8 @@ func TestRemoveCustomNetwork(t *testing.T) {
 
 func TestConfigFilePermissions(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	originalUP := os.Getenv("USERPROFILE")
-	os.Setenv("HOME", tmpDir)
-	os.Setenv("USERPROFILE", tmpDir)
-	defer func() {
-		os.Setenv("HOME", originalHome)
-		os.Setenv("USERPROFILE", originalUP)
-	}()
+	cleanup := setTestHomeDir(t, tmpDir)
+	defer cleanup()
 
 	testConfig := rpc.NetworkConfig{
 		Name:              "secure-net",
@@ -148,12 +137,12 @@ func TestConfigFilePermissions(t *testing.T) {
 	}
 
 	// Check that file has restrictive permissions (0600)
-	// Skip on Windows as permissions work differently
-	if runtime.GOOS != "windows" {
-		mode := info.Mode().Perm()
-		expected := os.FileMode(0600)
-		if mode != expected {
-			t.Errorf("Expected file permissions %o, got %o", expected, mode)
-		}
+	// Note: On Windows, file permissions work differently and this check may not be meaningful
+	// Windows uses ACLs instead of Unix-style permissions
+	mode := info.Mode().Perm()
+	expected := os.FileMode(0600)
+	if os.PathSeparator != '\\' && mode != expected {
+		// Only check permissions on Unix systems
+		t.Errorf("Expected file permissions %o, got %o", expected, mode)
 	}
 }

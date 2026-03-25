@@ -1,5 +1,8 @@
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { createAuditSigner } from '../src/audit/signing/factory';
-import { KmsEd25519Signer } from '../src/audit/signing/kmsSigner';
+import { KmsSigner } from '../src/audit/signing/kmsSigner';
 
 describe('Audit signer factory', () => {
   const mockKeyId = 'arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012';
@@ -11,6 +14,7 @@ MFMwEwYHKoZIzj0CAQYIKoZIzj0DAQcDOgAEWdp8vGtXxyGkftJoJphBnwvlvVfc
   beforeEach(() => {
     process.env.ERST_KMS_KEY_ID = mockKeyId;
     process.env.ERST_KMS_PUBLIC_KEY_PEM = mockPublicKeyPem;
+    process.env.AWS_REGION = 'us-east-1';
   });
 
   afterEach(() => {
@@ -20,12 +24,12 @@ MFMwEwYHKoZIzj0CAQYIKoZIzj0DAQcDOgAEWdp8vGtXxyGkftJoJphBnwvlvVfc
 
   test('creates KMS signer when provider is kms', () => {
     const signer = createAuditSigner({ hsmProvider: 'kms' });
-    expect(signer).toBeInstanceOf(KmsEd25519Signer);
+    expect(signer).toBeInstanceOf(KmsSigner);
   });
 
   test('respects case-insensitive provider selection', () => {
     const signer = createAuditSigner({ hsmProvider: 'KMS' });
-    expect(signer).toBeInstanceOf(KmsEd25519Signer);
+    expect(signer).toBeInstanceOf(KmsSigner);
   });
 
   test('defaults to software signer when no provider specified', () => {

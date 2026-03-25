@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -22,8 +22,9 @@ var (
 )
 
 var reportCmd = &cobra.Command{
-	Use:   "report",
-	Short: "Generate debugging reports from traces",
+	Use:     "report",
+	GroupID: "utility",
+	Short:   "Generate debugging reports from traces",
 	Long: `Generate professional PDF or HTML reports from execution traces.
 
 Reports include:
@@ -45,7 +46,7 @@ func reportExec(cmd *cobra.Command, args []string) error {
 		return errors.WrapCliArgumentRequired("file")
 	}
 
-	if _, err := os.Stat(reportFile); os.IsNotExist(err) {
+	if _, statErr := os.Stat(reportFile); os.IsNotExist(statErr) {
 		return errors.WrapValidationError(fmt.Sprintf("trace file not found: %s", reportFile))
 	}
 
@@ -129,14 +130,14 @@ func reportExec(cmd *cobra.Command, args []string) error {
 	}
 
 	if reportFormat == "json" {
-		jsonData, err := json.MarshalIndent(generatedReport, "", "  ")
-		if err != nil {
-			return errors.WrapMarshalFailed(err)
+		jsonData, marshalErr := json.MarshalIndent(generatedReport, "", "  ")
+		if marshalErr != nil {
+			return errors.WrapMarshalFailed(marshalErr)
 		}
 
 		filename := reportOutput + "/report.json"
-		if err := os.WriteFile(filename, jsonData, 0644); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("failed to write JSON report: %v", err))
+		if writeErr := os.WriteFile(filename, jsonData, 0644); writeErr != nil {
+			return errors.WrapValidationError(fmt.Sprintf("failed to write JSON report: %v", writeErr))
 		}
 
 		fmt.Printf("[OK] Report generated: %s\n", filename)
@@ -218,6 +219,8 @@ func init() {
 	reportCmd.Flags().StringVar(&reportFormat, "format", "html", "Output format: html, pdf, json, or html,pdf")
 	reportCmd.Flags().StringVar(&reportOutput, "output", ".", "Output directory for reports")
 	reportCmd.Flags().StringVar(&reportFile, "file", "", "Trace file to analyze")
+
+	_ = reportCmd.RegisterFlagCompletionFunc("format", completeReportFormatFlag)
 
 	rootCmd.AddCommand(reportCmd)
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+
+	"github.com/dotandev/hintents/internal/rpc"
 )
 
 func TestCheckGo(t *testing.T) {
@@ -102,6 +104,72 @@ func TestCheckSimulatorPaths(t *testing.T) {
 		if _, err := os.Stat(dep.Path); os.IsNotExist(err) {
 			t.Errorf("checkSimulator() reported installed but path does not exist: %s", dep.Path)
 		}
+	}
+}
+
+func TestGoVersionMismatch(t *testing.T) {
+	// write a temporary go.mod with incompatible version
+	orig, err := os.ReadFile("go.mod")
+	defer func() {
+		if err != nil {
+			os.Remove("go.mod")
+		} else {
+			os.WriteFile("go.mod", orig, 0644)
+		}
+	}()
+	_ = os.WriteFile("go.mod", []byte("module foo\n\ngo 9.99\n"), 0644)
+	dep := checkGo(false)
+	if dep.FixHint == "" {
+		t.Error("expected FixHint when go version mismatches go.mod")
+	}
+}
+
+func TestCheckConfigTOML(t *testing.T) {
+	// no config file -> success
+	os.Remove(".erst.toml")
+	dep := checkConfigTOML(false)
+	if !dep.Installed {
+		t.Error("expected config check to pass when no file present")
+	}
+
+	// valid config
+	os.WriteFile(".erst.toml", []byte("rpc_url = \"https://example.com\"\n"), 0644)
+	dep = checkConfigTOML(false)
+	if !dep.Installed {
+		t.Error("expected valid toml to succeed")
+	}
+
+	// invalid syntax
+	os.WriteFile(".erst.toml", []byte("rpc_url = \n"), 0644)
+	dep = checkConfigTOML(true)
+	if dep.Installed {
+		t.Error("expected invalid toml to fail")
+	}
+	os.Remove(".erst.toml")
+}
+
+func TestCheckRPC(t *testing.T) {
+	// start mock server responding healthy
+	rs := rpc.NewMockServer(map[string]rpc.MockRoute{
+		"/": rpc.SuccessRoute(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"result":  map[string]interface{}{"status": "healthy"},
+		}),
+	})
+	defer rs.Close()
+	os.Setenv("ERST_RPC_URL", rs.URL())
+	defer os.Unsetenv("ERST_RPC_URL")
+	dep := checkRPC(false)
+	if !dep.Installed {
+		t.Error("expected rpc check to succeed against mock server")
+	}
+
+	// bad url
+	os.Setenv("ERST_RPC_URL", "http://nonexistent.invalid")
+	dep = checkRPC(false)
+	if dep.Installed {
+		t.Error("expected rpc check to fail for unreachable url")
 	}
 }
 

@@ -1,11 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schemas/common.schema.json",
-  "definitions": {
+  "$id": "https://simulator.stellar.org/schemas/v1/common.schema.json",
+  "version": "1.0.0",
+  "title": "Common Schema Definitions",
+  "description": "Shared type definitions used across simulator schemas",
+  "$defs": {
     "Version": {
       "type": "string",
-      "pattern": "^\\d+\\.\\d+$",
-      "description": "Schema version (e.g. 1.0)"
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version string (e.g., 1.0.0)"
     },
     "XDRBase64": {
       "type": "string",

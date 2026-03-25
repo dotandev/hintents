@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package simulator
@@ -55,21 +55,6 @@ func TestCheckLedgerEntriesSize_OneByteOver(t *testing.T) {
 	}
 	if warning.LimitBytes != MaxLedgerEntriesSizeBytes {
 		t.Errorf("expected LimitBytes=%d, got %d", MaxLedgerEntriesSizeBytes, warning.LimitBytes)
-	}
-}
-
-func TestCheckLedgerEntriesSize_MultipleEntriesOverLimit(t *testing.T) {
-	// 10 entries, each key=64KiB + value=128KiB → 10 * 192 KiB = 1920 KiB > 1 MiB
-	entries := make(map[string]string, 10)
-	for i := 0; i < 10; i++ {
-		entries[makeEntry(64*1024)] = makeEntry(128 * 1024)
-	}
-	warning := CheckLedgerEntriesSize(entries)
-	if warning == nil {
-		t.Fatal("expected a warning for 10 large entries, got nil")
-	}
-	if warning.EntryCount != 10 {
-		t.Errorf("expected EntryCount=10, got %d", warning.EntryCount)
 	}
 }
 

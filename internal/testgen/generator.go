@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package testgen
@@ -8,10 +8,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
 	"github.com/dotandev/hintents/internal/rpc"
+)
+
+// Formal schema validation regex
+var (
+	txHashRegex = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
+	xdrRegex    = regexp.MustCompile(`^[A-Za-z0-9+/=]+$`) // Basic Base64 validation
 )
 
 // TestGenerator handles the generation of regression tests
@@ -20,13 +27,28 @@ type TestGenerator struct {
 	OutputDir string
 }
 
-// TestData contains the data needed to generate a test
+// TestData contains the data needed to generate a test.
+// Struct tags added to reflect formal schema for internal documentation.
 type TestData struct {
-	TestName      string
-	TxHash        string
-	EnvelopeXdr   string
-	ResultMetaXdr string
-	LedgerEntries []LedgerEntry
+	TestName      string        `validate:"required,alphanumeric"`
+	TxHash        string        `validate:"required,hex,len=64"`
+	EnvelopeXdr   string        `validate:"required,base64"`
+	ResultMetaXdr string        `validate:"required,base64"`
+	LedgerEntries []LedgerEntry `validate:"min=0"`
+}
+
+// Validate audits the input data against formal schemas before processing [Issue #606]
+func (d *TestData) Validate() error {
+	if d.TestName == "" {
+		return fmt.Errorf("formal schema error: TestName is required")
+	}
+	if !txHashRegex.MatchString(d.TxHash) {
+		return fmt.Errorf("formal schema error: TxHash must be a valid 64-character hex string")
+	}
+	if !xdrRegex.MatchString(d.EnvelopeXdr) || !xdrRegex.MatchString(d.ResultMetaXdr) {
+		return fmt.Errorf("formal schema error: Envelope and ResultMeta must be valid XDR strings")
+	}
+	return nil
 }
 
 // LedgerEntry represents a key-value pair for ledger state
@@ -51,19 +73,24 @@ func (g *TestGenerator) GenerateTests(ctx context.Context, txHash string, lang s
 		return fmt.Errorf("failed to fetch transaction data: %w", err)
 	}
 
-	// Generate tests based on language flag
+	// 1. Formal Schema Validation before processing [Issue #606]
+	if err := testData.Validate(); err != nil {
+		return fmt.Errorf("pre-processing validation failed: %w", err)
+	}
+
+	// 2. Proceed with generation
 	switch lang {
 	case "go":
 		return g.GenerateGoTest(testData)
 	case "rust":
 		return g.GenerateRustTest(testData)
 	case "both":
-		if err := g.GenerateGoTest(testData); err != nil {
-			return err
+		if goErr := g.GenerateGoTest(testData); goErr != nil {
+			return goErr
 		}
 		return g.GenerateRustTest(testData)
 	default:
-		return fmt.Errorf("unsupported language: %s (must be 'go', 'rust', or 'both')", lang)
+		return fmt.Errorf("unsupported language: %s", lang)
 	}
 }
 
@@ -74,13 +101,11 @@ func (g *TestGenerator) fetchTransactionData(ctx context.Context, txHash string,
 		return nil, err
 	}
 
-	// Use provided test name or generate from hash
 	if testName == "" {
 		testName = sanitizeTestName(txHash)
 	}
 
 	// TODO: Fetch ledger entries from transaction footprint
-	// For now, we'll use an empty map
 	ledgerEntries := []LedgerEntry{}
 
 	return &TestData{
@@ -99,13 +124,11 @@ func (g *TestGenerator) GenerateGoTest(data *TestData) error {
 		return fmt.Errorf("failed to parse Go template: %w", err)
 	}
 
-	// Create output directory
 	outputDir := filepath.Join(g.OutputDir, "internal", "simulator", "regression_tests")
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
+	if mkdirErr := os.MkdirAll(outputDir, 0755); mkdirErr != nil {
+		return fmt.Errorf("failed to create output directory: %w", mkdirErr)
 	}
 
-	// Create output file
 	filename := filepath.Join(outputDir, fmt.Sprintf("regression_%s_test.go", data.TestName))
 	file, err := os.Create(filename)
 	if err != nil {
@@ -113,7 +136,6 @@ func (g *TestGenerator) GenerateGoTest(data *TestData) error {
 	}
 	defer file.Close()
 
-	// Execute template
 	if err := tmpl.Execute(file, data); err != nil {
 		return fmt.Errorf("failed to execute Go template: %w", err)
 	}
@@ -129,13 +151,11 @@ func (g *TestGenerator) GenerateRustTest(data *TestData) error {
 		return fmt.Errorf("failed to parse Rust template: %w", err)
 	}
 
-	// Create output directory
 	outputDir := filepath.Join(g.OutputDir, "simulator", "tests", "regression")
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
+	if mkdirErr := os.MkdirAll(outputDir, 0755); mkdirErr != nil {
+		return fmt.Errorf("failed to create output directory: %w", mkdirErr)
 	}
 
-	// Create output file
 	filename := filepath.Join(outputDir, fmt.Sprintf("regression_%s.rs", data.TestName))
 	file, err := os.Create(filename)
 	if err != nil {
@@ -143,7 +163,6 @@ func (g *TestGenerator) GenerateRustTest(data *TestData) error {
 	}
 	defer file.Close()
 
-	// Execute template
 	if err := tmpl.Execute(file, data); err != nil {
 		return fmt.Errorf("failed to execute Rust template: %w", err)
 	}
@@ -154,12 +173,10 @@ func (g *TestGenerator) GenerateRustTest(data *TestData) error {
 
 // sanitizeTestName converts a transaction hash to a valid test name
 func sanitizeTestName(txHash string) string {
-	// Take first 8 characters of hash
 	name := txHash
 	if len(name) > 8 {
 		name = name[:8]
 	}
-	// Replace any non-alphanumeric characters
 	name = strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
 			return r

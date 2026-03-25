@@ -1,13 +1,13 @@
 // Copyright (c) 2026 dotandev
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-import { normalizeTokenLabel, resolvePkcs11KeyIdHex, resolveYkcs11KeyIdHex } from '../src/audit/signing/pkcs11Signer';
+import { normalizeTokenLabel, resolvePkcs11KeyIdHex, resolveYkcs11KeyIdHex, Pkcs11Signer } from '../src/audit/signing/pkcs11Signer';
 
-const loadSigner = (): typeof import('../src/audit/signing/pkcs11Signer').Pkcs11Ed25519Signer =>
+const loadSigner = (): typeof Pkcs11Signer =>
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  require('../src/audit/signing/pkcs11Signer').Pkcs11Ed25519Signer;
+  require('../src/audit/signing/pkcs11Signer').Pkcs11Signer;
 
-describe('Pkcs11Ed25519Signer', () => {
+describe('Pkcs11Signer', () => {
   const originalEnv = process.env;
 
   beforeEach(() => {

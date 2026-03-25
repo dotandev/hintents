@@ -1,15 +1,14 @@
 # Erst By Hintents
 
-**Erst** is a specialized developer tool for the Stellar network, designed to solve the "black box" debugging experience on Soroban.
+**Erst** is a premium developer toolset for the Stellar network, designed to provide high-fidelity "glass-box" debugging and simulation for Soroban smart contracts.
 
-> **Status**: Active Development (Pre-Alpha)
-> **Focus**: Soroban Error Decoding & Transaction Replay
+> **Status**: Active Development (Phase 4: Advanced Diagnostics)
+> **Documentation**: [https://dotandev-hintents-75.mintlify.app/](https://dotandev-hintents-75.mintlify.app/)
+> **Focus**: High-Fidelity Simulation, Auth Tracing, and Security Auditing
 
 ## Scope & Objective
 
-The primary goal of `erst` is to clarify **why** a Stellar smart contract transaction failed.
-
-Currently, when a Soroban transaction fails on mainnet, developers receive a generic XDR error code. `erst` aims to bridge the gap between this opaque network error and the developer's source code.
+The primary goal of `erst` is to eliminate the opaque "black box" experience of failed Stellar smart contract transactions. By providing local-first, high-fidelity replay and tracing, `erst` maps generic network errors back to human-readable diagnostic events and source code.
 
 **Core Features (Planned):**
 
@@ -18,7 +17,7 @@ Currently, when a Soroban transaction fails on mainnet, developers receive a gen
 3.  **Trace decoding**: Map execution steps and failures back to readable instructions or Rust source lines.
 4.  **Source Mapping**: Map WASM instruction failures to specific Rust source code lines using debug symbols.
 5.  **GitHub Source Links**: Automatically generate clickable GitHub links to source code locations in traces (when in a Git repository).
-5.  **Error Suggestions**: Heuristic-based engine that suggests potential fixes for common Soroban errors.
+6.  **Error Suggestions**: Heuristic-based engine that suggests potential fixes for common Soroban errors.
 
 ## Usage (MVP)
 
@@ -28,6 +27,12 @@ Fetches a transaction envelope from the Stellar Public network and prints its XD
 
 ```bash
 ./erst debug <transaction-hash> --network testnet
+```
+
+Debug an offline envelope from stdin (no RPC):
+
+```bash
+./erst debug < tx.xdr
 ```
 
 ### Interactive Trace Viewer
@@ -50,6 +55,32 @@ Launch an interactive terminal UI to explore transaction execution traces with s
 - **Match Counter**: See "Match 2 of 5" status while searching
 
 See [internal/trace/README.md](internal/trace/README.md) for detailed documentation.
+
+### Performance Profiling
+
+Generate interactive flamegraphs to visualize CPU and memory consumption during contract execution:
+
+```bash
+./erst debug --profile <transaction-hash>
+```
+
+This generates an interactive HTML file (`<tx-hash>.flamegraph.html`) with:
+- **Hover tooltips** showing frame details (function name, duration, percentage)
+- **Click-to-zoom** to focus on specific call stacks
+- **Search/highlight** to find frames by name
+- **Dark mode support** that adapts to your system theme
+
+**Export Formats:**
+
+```bash
+# Interactive HTML (default)
+./erst debug --profile --profile-format html <transaction-hash>
+
+# Raw SVG with dark mode support
+./erst debug --profile --profile-format svg <transaction-hash>
+```
+
+See [docs/INTERACTIVE_FLAMEGRAPH.md](docs/INTERACTIVE_FLAMEGRAPH.md) for detailed documentation and [docs/examples/sample_flamegraph.html](docs/examples/sample_flamegraph.html) for a live demo.
 
 ### Audit log signing (software / HSM)
 

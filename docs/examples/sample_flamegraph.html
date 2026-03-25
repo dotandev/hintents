@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive Flamegraph - Sample</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #1e1e2e; color: #cdd6f4; }
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    @media (prefers-color-scheme: dark) {
+      .container { background: #181825; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    }
+    .toolbar {
+      padding: 15px 20px;
+      border-bottom: 1px solid #e0e0e0;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    @media (prefers-color-scheme: dark) {
+      .toolbar { border-bottom-color: #313244; }
+    }
+    .toolbar button {
+      padding: 8px 16px;
+      border: 1px solid #ccc;
+      background: white;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    .toolbar button:hover {
+      background: #f0f0f0;
+      border-color: #999;
+    }
+    @media (prefers-color-scheme: dark) {
+      .toolbar button {
+        background: #313244;
+        border-color: #45475a;
+        color: #cdd6f4;
+      }
+      .toolbar button:hover {
+        background: #45475a;
+        border-color: #585b70;
+      }
+    }
+    .toolbar input {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 14px;
+      flex: 1;
+      min-width: 200px;
+      max-width: 400px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .toolbar input {
+        background: #313244;
+        border-color: #45475a;
+        color: #cdd6f4;
+      }
+    }
+    .svg-container {
+      padding: 20px;
+      overflow: auto;
+      position: relative;
+    }
+    svg {
+      display: block;
+      margin: 0 auto;
+      cursor: default;
+    }
+    .tooltip {
+      position: fixed;
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      pointer-events: none;
+      z-index: 1000;
+      display: none;
+      max-width: 400px;
+      word-wrap: break-word;
+    }
+    @media (prefers-color-scheme: dark) {
+      .tooltip { background: rgba(30, 30, 46, 0.95); border: 1px solid #45475a; }
+    }
+    .info {
+      padding: 10px 20px;
+      font-size: 13px;
+      color: #666;
+      border-top: 1px solid #e0e0e0;
+    }
+    @media (prefers-color-scheme: dark) {
+      .info { color: #a6adc8; border-top-color: #313244; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="toolbar">
+      <button id="resetBtn">Reset Zoom</button>
+      <input type="text" id="searchInput" placeholder="Search frames (e.g., function name)...">
+      <button id="searchBtn">Search</button>
+      <button id="clearBtn">Clear</button>
+    </div>
+    <div class="svg-container">
+      <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400">
+<style type="text/css">
+/* Dark mode support for flamegraph SVGs */
+@media (prefers-color-scheme: dark) {
+  /* Invert the background from white to a dark surface */
+  svg { background-color: #1e1e2e; }
+
+  /* Main text (function names, labels) */
+  text { fill: #cdd6f4 !important; }
+
+  /* Title and subtitle */
+  text.title { fill: #cdd6f4 !important; }
+
+  /* Details / info bar at the bottom */
+  rect.background { fill: #1e1e2e !important; }
+
+  /* Slightly desaturate the flame rectangles for better contrast on dark bg */
+  rect[fill] {
+    opacity: 0.92;
+  }
+
+  /* Search match highlight */
+  rect[fill="rgb(230,0,230)"] {
+    fill: rgb(200,80,200) !important;
+  }
+}
+</style>
+        <text x="600" y="30" text-anchor="middle" font-size="20" font-weight="bold">Sample Flamegraph - Soroban Resource Consumption</text>
+        
+        <!-- Main function -->
+        <g>
+          <title>main() - 100% (1000ms)</title>
+          <rect x="0" y="60" width="1200" height="40" fill="rgb(230, 159, 0)" stroke="white"/>
+          <text x="600" y="85" text-anchor="middle" font-size="14">main() - 100%</text>
+        </g>
+        
+        <!-- Contract invocation -->
+        <g>
+          <title>invoke_contract() - 80% (800ms)</title>
+          <rect x="0" y="110" width="960" height="40" fill="rgb(86, 180, 233)" stroke="white"/>
+          <text x="480" y="135" text-anchor="middle" font-size="14">invoke_contract() - 80%</text>
+        </g>
+        
+        <!-- Token transfer -->
+        <g>
+          <title>token_transfer() - 40% (400ms)</title>
+          <rect x="0" y="160" width="480" height="40" fill="rgb(0, 158, 115)" stroke="white"/>
+          <text x="240" y="185" text-anchor="middle" font-size="14">token_transfer() - 40%</text>
+        </g>
+        
+        <!-- Balance check -->
+        <g>
+          <title>check_balance() - 20% (200ms)</title>
+          <rect x="0" y="210" width="240" height="40" fill="rgb(240, 228, 66)" stroke="white"/>
+          <text x="120" y="235" text-anchor="middle" font-size="14">check_balance() - 20%</text>
+        </g>
+        
+        <!-- Storage read -->
+        <g>
+          <title>storage_read() - 10% (100ms)</title>
+          <rect x="0" y="260" width="120" height="40" fill="rgb(213, 94, 0)" stroke="white"/>
+          <text x="60" y="285" text-anchor="middle" font-size="12">storage_read()</text>
+        </g>
+        
+        <!-- Deserialize -->
+        <g>
+          <title>deserialize() - 10% (100ms)</title>
+          <rect x="120" y="260" width="120" height="40" fill="rgb(204, 121, 167)" stroke="white"/>
+          <text x="180" y="285" text-anchor="middle" font-size="12">deserialize()</text>
+        </g>
+        
+        <!-- Update balance -->
+        <g>
+          <title>update_balance() - 20% (200ms)</title>
+          <rect x="240" y="210" width="240" height="40" fill="rgb(0, 114, 178)" stroke="white"/>
+          <text x="360" y="235" text-anchor="middle" font-size="14">update_balance() - 20%</text>
+        </g>
+        
+        <!-- Event emission -->
+        <g>
+          <title>emit_event() - 40% (400ms)</title>
+          <rect x="480" y="160" width="480" height="40" fill="rgb(230, 159, 0)" stroke="white"/>
+          <text x="720" y="185" text-anchor="middle" font-size="14">emit_event() - 40%</text>
+        </g>
+        
+        <!-- Logging -->
+        <g>
+          <title>log_debug() - 20% (200ms)</title>
+          <rect x="960" y="110" width="240" height="40" fill="rgb(86, 180, 233)" stroke="white"/>
+          <text x="1080" y="135" text-anchor="middle" font-size="14">log_debug() - 20%</text>
+        </g>
+      </svg>
+    </div>
+    <div class="info">
+      <strong>Interactions:</strong> Hover for details • Click to zoom • Search to highlight
+    </div>
+  </div>
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    (function() {
+      'use strict';
+
+      const svg = document.querySelector('svg');
+      const tooltip = document.getElementById('tooltip');
+      const resetBtn = document.getElementById('resetBtn');
+      const searchInput = document.getElementById('searchInput');
+      const searchBtn = document.getElementById('searchBtn');
+      const clearBtn = document.getElementById('clearBtn');
+
+      let zoomStack = [];
+      let originalViewBox = null;
+
+      // Initialize
+      if (svg) {
+        originalViewBox = svg.getAttribute('viewBox') || '0 0 ' + svg.getAttribute('width') + ' ' + svg.getAttribute('height');
+        setupInteractivity();
+      }
+
+      function setupInteractivity() {
+        // Hover tooltips
+        svg.addEventListener('mouseover', handleMouseOver);
+        svg.addEventListener('mouseout', handleMouseOut);
+        svg.addEventListener('mousemove', handleMouseMove);
+
+        // Click to zoom
+        svg.addEventListener('click', handleClick);
+
+        // Toolbar actions
+        resetBtn.addEventListener('click', resetZoom);
+        searchBtn.addEventListener('click', performSearch);
+        clearBtn.addEventListener('click', clearSearch);
+        searchInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') performSearch();
+        });
+      }
+
+      function handleMouseOver(e) {
+        const target = e.target;
+        if (target.tagName === 'rect' || target.tagName === 'g') {
+          const g = target.tagName === 'g' ? target : target.parentElement;
+          const title = g.querySelector('title');
+          if (title) {
+            tooltip.textContent = title.textContent;
+            tooltip.style.display = 'block';
+          }
+        }
+      }
+
+      function handleMouseOut(e) {
+        tooltip.style.display = 'none';
+      }
+
+      function handleMouseMove(e) {
+        if (tooltip.style.display === 'block') {
+          tooltip.style.left = (e.clientX + 10) + 'px';
+          tooltip.style.top = (e.clientY + 10) + 'px';
+        }
+      }
+
+      function handleClick(e) {
+        const target = e.target;
+        if (target.tagName !== 'rect') return;
+
+        const g = target.parentElement;
+        const rect = target;
+
+        // Get bounding box
+        const x = parseFloat(rect.getAttribute('x') || 0);
+        const y = parseFloat(rect.getAttribute('y') || 0);
+        const width = parseFloat(rect.getAttribute('width') || 0);
+        const height = parseFloat(rect.getAttribute('height') || 0);
+
+        if (width > 0 && height > 0) {
+          // Save current viewBox to stack
+          zoomStack.push(svg.getAttribute('viewBox'));
+
+          // Calculate new viewBox with some padding
+          const padding = width * 0.1;
+          const newX = Math.max(0, x - padding);
+          const newY = Math.max(0, y - padding);
+          const newWidth = width + (padding * 2);
+          const newHeight = height * 10; // Show more vertical context
+
+          svg.setAttribute('viewBox', newX + ' ' + newY + ' ' + newWidth + ' ' + newHeight);
+        }
+      }
+
+      function resetZoom() {
+        if (originalViewBox) {
+          svg.setAttribute('viewBox', originalViewBox);
+          zoomStack = [];
+        }
+      }
+
+      function performSearch() {
+        const query = searchInput.value.trim().toLowerCase();
+        if (!query) return;
+
+        clearSearch();
+
+        const allGroups = svg.querySelectorAll('g');
+        let matchCount = 0;
+
+        allGroups.forEach(g => {
+          const title = g.querySelector('title');
+          const rect = g.querySelector('rect');
+
+          if (title && rect && title.textContent.toLowerCase().includes(query)) {
+            // Highlight matching frames
+            const originalFill = rect.getAttribute('fill');
+            rect.setAttribute('data-original-fill', originalFill);
+            rect.setAttribute('fill', 'rgb(230, 100, 230)');
+            rect.setAttribute('data-highlighted', 'true');
+            matchCount++;
+          }
+        });
+
+        if (matchCount === 0) {
+          alert('No matches found for: ' + query);
+        }
+      }
+
+      function clearSearch() {
+        const highlighted = svg.querySelectorAll('rect[data-highlighted="true"]');
+        highlighted.forEach(rect => {
+          const originalFill = rect.getAttribute('data-original-fill');
+          if (originalFill) {
+            rect.setAttribute('fill', originalFill);
+          }
+          rect.removeAttribute('data-original-fill');
+          rect.removeAttribute('data-highlighted');
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package config
@@ -43,7 +43,8 @@ func LoadCustomNetworks() (*CustomNetworkConfig, error) {
 	}
 
 	// If file doesn't exist, return empty config
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	_, err = os.Stat(configPath)
+	if os.IsNotExist(err) {
 		return &CustomNetworkConfig{
 			Networks: make(map[string]rpc.NetworkConfig),
 		}, nil
@@ -75,7 +76,8 @@ func SaveCustomNetworks(config *CustomNetworkConfig) error {
 
 	// Ensure config directory exists
 	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, 0700); err != nil {
+	err = os.MkdirAll(configDir, 0700)
+	if err != nil {
 		return errors.WrapConfigError("failed to create config directory", err)
 	}
 
@@ -85,7 +87,8 @@ func SaveCustomNetworks(config *CustomNetworkConfig) error {
 	}
 
 	// Write with restricted permissions (owner only)
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
+	err = os.WriteFile(configPath, data, 0600)
+	if err != nil {
 		return errors.WrapConfigError("failed to write config file", err)
 	}
 

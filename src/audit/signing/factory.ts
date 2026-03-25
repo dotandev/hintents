@@ -4,7 +4,7 @@
 import type { AuditSigner } from './types';
 import { SoftwareEd25519Signer } from './softwareSigner';
 import { Pkcs11Signer } from './pkcs11Signer';
-import { KmsEd25519Signer } from './kmsSigner';
+import { KmsSigner } from './kmsSigner';
 
 export type SigningProvider = 'software' | 'pkcs11' | 'kms';
 
@@ -21,7 +21,7 @@ export function createAuditSigner(opts: CreateAuditSignerOpts): AuditSigner {
   switch (provider) {
     case 'kms':
       // Return KMS signer with algorithm support
-      return new KmsEd25519Signer();
+      return new KmsSigner();
 
     case 'pkcs11':
       // The Pkcs11Signer now handles algorithm choice via ERST_PKCS11_ALGORITHM env var

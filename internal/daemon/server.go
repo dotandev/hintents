@@ -1,10 +1,11 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/gorilla/rpc/v2"
 	"github.com/gorilla/rpc/v2/json2"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -57,6 +59,19 @@ type GetTraceRequest struct {
 type GetTraceResponse struct {
 	Hash   string                   `json:"hash"`
 	Traces []map[string]interface{} `json:"traces"`
+}
+
+// GetContractCodeRequest represents the get_contract_code RPC request
+type GetContractCodeRequest struct {
+	ContractID string `json:"contract_id"`
+	TxHash     string `json:"tx_hash"`
+}
+
+// GetContractCodeResponse represents the get_contract_code RPC response
+type GetContractCodeResponse struct {
+	ContractID string `json:"contract_id"`
+	WasmHash   string `json:"wasm_hash"`
+	Wasm       string `json:"wasm"`
 }
 
 // NewServer creates a new JSON-RPC server
@@ -168,6 +183,38 @@ func (s *Server) GetTrace(r *http.Request, req *GetTraceRequest, resp *GetTraceR
 	return nil
 }
 
+// GetContractCode handles get_contract_code RPC calls to fetch historical WASM bytecode
+func (s *Server) GetContractCode(r *http.Request, req *GetContractCodeRequest, resp *GetContractCodeResponse) error {
+	if !s.authenticate(r) {
+		return errors.WrapUnauthorized("")
+	}
+
+	ctx := r.Context()
+	tracer := telemetry.GetTracer()
+	ctx, span := tracer.Start(ctx, "rpc_get_contract_code")
+	span.SetAttributes(
+		attribute.String("contract.id", req.ContractID),
+		attribute.String("transaction.hash", req.TxHash),
+	)
+	defer span.End()
+
+	logger.Logger.Info("Processing get_contract_code RPC", "contract_id", req.ContractID, "tx_hash", req.TxHash)
+
+	wasmBytes, wasmHash, err := stellarrpc.FetchHistoricalContractBytecode(ctx, s.rpcClient, req.ContractID, req.TxHash)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("fetch historical bytecode: %w", err)
+	}
+
+	*resp = GetContractCodeResponse{
+		ContractID: req.ContractID,
+		WasmHash:   wasmHash,
+		Wasm:       base64.StdEncoding.EncodeToString(wasmBytes),
+	}
+
+	return nil
+}
+
 // Start starts the JSON-RPC server
 func (s *Server) Start(ctx context.Context, port string) error {
 	server := rpc.NewServer()
@@ -185,6 +232,9 @@ func (s *Server) Start(ctx context.Context, port string) error {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
+
+	// Prometheus metrics endpoint
+	http.Handle("/metrics", promhttp.Handler())
 
 	logger.Logger.Info("Starting JSON-RPC server", "port", port)
 

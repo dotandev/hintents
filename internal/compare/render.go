@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package compare
@@ -134,7 +134,7 @@ func renderEventDiffs(diffs []EventDiff) {
 	for _, d := range diffs {
 		localEvt := truncate(d.LocalEvent, colWidth)
 		onChainEvt := truncate(d.OnChainEvent, colWidth)
-		marker := "  "
+		var marker string
 		if d.Divergent {
 			marker = visualizer.Colorize("[!]", "yellow") + " "
 		} else {

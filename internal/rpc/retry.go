@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package rpc
@@ -6,8 +6,8 @@ package rpc
 import (
 	"context"
 	"fmt"
-	"math"
 	"math/rand"
+
 	"net/http"
 	"strconv"
 	"time"
@@ -31,7 +31,7 @@ func DefaultRetryConfig() RetryConfig {
 		MaxRetries:         3,
 		InitialBackoff:     1 * time.Second,
 		MaxBackoff:         10 * time.Second,
-		JitterFraction:     0.1,
+		JitterFraction:     0.1, // 10% jitter to prevent thundering herd
 		StatusCodesToRetry: []int{429, 503, 504},
 	}
 }
@@ -149,6 +149,7 @@ func (r *Retrier) getRetryAfter(resp *http.Response) time.Duration {
 }
 
 // nextBackoff calculates the next backoff duration with exponential backoff and jitter
+// Uses full jitter to prevent thundering herd problems when multiple clients retry simultaneously
 func (r *Retrier) nextBackoff(current time.Duration) time.Duration {
 	// Exponential backoff: double the current duration
 	next := time.Duration(float64(current) * 2)
@@ -156,12 +157,13 @@ func (r *Retrier) nextBackoff(current time.Duration) time.Duration {
 		next = r.config.MaxBackoff
 	}
 
-	// Add jitter: ±JitterFraction of the duration
+	// Add full jitter: random value between 0 and next duration
+	// This prevents thundering herd by spreading retry attempts randomly
 	if r.config.JitterFraction > 0 {
-		jitterAmount := float64(next) * r.config.JitterFraction
-		jitterRange := math.Round(jitterAmount)
-		jitter := time.Duration(rand.Int63n(int64(jitterRange)*2) - int64(jitterRange))
-		next = next + jitter
+		// Full jitter: random between 0 and next * (1 + JitterFraction)
+		maxJitter := float64(next) * (1.0 + r.config.JitterFraction)
+		jitter := time.Duration(rand.Float64() * maxJitter)
+		next = jitter
 		if next < 0 {
 			next = 0
 		}
@@ -292,6 +294,7 @@ func (rt *RetryTransport) getRetryAfter(resp *http.Response) time.Duration {
 }
 
 // nextBackoff calculates the next backoff duration with exponential backoff and jitter
+// Uses full jitter to prevent thundering herd problems when multiple clients retry simultaneously
 func (rt *RetryTransport) nextBackoff(current time.Duration) time.Duration {
 	// Exponential backoff: double the current duration
 	next := time.Duration(float64(current) * 2)
@@ -299,12 +302,13 @@ func (rt *RetryTransport) nextBackoff(current time.Duration) time.Duration {
 		next = rt.config.MaxBackoff
 	}
 
-	// Add jitter: ±JitterFraction of the duration
+	// Add full jitter: random value between 0 and next duration
+	// This prevents thundering herd by spreading retry attempts randomly
 	if rt.config.JitterFraction > 0 {
-		jitterAmount := float64(next) * rt.config.JitterFraction
-		jitterRange := math.Round(jitterAmount)
-		jitter := time.Duration(rand.Int63n(int64(jitterRange)*2) - int64(jitterRange))
-		next = next + jitter
+		// Full jitter: random between 0 and next * (1 + JitterFraction)
+		maxJitter := float64(next) * (1.0 + rt.config.JitterFraction)
+		jitter := time.Duration(rand.Float64() * maxJitter)
+		next = jitter
 		if next < 0 {
 			next = 0
 		}

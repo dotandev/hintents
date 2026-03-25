@@ -4,7 +4,7 @@
 import { renderAuditHTML } from '../src/audit/AuditRenderer';
 import { AuditLogger } from '../src/audit/AuditLogger';
 import { MockAuditSigner } from '../src/audit/signing/mockSigner';
-import type { ExecutionTrace, SignedAuditLog } from '../src/audit/AuditLogger';
+import type { ExecutionTrace, SignedAuditLog, MultiSignedAuditLog } from '../src/audit/AuditLogger';
 
 const baseTrace: ExecutionTrace = {
   input: { amount: 100, currency: 'USD', user_id: 'u_123' },
@@ -143,5 +143,36 @@ describe('renderAuditHTML (SignedAuditLog)', () => {
     expect(html).toContain('INIT_TRANSFER');
     expect(html).toContain('DEBIT_ACCOUNT');
     expect(html).toContain('FEE_CALC');
+  });
+});
+
+describe('renderAuditHTML (MultiSignedAuditLog)', () => {
+  let multiLog: MultiSignedAuditLog;
+
+  beforeAll(async () => {
+    const signerA = new MockAuditSigner();
+    const signerB = new MockAuditSigner();
+    const logger = new AuditLogger(signerA, 'mock');
+    multiLog = await logger.generateMultiLog(baseTrace, [
+      { signer: signerA, provider: 'mock', label: 'alice' },
+      { signer: signerB, provider: 'mock', label: 'bob' },
+    ]);
+  });
+
+  test('includes the signature section', () => {
+    const html = renderAuditHTML(multiLog);
+    expect(html).toContain('id="signature"');
+  });
+
+  test('renders each signer label', () => {
+    const html = renderAuditHTML(multiLog);
+    expect(html).toContain('alice');
+    expect(html).toContain('bob');
+  });
+
+  test('includes multi-signature table headers', () => {
+    const html = renderAuditHTML(multiLog);
+    expect(html).toContain('Signer');
+    expect(html).toContain('Public Key');
   });
 });

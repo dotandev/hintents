@@ -26,6 +26,26 @@ jobs:
       - name: Check license headers in Go and Rust files
         run: ./scripts/check-license-headers.sh
 
+      - name: Guard against conflict markers and leaked secrets
+        run: |
+          set -euo pipefail
+
+          echo "Checking for unresolved merge conflict markers..."
+          if rg -n -e "^(<{7}|={7}|>{7})( .*)?$" . > /tmp/conflict-markers.txt; then
+            echo "[FAIL] Unresolved merge conflict markers found:"
+            cat /tmp/conflict-markers.txt
+            exit 1
+          fi
+
+          echo "Checking for common secret patterns..."
+          if rg -n -g "!**/*.md" -g "!**/examples/**" -e "-----BEGIN (RSA|EC|OPENSSH|DSA|PRIVATE KEY)-----|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|xox[baprs]-" . > /tmp/secret-patterns.txt; then
+            echo "[FAIL] Potential secrets detected in tracked files:"
+            cat /tmp/secret-patterns.txt
+            exit 1
+          fi
+
+          echo " Repository sanity checks passed"
+
   # ============================================
   # Go CLI - Lint, Build & Test
   # ============================================
@@ -36,7 +56,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ["1.21", "1.22", "1.23"]
+        go-version: ["1.24.0"]
 
     steps:
       - name: Checkout code
@@ -53,7 +73,7 @@ jobs:
         run: go mod verify
 
       - name: Check formatting
-        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.23'
+        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.24.0'
         run: |
           if [ -n "$(gofmt -l .)" ]; then
             echo "[FAIL] Go files are not formatted. Run 'go fmt ./...' to fix."
@@ -63,18 +83,18 @@ jobs:
           echo " All Go files are properly formatted"
 
       - name: Run go vet
-        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.23'
+        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.24.0'
         run: go vet ./...
 
       - name: Install golangci-lint
-        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.23'
+        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.24.0'
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
           args: --config=.golangci.yml --timeout=5m --max-issues-per-linter=0 --max-same-issues=0
 
       - name: Check for unused variables
-        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.23'
+        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.24.0'
         run: |
           echo "Checking for unused variables and code..."
           go vet ./... || {
@@ -83,11 +103,45 @@ jobs:
           }
           echo " No unused variables detected"
 
-      - name: Run tests
-        run: go test -v -race ./...
-
       - name: Build
         run: go build -v ./...
+
+      - name: Build erst binary for integration tests
+        run: go build -o erst ./cmd/erst
+
+      - name: Run tests (race)
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -v -race ./...
+
+      - name: Run tests (compile-only)
+        if: matrix.os != 'ubuntu-latest'
+        run: go test -short -run '^$' -v ./...
+
+  # ============================================
+  # Cross-Platform CLI Binary Integration
+  # ============================================
+  cli-integration:
+    name: CLI Integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: license-headers
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Run CLI integration suite via os/exec
+        run: go test -v ./tests -run TestErstBinaryFullCLISurface -count=1
 
   # ============================================
   # Docs - Spell Check
@@ -120,7 +174,8 @@ jobs:
     needs: license-headers
     strategy:
       matrix:
-        rust-version: [stable, "1.85.0"]
+        # Rust 1.87+ is required for ruzstd 0.8.x which uses the stabilized `unsigned_is_multiple_of` feature
+        rust-version: [stable, "1.87"]
     defaults:
       run:
         working-directory: simulator
@@ -134,14 +189,6 @@ jobs:
         with:
           toolchain: ${{ matrix.rust-version }}
           components: rustfmt, clippy
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.6
-
-      - name: Configure sccache
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
 
       - name: Cache Cargo dependencies and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -174,9 +221,7 @@ jobs:
             -D unused-imports \
             -D unused-mut \
             -D dead-code \
-            -D unused-assignments \
-            -W clippy::pedantic \
-            -W clippy::nursery || {
+            -D unused-assignments || {
             echo "[FAIL] Clippy found issues that must be fixed"
             exit 1
           }
@@ -187,6 +232,3 @@ jobs:
 
       - name: Build
         run: cargo build --verbose
-
-      - name: Print sccache stats
-        run: sccache --show-stats

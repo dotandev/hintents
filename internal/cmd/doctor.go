@@ -1,15 +1,20 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+
+	"github.com/dotandev/hintents/internal/config"
+	"github.com/dotandev/hintents/internal/rpc"
 
 	"github.com/spf13/cobra"
 )
@@ -23,14 +28,17 @@ type DependencyStatus struct {
 }
 
 var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Diagnose development environment setup",
+	Use:     "doctor",
+	GroupID: "development",
+	Short:   "Diagnose development environment setup",
 	Long: `Check the status of required dependencies and development tools.
 
 This command verifies:
-  - Go installation and version
+  - Go installation and version (matches go.mod)
   - Rust toolchain (cargo, rustc)
   - Simulator binary (erst-sim)
+  - Syntax of TOML config files
+  - Reachability of the configured RPC endpoint
 
 Use this to troubleshoot installation issues or verify your setup.`,
 	Example: `  # Check environment status
@@ -54,6 +62,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		checkRust(verbose),
 		checkCargo(verbose),
 		checkSimulator(verbose),
+		checkConfigTOML(verbose),
+		checkRPC(verbose),
 	}
 
 	// Print results
@@ -117,6 +127,21 @@ func checkGo(verbose bool) DependencyStatus {
 		parts := strings.Fields(version)
 		if len(parts) >= 3 {
 			dep.Version = parts[2]
+		}
+	}
+
+	// compare against go.mod requirement if available
+	if dep.Installed && dep.Version != "" {
+		if data, err := os.ReadFile("go.mod"); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(line, "go ") {
+					req := strings.TrimSpace(strings.TrimPrefix(line, "go "))
+					if req != "" && !strings.HasPrefix(dep.Version, req) {
+						dep.FixHint = fmt.Sprintf("go.mod requests %s but installed %s", req, dep.Version)
+					}
+					break
+				}
+			}
 		}
 	}
 
@@ -220,6 +245,87 @@ func checkSimulator(verbose bool) DependencyStatus {
 		}
 	}
 
+	return dep
+}
+
+// checkConfigTOML verifies that any present configuration file can be parsed
+// as basic TOML (naive syntax check). Missing file is treated as OK.
+func checkConfigTOML(verbose bool) DependencyStatus {
+	dep := DependencyStatus{
+		Name:    "TOML config",
+		FixHint: "Fix syntax in .erst.toml or remove the malformed file",
+	}
+
+	paths := []string{
+		".erst.toml",
+		filepath.Join(os.ExpandEnv("$HOME"), ".erst.toml"),
+		"/etc/erst/config.toml",
+	}
+
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+
+		// simple syntax sniff: non-empty, non-comment lines must contain 'key = value'
+		for ln, line := range strings.Split(string(data), "\n") {
+			trim := strings.TrimSpace(line)
+			if trim == "" || strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, "[") {
+				continue
+			}
+			eqIdx := strings.Index(trim, "=")
+			if eqIdx < 0 {
+				if verbose {
+					dep.FixHint = fmt.Sprintf("%s (line %d missing '=')", dep.FixHint, ln+1)
+				}
+				return dep
+			}
+			// key must be non-empty and value must be non-empty
+			key := strings.TrimSpace(trim[:eqIdx])
+			val := strings.TrimSpace(trim[eqIdx+1:])
+			if key == "" || val == "" {
+				if verbose {
+					dep.FixHint = fmt.Sprintf("%s (line %d has invalid key=value)", dep.FixHint, ln+1)
+				}
+				return dep
+			}
+		}
+
+		dep.Installed = true
+		return dep
+	}
+
+	dep.Installed = true // no config file - nothing to parse
+	return dep
+}
+
+// checkRPC attempts a health ping to the current rpc endpoint
+func checkRPC(verbose bool) DependencyStatus {
+	dep := DependencyStatus{
+		Name:    "RPC endpoint",
+		FixHint: "Set ERST_RPC_URL or ensure the default RPC is reachable",
+	}
+
+	cfg := config.DefaultConfig()
+	url := cfg.RpcUrl
+	if env := os.Getenv("ERST_RPC_URL"); env != "" {
+		url = env
+	}
+
+	client, err := rpc.NewClient(rpc.WithHorizonURL(url), rpc.WithSorobanURL(url))
+	if err != nil {
+		return dep
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.GetHealth(ctx); err != nil {
+		if verbose {
+			dep.FixHint = "RPC health check failed: " + err.Error()
+		}
+		return dep
+	}
+	dep.Installed = true
 	return dep
 }
 

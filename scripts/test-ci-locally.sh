@@ -1,14 +1,25 @@
+#!/bin/bash
 # Copyright (c) Hintents Authors.
 # SPDX-License-Identifier: Apache-2.0
 
-#!/bin/bash
 
-// Copyright (c) 2026 dotandev
-// SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright 2026 Erst Users
+# SPDX-License-Identifier: Apache-2.0
+
+# Copyright (c) Hintents Authors.
+# SPDX-License-Identifier: Apache-2.0
+
+# Copyright (c) 2026 dotandev
+# SPDX-License-Identifier: MIT OR Apache-2.0
 
 # Test CI checks locally before pushing
 
-set -e
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
 
 echo "Running CI checks locally..."
 echo ""
@@ -28,11 +39,14 @@ echo "[OK] Go files are properly formatted"
 echo "Go: Running go vet..."
 go vet ./...
 
-echo "Go: Running tests..."
-go test -v -race ./...
-
 echo "Go: Building..."
 go build -v ./...
+
+echo "Go: Building erst binary for integration tests..."
+go build -o erst ./cmd/erst
+
+echo "Go: Running tests..."
+go test -v -race ./...
 
 # Rust checks
 echo ""

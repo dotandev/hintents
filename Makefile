@@ -1,6 +1,7 @@
 .PHONY: build test lint lint-strict lint-unused test-unused validate-ci validate-interface clean
 .PHONY: rust-lint rust-lint-strict rust-test rust-build lint-all-strict
 .PHONY: build test lint validate-errors clean bench bench-rpc bench-sim bench-profile
+.PHONY: fmt fmt-go fmt-rust pre-commit
 
 # Build variables
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -113,3 +114,43 @@ rust-build:
 # Run all strict linting (Go + Rust)
 lint-all-strict: lint-strict rust-lint-strict
 	@echo " All strict linting passed"
+
+# ──────────────────────────────────────────────
+# Formatting targets
+# ──────────────────────────────────────────────
+
+# Format Go files (gofmt + goimports)
+fmt-go:
+	@echo "Formatting Go files..."
+	@gofmt -w .
+	@if command -v goimports >/dev/null 2>&1; then \
+		goimports -w .; \
+	else \
+		echo "⚠  goimports not found. Install: go install golang.org/x/tools/cmd/goimports@latest"; \
+	fi
+	@echo "✓ Go formatting done"
+
+# Format Rust files (cargo fmt)
+fmt-rust:
+	@echo "Formatting Rust files..."
+	@cd simulator && cargo fmt
+	@echo "✓ Rust formatting done"
+
+# Format everything (Go + Rust)
+fmt: fmt-go fmt-rust
+	@echo "✓ All formatting done"
+
+# ──────────────────────────────────────────────
+# Pre-commit setup
+# ──────────────────────────────────────────────
+
+# Install pre-commit hooks
+pre-commit:
+	@echo "Setting up pre-commit hooks..."
+	@if command -v pre-commit >/dev/null 2>&1; then \
+		pre-commit install; \
+		echo "✓ Pre-commit hooks installed"; \
+	else \
+		echo "⚠  pre-commit not found. Install: pip install pre-commit"; \
+		exit 1; \
+	fi

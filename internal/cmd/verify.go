@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -7,7 +7,6 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 
 	"github.com/dotandev/hintents/internal/errors"
@@ -15,11 +14,10 @@ import (
 
 // Verify checks the integrity and signature of an AuditLog
 func Verify(log *AuditLog) error {
-	// 1. Re-calculate Trace Hash
+	// 1. Re-calculate Trace Hash using canonical JSON
 	// We must marshal the payload exactly as it was during generation.
-	// Since we use standard json.Marshal in both places on the same struct,
-	// it should be deterministic for this tool's usage.
-	payloadBytes, err := json.Marshal(log.Payload)
+	// Using canonical JSON ensures deterministic serialization across platforms.
+	payloadBytes, err := marshalCanonical(log.Payload)
 	if err != nil {
 		return errors.WrapMarshalFailed(err)
 	}

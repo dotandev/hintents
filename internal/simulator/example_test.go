@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package simulator_test
@@ -75,7 +75,7 @@ func ExampleSimulationRequestBuilder_validation() {
 	if err != nil {
 		fmt.Println("Validation error:", err)
 	}
-	// Output: Validation error: validation failed: result meta XDR is required
+	// Output: Validation error: VALIDATION_FAILED: result meta XDR is required
 }
 
 // ExampleSimulationRequestBuilder_reuse demonstrates builder reuse with Reset().

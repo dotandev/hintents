@@ -28,4 +28,4 @@ jobs:
 
       - name: Execute LLVM SanitizerCoverage Pass
         working-directory: ./simulator
-        run: cargo rustc -- -C passes=sancov-module
+        run: cargo rustc --bin simulator -- -C passes=sancov-module

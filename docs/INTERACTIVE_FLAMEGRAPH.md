@@ -1,0 +1,186 @@
+# Interactive Flamegraph Export
+
+## Overview
+
+The flamegraph export feature now supports generating standalone interactive HTML files in addition to raw SVG output. The interactive HTML format provides a rich user experience with hover tooltips, click-to-zoom, and search functionality—all without requiring external dependencies.
+
+## Usage
+
+### Basic Usage
+
+Enable profiling with the `--profile` flag:
+
+```bash
+erst debug --profile <transaction-hash>
+```
+
+By default, this generates an interactive HTML file: `<tx-hash>.flamegraph.html`
+
+### Export Formats
+
+Control the output format with the `--profile-format` flag:
+
+```bash
+# Interactive HTML (default)
+erst debug --profile --profile-format html <transaction-hash>
+
+# Raw SVG with dark mode support
+erst debug --profile --profile-format svg <transaction-hash>
+```
+
+## Interactive Features
+
+The HTML export includes the following interactive capabilities:
+
+### 1. Hover Tooltips
+- Hover over any frame to see detailed information
+- Shows function name, file location, duration, and percentage
+- Tooltips follow the mouse cursor
+
+### 2. Click-to-Zoom
+- Click any frame to zoom into that section of the flamegraph
+- Provides better visibility for deeply nested call stacks
+- Click "Reset Zoom" button to return to the full view
+
+### 3. Search and Highlight
+- Use the search box to find frames by name
+- Matching frames are highlighted in magenta
+- Case-insensitive search
+- Click "Clear" to remove highlights
+
+### 4. Responsive Design
+- Adapts to different viewport sizes
+- Supports both light and dark color schemes
+- Automatically detects system theme preference
+
+## Technical Details
+
+### Standalone File
+The HTML export is completely self-contained:
+- All CSS is inlined in a `<style>` block
+- All JavaScript is inlined in a `<script>` block
+- SVG is embedded directly in the HTML
+- No external dependencies or network requests required
+- Can be opened directly in any modern browser
+
+### Dark Mode Support
+Both SVG and HTML formats include CSS media queries that automatically adapt colors when the system is set to dark mode:
+- Dark background (#1e1e2e)
+- Light text (#cdd6f4)
+- Adjusted frame colors for better contrast
+
+### Browser Compatibility
+The interactive HTML works in all modern browsers:
+- Chrome/Edge 88+
+- Firefox 78+
+- Safari 14+
+- Opera 74+
+
+## Implementation
+
+### Code Structure
+
+The implementation is located in `internal/visualizer/flamegraph.go`:
+
+- `GenerateInteractiveHTML(svg string) string` - Wraps SVG in interactive HTML
+- `ExportFlamegraph(svg string, format ExportFormat) string` - Main export function
+- `ExportFormat` type - Enum for format selection (HTML or SVG)
+- `GetFileExtension()` - Returns appropriate file extension
+
+### CLI Integration
+
+The feature integrates with the existing `--profile` flag:
+
+- `--profile` - Enable profiling (defined in `internal/cmd/root.go`)
+- `--profile-format` - Choose export format: `html` or `svg` (default: `html`)
+
+Export logic is in `internal/cmd/debug.go` where the flamegraph is saved after simulation.
+
+## Examples
+
+### Example 1: Debug with Interactive Flamegraph
+
+```bash
+erst debug --profile abc123def456
+# Output: abc123def456.flamegraph.html
+```
+
+Open the HTML file in your browser to explore the flamegraph interactively.
+
+### Example 2: Export Raw SVG
+
+```bash
+erst debug --profile --profile-format svg abc123def456
+# Output: abc123def456.flamegraph.svg
+```
+
+The SVG can be opened in browsers or vector graphics editors.
+
+### Example 3: Network Comparison with Profiling
+
+```bash
+erst debug --profile --network testnet --compare mainnet abc123def456
+# Generates flamegraph for the primary network (testnet)
+```
+
+## Testing
+
+Run the test suite to verify the implementation:
+
+```bash
+make test
+# or
+go test ./internal/visualizer/...
+```
+
+### Manual Verification
+
+To manually verify the HTML output:
+
+1. Run a debug command with profiling enabled
+2. Open the generated `.flamegraph.html` file in a browser
+3. Verify the following:
+   - [ ] Flamegraph renders correctly
+   - [ ] Hover shows tooltips with frame details
+   - [ ] Click zooms into frames
+   - [ ] Reset button returns to full view
+   - [ ] Search finds and highlights frames
+   - [ ] Clear button removes highlights
+   - [ ] Dark mode adapts colors (toggle system theme)
+   - [ ] No console errors in browser DevTools
+   - [ ] No network requests (check Network tab)
+
+## Migration Notes
+
+### Backward Compatibility
+
+The raw SVG export is still available via `--profile-format svg`. Existing workflows that expect SVG files can continue to use this format.
+
+### Default Behavior Change
+
+The default export format has changed from SVG to HTML. If you have scripts or automation that depend on SVG output, explicitly set `--profile-format svg`.
+
+### File Extensions
+
+- HTML format: `.flamegraph.html`
+- SVG format: `.flamegraph.svg`
+
+Both patterns are included in the default `.gitignore` generated by `erst init`.
+
+## Future Enhancements
+
+Potential improvements for future versions:
+
+- Export to other formats (PNG, PDF)
+- Configurable color schemes
+- Diff view for comparing two flamegraphs
+- Flame chart view (time-based)
+- Integration with profiling tools (pprof, perf)
+- Keyboard shortcuts for navigation
+- Permalink support for sharing specific views
+
+## References
+
+- [Flamegraph Visualization](https://www.brendangregg.com/flamegraphs.html)
+- [Inferno Flamegraph Library](https://github.com/jonhoo/inferno)
+- [SVG Specification](https://www.w3.org/TR/SVG2/)

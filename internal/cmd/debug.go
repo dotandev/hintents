@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/dotandev/hintents/internal/config"
+	"github.com/dotandev/hintents/internal/decenstorage"
 	"github.com/dotandev/hintents/internal/decoder"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/lto"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/security"
 	"github.com/dotandev/hintents/internal/session"
@@ -35,25 +35,38 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"go.opentelemetry.io/otel/attribute"
 )
+
 var (
-	networkFlag        string
-	rpcURLFlag         string
-	rpcTokenFlag       string
-	tracingEnabled     bool
-	otlpExporterURL    string
-	generateTrace      bool
-	traceOutputFile    string
-	snapshotFlag       string
-	compareNetworkFlag string
-	verbose            bool
-	wasmPath           string
-	args               []string
-	noCacheFlag        bool
-	demoMode           bool
-	watchFlag          bool
-	watchTimeoutFlag   int
-	mockBaseFeeFlag    uint32
-	mockGasPriceFlag   uint64
+	networkFlag         string
+	rpcURLFlag          string
+	rpcTokenFlag        string
+	tracingEnabled      bool
+	otlpExporterURL     string
+	generateTrace       bool
+	traceOutputFile     string
+	snapshotFlag        string
+	compareNetworkFlag  string
+	verbose             bool
+	wasmPath            string
+	wasmOptimizeFlag    bool
+	args                []string
+	themeFlag           string
+	noCacheFlag         bool
+	demoMode            bool
+	watchFlag           bool
+	watchTimeoutFlag    int
+	protocolVersionFlag uint32
+	auditKeyFlag        string
+	publishIPFSFlag     bool
+	publishArweaveFlag  bool
+	ipfsNodeFlag        string
+	arweaveGatewayFlag  string
+	arweaveWalletFlag   string
+	mockTimeFlag        int64
+	mockBaseFeeFlag     uint32
+	mockGasPriceFlag    uint64
+	asyncFlag           bool
+	asyncTimeoutFlag    int
 )
 
 // DebugCommand holds dependencies for the debug command
@@ -259,6 +272,16 @@ Local WASM Replay Mode:
 		ctx := cmd.Context()
 		txHash := cmdArgs[0]
 
+		// Load persisted viewer state for this transaction (best-effort).
+		var uiStore *session.UIStateStore
+		if s, err := session.NewUIStateStore(); err == nil {
+			uiStore = s
+			defer uiStore.Close()
+			if prev, err := uiStore.LoadSectionState(ctx, txHash); err == nil && len(prev) > 0 {
+				fmt.Printf("Restoring viewer state: last session showed [%s] for this transaction.\n", strings.Join(prev, ", "))
+			}
+		}
+
 		// Initialize OpenTelemetry if enabled
 		if tracingEnabled {
 			cleanup, err := telemetry.Init(ctx, telemetry.Config{
@@ -452,7 +475,7 @@ Local WASM Replay Mode:
 				}
 				applySimulationFeeMocks(simReq)
 
-				simResp, err = runner.Run(simReq)
+				simResp, err = runner.Run(ctx, simReq)
 				if err != nil {
 					return errors.WrapSimulationFailed(err, "")
 				}
@@ -490,7 +513,7 @@ Local WASM Replay Mode:
 						Timestamp:     ts,
 					}
 					applySimulationFeeMocks(primaryReq)
-					primaryResult, primaryErr = runner.Run(primaryReq)
+					primaryResult, primaryErr = runner.Run(ctx, primaryReq)
 				}()
 
 				go func() {
@@ -530,7 +553,7 @@ Local WASM Replay Mode:
 						Timestamp:     ts,
 					}
 					applySimulationFeeMocks(compareReq)
-					compareResult, compareErr = runner.Run(compareReq)
+					compareResult, compareErr = runner.Run(ctx, compareReq)
 				}()
 
 				wg.Wait()
@@ -563,7 +586,7 @@ Local WASM Replay Mode:
 		// Analysis: Error Suggestions (Heuristic-based)
 		if len(lastSimResp.Events) > 0 {
 			suggestionEngine := decoder.NewSuggestionEngine()
-			
+
 			// Decode events for analysis
 			callTree, err := decoder.DecodeEvents(lastSimResp.Events)
 			if err == nil && callTree != nil {
@@ -614,13 +637,20 @@ Local WASM Replay Mode:
 		}
 
 		// Analysis: Token Flows
+		hasTokenFlows := false
 		if report, err := tokenflow.BuildReport(resp.EnvelopeXdr, resp.ResultMetaXdr); err == nil && len(report.Agg) > 0 {
+			hasTokenFlows = true
 			fmt.Printf("\nToken Flow Summary:\n")
 			for _, line := range report.SummaryLines() {
 				fmt.Printf("  %s\n", line)
 			}
 			fmt.Printf("\nToken Flow Chart (Mermaid):\n")
 			fmt.Println(report.MermaidFlowchart())
+		}
+
+		// Persist viewer state so the next debug of this transaction restores context.
+		if uiStore != nil {
+			_ = uiStore.SaveSectionState(ctx, txHash, collectVisibleSections(lastSimResp, findings, hasTokenFlows))
 		}
 
 		// Session Management
@@ -657,6 +687,58 @@ Local WASM Replay Mode:
 		SetCurrentSession(sessionData)
 		fmt.Printf("\nSession created: %s\n", sessionData.ID)
 		fmt.Printf("Run 'erst session save' to persist this session.\n")
+
+		// Publish signed audit trail to decentralised storage when requested.
+		if publishIPFSFlag || publishArweaveFlag {
+			if auditKeyFlag == "" {
+				return errors.WrapCliArgumentRequired("audit-key")
+			}
+			auditLog, auditErr := Generate(
+				txHash,
+				resp.EnvelopeXdr,
+				resp.ResultMetaXdr,
+				lastSimResp.Events,
+				lastSimResp.Logs,
+				auditKeyFlag,
+				nil,
+			)
+			if auditErr != nil {
+				return fmt.Errorf("failed to generate audit log: %w", auditErr)
+			}
+			auditBytes, auditErr := json.Marshal(auditLog)
+			if auditErr != nil {
+				return fmt.Errorf("failed to marshal audit log: %w", auditErr)
+			}
+
+			pub := decenstorage.New(decenstorage.PublishConfig{
+				IPFSNode:       ipfsNodeFlag,
+				ArweaveGateway: arweaveGatewayFlag,
+				ArweaveWallet:  arweaveWalletFlag,
+			})
+
+			fmt.Printf("\n=== Decentralised Storage ===\n")
+
+			if publishIPFSFlag {
+				result, ipfsErr := pub.PublishIPFS(ctx, auditBytes)
+				if ipfsErr != nil {
+					fmt.Printf("IPFS publish failed: %v\n", ipfsErr)
+				} else {
+					fmt.Printf("IPFS CID : %s\n", result.CID)
+					fmt.Printf("IPFS URL : %s\n", result.URL)
+				}
+			}
+
+			if publishArweaveFlag {
+				result, arErr := pub.PublishArweave(ctx, auditBytes)
+				if arErr != nil {
+					fmt.Printf("Arweave publish failed: %v\n", arErr)
+				} else {
+					fmt.Printf("Arweave TXID : %s\n", result.TXID)
+					fmt.Printf("Arweave URL  : %s\n", result.URL)
+				}
+			}
+		}
+
 		return nil
 	},
 }
@@ -699,9 +781,6 @@ func runLocalWasmReplay() error {
 	fmt.Printf("Arguments: %v\n", args)
 	fmt.Println()
 
-	// Check for LTO in the project that produced the WASM
-	checkLTOWarning(wasmPath)
-
 	// Create simulator runner
 	runner, err := simulator.NewRunner("", tracingEnabled)
 	if err != nil {
@@ -720,7 +799,7 @@ func runLocalWasmReplay() error {
 
 	// Run simulation
 	fmt.Printf("%s Executing contract locally...\n", visualizer.Symbol("play"))
-	resp, err := runner.Run(req)
+	resp, err := runner.Run(context.Background(), req)
 	if err != nil {
 		fmt.Printf("%s Technical failure: %v\n", visualizer.Error(), err)
 		return err
@@ -1021,48 +1100,26 @@ func diffResults(res1, res2 *simulator.SimulationResponse, net1, net2 string) {
 	}
 }
 
-func applySimulationFeeMocks(req *simulator.SimulationRequest) {
-	if req == nil {
-		return
+// collectVisibleSections returns the names of output sections that contained
+// data during the last simulation run.
+func collectVisibleSections(resp *simulator.SimulationResponse, findings []security.Finding, hasTokenFlows bool) []string {
+	var sections []string
+	if resp.BudgetUsage != nil {
+		sections = append(sections, "budget")
 	}
-
-	if mockBaseFeeFlag > 0 {
-		baseFee := mockBaseFeeFlag
-		req.MockBaseFee = &baseFee
+	if len(resp.DiagnosticEvents) > 0 {
+		sections = append(sections, "events")
 	}
-	if mockGasPriceFlag > 0 {
-		gasPrice := mockGasPriceFlag
-		req.MockGasPrice = &gasPrice
+	if len(resp.Logs) > 0 {
+		sections = append(sections, "logs")
 	}
-}
-
-var deprecatedSorobanHostFunctions = []string{
-	"bytes_copy_from_linear_memory",
-	"bytes_copy_to_linear_memory",
-	"bytes_new_from_linear_memory",
-	"map_new_from_linear_memory",
-	"map_unpack_to_linear_memory",
-	"symbol_new_from_linear_memory",
-	"string_new_from_linear_memory",
-	"vec_new_from_linear_memory",
-	"vec_unpack_to_linear_memory",
-}
-
-func deprecatedHostFunctionInDiagnosticEvent(event simulator.DiagnosticEvent) (string, bool) {
-	if name, ok := findDeprecatedHostFunction(strings.Join(event.Topics, " ")); ok {
-		return name, true
+	if len(findings) > 0 {
+		sections = append(sections, "security")
 	}
-	return findDeprecatedHostFunction(event.Data)
-}
-
-func findDeprecatedHostFunction(input string) (string, bool) {
-	lower := strings.ToLower(input)
-	for _, fn := range deprecatedSorobanHostFunctions {
-		if strings.Contains(lower, strings.ToLower(fn)) {
-			return fn, true
-		}
+	if hasTokenFlows {
+		sections = append(sections, "tokenflow")
 	}
-	return "", false
+	return sections
 }
 
 func init() {
@@ -1084,34 +1141,12 @@ func init() {
 	debugCmd.Flags().IntVar(&watchTimeoutFlag, "watch-timeout", 30, "Timeout in seconds for watch mode")
 	debugCmd.Flags().Uint32Var(&mockBaseFeeFlag, "mock-base-fee", 0, "Override base fee (stroops) for local fee sufficiency checks")
 	debugCmd.Flags().Uint64Var(&mockGasPriceFlag, "mock-gas-price", 0, "Override gas price multiplier for local fee sufficiency checks")
+	debugCmd.Flags().StringVar(&themeFlag, "theme", "", "Color theme override (dark, light, none)")
+	debugCmd.Flags().Int64Var(&mockTimeFlag, "mock-time", 0, "Override ledger timestamp for simulation (Unix seconds)")
+	debugCmd.Flags().Uint32Var(&protocolVersionFlag, "protocol-version", 0, "Override protocol version for simulation")
 
 	rootCmd.AddCommand(debugCmd)
 }
-
-// checkLTOWarning searches the directory tree around a WASM file for
-// Cargo.toml files with LTO settings and prints a warning if found.
-// It searches the WASM file's parent directory and up to two levels up
-// to find the project root.
-func checkLTOWarning(wasmFilePath string) {
-	dir := filepath.Dir(wasmFilePath)
-
-	// Walk up to 3 levels to find Cargo.toml files
-	for i := 0; i < 3; i++ {
-		results, err := lto.CheckProjectDir(dir)
-		if err != nil {
-			logger.Logger.Debug("LTO check failed", "dir", dir, "error", err)
-			break
-		}
-		if lto.HasLTO(results) {
-			fmt.Fprintf(os.Stderr, "\n%s\n", lto.FormatWarnings(results))
-			return
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
 func displaySourceLocation(loc *simulator.SourceLocation) {
 	fmt.Printf("%s Location: %s:%d:%d\n", visualizer.Symbol("location"), loc.File, loc.Line, loc.Column)
 
@@ -1177,4 +1212,41 @@ func displaySourceLocation(loc *simulator.SourceLocation) {
 		}
 	}
 	fmt.Println()
+}
+
+func applySimulationFeeMocks(req *simulator.SimulationRequest) {
+	if mockBaseFeeFlag > 0 {
+		baseFee := mockBaseFeeFlag
+		req.MockBaseFee = &baseFee
+	}
+	if mockGasPriceFlag > 0 {
+		gas := mockGasPriceFlag
+		req.MockGasPrice = &gas
+	}
+}
+
+var deprecatedHostFuncs = []string{
+	"vec_unpack_to_linear_memory",
+	"bytes_copy_to_linear_memory",
+}
+
+func findDeprecatedHostFunction(event string) (string, bool) {
+	for _, fn := range deprecatedHostFuncs {
+		if strings.Contains(event, "Symbol(\""+fn+"\")") {
+			return fn, true
+		}
+	}
+	return "", false
+}
+
+func deprecatedHostFunctionInDiagnosticEvent(event simulator.DiagnosticEvent) (string, bool) {
+	if name, ok := findDeprecatedHostFunction(event.Data); ok {
+		return name, ok
+	}
+	for _, topic := range event.Topics {
+		if name, ok := findDeprecatedHostFunction(topic); ok {
+			return name, ok
+		}
+	}
+	return "", false
 }

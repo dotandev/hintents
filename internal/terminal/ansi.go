@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package terminal
@@ -6,7 +6,6 @@ package terminal
 import (
 	"fmt"
 	"os"
-	"sync"
 
 	"github.com/mattn/go-isatty"
 )
@@ -24,9 +23,9 @@ const (
 	sgrBold    = "\033[1m"
 )
 
+var _ Renderer = (*ANSIRenderer)(nil)
+
 type ANSIRenderer struct {
-	isTTY   bool
-	ttyOnce sync.Once
 }
 
 func NewANSIRenderer() *ANSIRenderer {
@@ -34,18 +33,15 @@ func NewANSIRenderer() *ANSIRenderer {
 }
 
 func (r *ANSIRenderer) IsTTY() bool {
-	r.ttyOnce.Do(func() {
-		r.isTTY = r.checkTTY()
-	})
-	return r.isTTY
+	return r.checkTTY()
 }
 
 func (r *ANSIRenderer) checkTTY() bool {
-	if os.Getenv("FORCE_COLOR") != "" {
-		return true
-	}
 	if _, ok := os.LookupEnv("NO_COLOR"); ok {
 		return false
+	}
+	if os.Getenv("FORCE_COLOR") != "" {
+		return true
 	}
 	if os.Getenv("TERM") == "dumb" {
 		return false
@@ -122,7 +118,7 @@ func (r *ANSIRenderer) Error() string {
 	return "[X]"
 }
 
-func (r *ANSIRenderer) Symbol(name string) string {
+func (r *ANSIRenderer) Symbol(name string) string { //nolint:gocyclo
 	if r.IsTTY() {
 		switch name {
 		case "check":

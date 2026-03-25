@@ -271,3 +271,205 @@ pub fn get_balance(env: Env, user: Address) -> i128 {
     env.storage().persistent().get(&user).unwrap_or(0)
 }
 ```
+---
+
+## 6. Contract Cross-Invocation: Contract A Calling Contract B
+
+### Overview
+
+Cross-contract invocation is one of the most powerful — and most misunderstood — patterns in Soroban. This recipe walks you through a complete example: Contract A (a "Router") calling Contract B (a "Vault"), and how to use `SimulationRequest` to replay and debug that interaction locally.
+
+---
+
+### The Scenario
+
+**Contract B — Vault:**
+```rust
+// Contract B: vault.rs
+#[contract]
+pub struct Vault;
+
+#[contractimpl]
+impl Vault {
+    pub fn deposit(env: Env, caller: Address, amount: i128) {
+        // Only allow the caller to deposit on their own behalf
+        caller.require_auth();
+
+        let mut balance: i128 = env
+            .storage()
+            .persistent()
+            .get(&caller)
+            .unwrap_or(0);
+
+        balance += amount;
+        env.storage().persistent().set(&caller, &balance);
+    }
+
+    pub fn get_balance(env: Env, user: Address) -> i128 {
+        env.storage().persistent().get(&user).unwrap_or(0)
+    }
+}
+```
+
+**Contract A — Router:**
+```rust
+// Contract A: router.rs
+#[contract]
+pub struct Router;
+
+#[contractimpl]
+impl Router {
+    pub fn route_deposit(env: Env, vault_id: Address, user: Address, amount: i128) {
+        // The router requires the user to authorize THIS invocation.
+        // Soroban will propagate this auth down to the sub-invocation in Vault.
+        user.require_auth();
+
+        let vault = VaultClient::new(&env, &vault_id);
+        vault.deposit(&user, &amount);
+    }
+}
+```
+
+**The key rule:** `user.require_auth()` in Contract A propagates authorization into Contract B. You do **not** need a second `require_auth` signature for the sub-call — the Soroban auth framework handles the tree automatically.
+
+---
+
+### Building the SimulationRequest
+
+To debug or replay this cross-invocation locally, you need three things: the transaction envelope, the result metadata, and the ledger entries for every storage key touched by **both** contracts.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    "github.com/dotandev/hintents/internal/rpc"
+    "github.com/dotandev/hintents/internal/simulator"
+)
+
+func main() {
+    // 1. Connect to the network and fetch the transaction
+    client := rpc.NewClient(rpc.Testnet)
+    txHash := "your-transaction-hash-here"
+
+    txResp, err := client.GetTransaction(context.Background(), txHash)
+    if err != nil {
+        log.Fatalf("Failed to fetch transaction: %v", err)
+    }
+
+    // 2. Fetch ledger entries for BOTH contracts.
+    //    You need the storage keys touched by Contract A and Contract B.
+    ledgerKeys := []string{
+        "base64-encoded-router-contract-instance-key",
+        "base64-encoded-vault-contract-instance-key",
+        "base64-encoded-user-persistent-storage-key", // Vault's balance entry for 'user'
+    }
+
+    entries, err := client.GetLedgerEntries(context.Background(), ledgerKeys)
+    if err != nil {
+        log.Fatalf("Failed to fetch ledger entries: %v", err)
+    }
+
+    // 3. Build the SimulationRequest using the builder.
+    //    WithLedgerEntries covers state for both contracts in a single call.
+    req, err := simulator.NewSimulationRequestBuilder().
+        WithEnvelopeXDR(txResp.EnvelopeXdr).
+        WithResultMetaXDR(txResp.ResultMetaXdr).
+        WithLedgerEntries(entries). // Covers Contract A + Contract B state
+        Build()
+
+    if err != nil {
+        log.Fatalf("Failed to build simulation request: %v", err)
+    }
+
+    // 4. Run the simulation
+    runner, err := simulator.NewRunner()
+    if err != nil {
+        log.Fatalf("Failed to create runner: %v", err)
+    }
+
+    resp, err := runner.Run(req)
+    if err != nil {
+        log.Fatalf("Simulation failed: %v", err)
+    }
+
+    // 5. Inspect the response
+    fmt.Printf("Status: %s\n", resp.Status)
+    for _, event := range resp.Events {
+        fmt.Printf("Event: %s\n", event)
+    }
+    if resp.Error != "" {
+        fmt.Printf("Error: %s\n", resp.Error)
+    }
+}
+```
+
+---
+
+### Common Cross-Invocation Errors and How to Spot Them
+
+#### Auth not propagated (most common mistake)
+
+If you see this in the Hintents trace:
+```
+Event: Diagnostic
+Topics: ["fn_call", "contract:<vault_id>", "deposit"]
+Status: Failed
+Error: HostError: Error(Context, InvalidAction)
+```
+
+It means the auth tree is broken. Check that:
+1. `user.require_auth()` is called in Contract A **before** the sub-call.
+2. The transaction was signed by `user`, not just by the router's admin key.
+3. You are not calling `user.require_auth()` **inside** Contract B for a cross-invocation — that is Contract A's responsibility when it initiates the call.
+
+#### Missing ledger entries for Contract B
+
+If you see:
+```
+Error: HostError: Error(Storage, MissingEntry)
+```
+
+Your `ledger_entries` map is incomplete. The simulator needs the state of **every** contract involved in the call chain, not just the top-level one. Add Contract B's instance key and any persistent storage keys it reads or writes.
+
+#### Footprint too narrow
+
+If your transaction was manually constructed (not simulated first via RPC), the footprint may not include Contract B's keys. Always run `simulateTransaction` on the Stellar RPC before submitting cross-invocation transactions. The simulation auto-generates the correct read/write set.
+
+---
+
+### Running with `erst` Directly
+
+You can also debug this from the CLI without writing Go code:
+
+```bash
+erst debug <tx-hash> --network testnet
+```
+
+Hintents will automatically:
+- Fetch the envelope and result metadata
+- Discover ledger entries from the transaction footprint
+- Replay the full call tree, showing Contract A → Contract B as nested events
+- Surface the exact sub-invocation that failed, if any
+
+To inspect a specific cross-invocation step interactively:
+```bash
+erst debug <tx-hash> --network testnet --verbose
+```
+
+The `--verbose` flag shows each host function call across both contracts in execution order.
+
+---
+
+### Security Checklist for Cross-Invocation
+
+Before deploying Contract A that calls Contract B, verify:
+
+- [ ] Contract A calls `user.require_auth()` **before** any sub-invocation that modifies `user`'s state.
+- [ ] Contract B does **not** blindly trust the `caller` argument — it relies on Soroban's auth propagation.
+- [ ] The transaction footprint (read/write set) includes ledger entries for **all** contracts in the call chain.
+- [ ] You have simulated the full transaction (not just the top-level call) to validate auth and footprint.
+- [ ] You have tested the failure path: what happens if Contract B reverts? Contract A should not leave partial state behind.

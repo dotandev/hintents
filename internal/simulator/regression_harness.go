@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package simulator
@@ -178,7 +178,7 @@ func (h *RegressionHarness) testTransaction(
 	}
 
 	// Run simulation
-	simResp, err := h.Runner.Run(simReq)
+	simResp, err := h.Runner.Run(ctx, simReq)
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("simulation failed: %v", err)
 		return result

@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package simulator
@@ -137,7 +137,7 @@ func TestRegressionHarness_RunRegressionTests(t *testing.T) {
 func TestRegressionHarness_TestTransaction(t *testing.T) {
 	t.Run("returns error when RPCClient is nil", func(t *testing.T) {
 		mockRunner := &MockRunner{
-			RunFunc: func(req *SimulationRequest) (*SimulationResponse, error) {
+			RunFunc: func(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 				return &SimulationResponse{Status: "error"}, nil
 			},
 		}

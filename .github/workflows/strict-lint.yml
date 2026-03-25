@@ -26,7 +26,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.24"
           cache: true
           cache-dependency-path: go.sum
 
@@ -81,14 +81,6 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.6
-
-      - name: Configure sccache
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-
       - name: Cache Cargo dependencies and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -114,16 +106,12 @@ jobs:
             -D unused-imports \
             -D unused-mut \
             -D dead-code \
-            -D unused-assignments \
-            -W clippy::pedantic \
-            -W clippy::nursery || {
+            -D unused-assignments || {
             echo "[FAIL] Clippy found issues that must be fixed"
             exit 1
           }
           echo " Clippy checks passed"
 
-      - name: Print sccache stats
-        run: sccache --show-stats
 
   # ============================================
   # Summary

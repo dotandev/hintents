@@ -1,9 +1,10 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package rpc
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -48,9 +49,8 @@ type CachedEntry struct {
 }
 
 var (
-	cacheDB   *sql.DB
-	cacheOnce sync.Once
-	cacheMu   sync.Mutex
+	cacheDB *sql.DB
+	cacheMu sync.Mutex
 )
 
 // cacheSchema creates the rpc_cache table and indexes.
@@ -59,10 +59,12 @@ CREATE TABLE IF NOT EXISTS rpc_cache (
 	key_hash   TEXT PRIMARY KEY,
 	cache_key  TEXT NOT NULL,
 	value      TEXT NOT NULL,
+	network    TEXT NOT NULL DEFAULT '',
 	created_at INTEGER NOT NULL,
 	expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rpc_cache_expires ON rpc_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_rpc_cache_network  ON rpc_cache(network);
 `
 
 // GetCachePath returns the path to the cache directory, creating it if necessary.
@@ -184,6 +186,11 @@ func Get(key string) (string, bool, error) {
 
 // SetWithTTL stores a value in the cache with a specific TTL.
 func SetWithTTL(key string, value string, ttl time.Duration) error {
+	return SetWithTTLAndNetwork(key, value, ttl, "")
+}
+
+// SetWithTTLAndNetwork stores a value in the cache with a specific TTL and network tag.
+func SetWithTTLAndNetwork(key, value string, ttl time.Duration, network string) error {
 	if ttl <= 0 {
 		ttl = DefaultCacheTTL
 	}
@@ -197,13 +204,14 @@ func SetWithTTL(key string, value string, ttl time.Duration) error {
 	now := time.Now()
 
 	_, err = db.Exec(
-		`INSERT INTO rpc_cache (key_hash, cache_key, value, created_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO rpc_cache (key_hash, cache_key, value, network, created_at, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key_hash) DO UPDATE SET
-		   value = excluded.value,
+		   value      = excluded.value,
+		   network    = excluded.network,
 		   created_at = excluded.created_at,
 		   expires_at = excluded.expires_at`,
-		keyHash, key, value, now.UnixNano(), now.Add(ttl).UnixNano(),
+		keyHash, key, value, network, now.UnixNano(), now.Add(ttl).UnixNano(),
 	)
 	if err != nil {
 		return fmt.Errorf("cache write failed: %w", err)
@@ -256,4 +264,76 @@ func Cleanup(maxAge time.Duration) (int, error) {
 	}
 
 	return int(removed), nil
+}
+
+// CleanFilter holds the criteria for selective cache pruning.
+type CleanFilter struct {
+	// OlderThan removes entries whose created_at is older than this duration.
+	// Zero means no age filter.
+	OlderThan time.Duration
+	// Network removes only entries matching this network tag.
+	// Empty string means no network filter.
+	Network string
+	// All removes every entry regardless of other filters.
+	All bool
+}
+
+// CleanByFilter removes rpc_cache entries that match the given filter.
+// Returns the number of rows deleted.
+func CleanByFilter(f CleanFilter) (int, error) {
+	if !f.All && f.OlderThan == 0 && f.Network == "" {
+		return 0, fmt.Errorf("no filter specified: use --all, --older-than, or --network")
+	}
+
+	db, err := ensureDB()
+	if err != nil {
+		return 0, err
+	}
+
+	var (
+		query string
+		args  []any
+	)
+
+	switch {
+	case f.All:
+		query = "DELETE FROM rpc_cache"
+
+	case f.OlderThan > 0 && f.Network != "":
+		cutoff := time.Now().Add(-f.OlderThan).UnixNano()
+		query = "DELETE FROM rpc_cache WHERE network = ? AND created_at < ?"
+		args = []any{f.Network, cutoff}
+
+	case f.OlderThan > 0:
+		cutoff := time.Now().Add(-f.OlderThan).UnixNano()
+		query = "DELETE FROM rpc_cache WHERE created_at < ?"
+		args = []any{cutoff}
+
+	case f.Network != "":
+		query = "DELETE FROM rpc_cache WHERE network = ?"
+		args = []any{f.Network}
+	}
+
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("cache clean failed: %w", err)
+	}
+
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	if removed > 0 {
+		logger.Logger.Info("RPC cache clean completed", "entries_removed", removed)
+	}
+
+	return int(removed), nil
+}
+
+// Flush finalizes pending cache writes.
+// Current cache writes are synchronous file writes, so this is a no-op.
+func Flush(ctx context.Context) error {
+	_ = ctx
+	return nil
 }

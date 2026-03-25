@@ -1,11 +1,10 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package rpc
 
 import (
 	"context"
-	"net/http"
 	"testing"
 
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
@@ -16,16 +15,6 @@ const probeTestHash = "5c0a1234567890abcdef1234567890abcdef1234567890abcdef12345
 
 func txSuccessRoute(hash string) MockRoute {
 	return SuccessRoute(hProtocol.Transaction{Hash: hash})
-}
-
-func txNotFoundRoute() MockRoute {
-	return MockRoute{
-		StatusCode: http.StatusNotFound,
-		Body: map[string]string{
-			"status": "Not Found",
-			"detail": "transaction not found",
-		},
-	}
 }
 
 func TestResolveNetwork_FoundOnMainnet(t *testing.T) {

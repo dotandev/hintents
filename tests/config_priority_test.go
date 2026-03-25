@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package tests
@@ -22,15 +22,16 @@ func TestConfigPriority(t *testing.T) {
 	// Setup generic temporary home directory for config
 	tmpDir := t.TempDir()
 
-	// Mock HOME to point to tmpDir so config.LoadConfig uses it
+	// Mock home directory to point to tmpDir so config.LoadConfig uses it
+	// On Unix, os.UserHomeDir() uses HOME; on Windows, it uses USERPROFILE
 	originalHome := os.Getenv("HOME")
-	originalUP := os.Getenv("USERPROFILE")
-	os.Setenv("HOME", tmpDir)
-	os.Setenv("USERPROFILE", tmpDir)
+	originalUserProfile := os.Getenv("USERPROFILE")
 	defer func() {
 		os.Setenv("HOME", originalHome)
-		os.Setenv("USERPROFILE", originalUP)
+		os.Setenv("USERPROFILE", originalUserProfile)
 	}()
+	os.Setenv("HOME", tmpDir)
+	os.Setenv("USERPROFILE", tmpDir)
 
 	// Create a dummy config file
 	configDir := filepath.Join(tmpDir, ".erst")

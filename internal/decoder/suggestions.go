@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package decoder
@@ -253,8 +253,13 @@ func (e *SuggestionEngine) collectEvents(node *CallNode) []DecodedEvent {
 	events := make([]DecodedEvent, 0)
 
 	if node == nil {
-		return events
+		return nil
 	}
+
+	// Pre-allocate with estimated capacity to reduce re-allocations
+	// Estimate: node.Events + 5 events per child call
+	capacity := len(node.Events) + len(node.SubCalls)*5
+	events := make([]DecodedEvent, 0, capacity)
 
 	events = append(events, node.Events...)
 
