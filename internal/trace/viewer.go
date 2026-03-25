@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package trace
@@ -344,6 +344,7 @@ func (v *InteractiveViewer) displayCurrentState() {
 		}
 	}
 
+	// Show memory/state summary
 	if len(state.HostState) > 0 {
 		fmt.Printf("Host State: %d entries\n", len(state.HostState))
 	}
@@ -564,7 +565,9 @@ func (v *InteractiveViewer) showHelp() {
 	fmt.Println()
 	fmt.Println("Display:")
 	fmt.Println("  s, show, state          - Show current state")
+	fmt.Println("  e, expand               - Expand / show full detail of current step")
 	fmt.Println("  S                       - Toggle hiding/showing Rust core::* traces")
+	fmt.Println("  e, expand               - Expand / collapse the current trace node")
 	fmt.Println("  r, reconstruct [step]   - Reconstruct state")
 	fmt.Println("  t, trap                 - Show trap info with local variables")
 	fmt.Println("  l, list [count]         - List steps (default: 10)")

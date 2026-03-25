@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package trace
@@ -46,13 +46,13 @@ func (tv *TreeViewerWithMouse) StartWithMouse() error {
 	if err := tv.enableRawMode(); err != nil {
 		return fmt.Errorf("failed to enable raw mode: %w", err)
 	}
-	defer tv.restoreTerminalState(initialTermState)
+	defer tv.restoreTerminalState(initialTermState) //nolint:errcheck
 
 	// Enable mouse tracking
 	if err := tv.mouseTracker.Enable(); err != nil {
 		return fmt.Errorf("failed to enable mouse tracking: %w", err)
 	}
-	defer tv.mouseTracker.Disable()
+	defer tv.mouseTracker.Disable() //nolint:errcheck
 
 	// Build initial tree
 	nodes := make([]*TraceNode, 0)
@@ -212,19 +212,19 @@ func (tv *TreeViewerWithMouse) getTraceRoot() *TraceNode {
 // renderView clears and renders the current view
 func (tv *TreeViewerWithMouse) renderView() {
 	// Clear screen
-	fmt.Print("\x1b[2J\x1b[H")
+	_, _ = fmt.Print("\x1b[2J\x1b[H") //nolint:errcheck
 
 	// Render header
-	fmt.Printf("ERST Interactive Trace Tree Viewer (Mouse Support Enabled)\n")
-	fmt.Printf("Transaction: %s | Steps: %d\n", tv.trace.TransactionHash, len(tv.trace.States))
-	fmt.Print("─────────────────────────────────────────────────────────\n")
+	_, _ = fmt.Printf("ERST Interactive Trace Tree Viewer (Mouse Support Enabled)\n")                  //nolint:errcheck
+	_, _ = fmt.Printf("Transaction: %s | Steps: %d\n", tv.trace.TransactionHash, len(tv.trace.States)) //nolint:errcheck
+	_, _ = fmt.Print("─────────────────────────────────────────────────────────\n")                    //nolint:errcheck
 
 	// Render tree
-	fmt.Print(tv.renderer.Render())
+	_, _ = fmt.Print(tv.renderer.Render()) //nolint:errcheck
 
 	// Render footer
-	fmt.Print("\n─────────────────────────────────────────────────────────\n")
-	fmt.Print("Controls: ↑↓/kj=navigate | Space/Enter=expand | e=expand-all | c=collapse-all | h=help | q=quit | Click [+/-] to expand\n")
+	_, _ = fmt.Print("\n─────────────────────────────────────────────────────────\n")                                                             //nolint:errcheck
+	_, _ = fmt.Print("Controls: ↑↓/kj=navigate | Space/Enter=expand | e=expand-all | c=collapse-all | h=help | q=quit | Click [+/-] to expand\n") //nolint:errcheck
 }
 
 // showHelp displays help information
@@ -255,11 +255,11 @@ symbols with your mouse, or use keyboard shortcuts to navigate.
 
 Press any key to continue...
 `
-	fmt.Print(helpText)
+	_, _ = fmt.Print(helpText) //nolint:errcheck
 
 	// Wait for input
 	buf := make([]byte, 1)
-	syscall.Read(0, buf)
+	_, _ = syscall.Read(0, buf) //nolint:errcheck
 
 	tv.renderView()
 }
@@ -275,13 +275,13 @@ func (tv *TreeViewerWithMouse) saveTerminalState() (string, error) {
 func (tv *TreeViewerWithMouse) restoreTerminalState(state string) error {
 	// Restore terminal settings
 	// In production, would use stty
-	fmt.Print("\x1b[?25h") // Show cursor
+	_, _ = fmt.Print("\x1b[?25h") // Show cursor
 	return nil
 }
 
 func (tv *TreeViewerWithMouse) enableRawMode() error {
 	// Enable raw mode using stty-like behavior
 	// Hide cursor
-	fmt.Print("\x1b[?25l")
+	_, _ = fmt.Print("\x1b[?25l") //nolint:errcheck
 	return nil
 }

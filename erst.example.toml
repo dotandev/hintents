@@ -16,6 +16,7 @@ network = "testnet"
 # simulator_path = "/path/to/simulator"
 
 # Log level: trace, debug, info, warn, error
+# This controls both the Go CLI and the Rust simulator (via ERST_LOG_LEVEL).
 log_level = "info"
 
 # Cache directory for storing traces and snapshots

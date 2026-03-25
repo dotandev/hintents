@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -19,8 +19,9 @@ var (
 )
 
 var regressionTestCmd = &cobra.Command{
-	Use:   "regression-test",
-	Short: "Run protocol regression tests against historic transactions",
+	Use:     "regression-test",
+	GroupID: "testing",
+	Short:   "Run protocol regression tests against historic transactions",
 	Long: `Execute a comprehensive regression test suite by downloading historic failed
 transactions from Mainnet and ensuring erst-sim yields identical results.
 

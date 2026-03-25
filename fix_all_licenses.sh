@@ -47,7 +47,7 @@ check_or_fix() {
 list_files() {
   local ext="$1"
   if git rev-parse --is-inside-work-tree &>/dev/null; then
-    git ls-files "*.$ext" "**/*.$ext" 2>/dev/null || true
+    git ls-files | grep -E "\\.${ext}$" || true
   else
     find . -type f -name "*.$ext" \
       -not -path "*/.*" \
@@ -73,7 +73,25 @@ while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   # Skip this script itself
   [[ "$(realpath "$f")" == "$(realpath "$0")" ]] && continue
-  check_or_fix "$f" "$SH_HEADER" "# Copyright" || MISSING=$((MISSING + 1))
+  if head -n 1 "$f" | grep -q '^#!'; then
+    if sed -n '2p' "$f" | grep -qF "# Copyright"; then
+      continue
+    fi
+    if [[ $CHECK_MODE == true ]]; then
+      echo "[missing] $f"
+      MISSING=$((MISSING + 1))
+    else
+      echo "[fixed] $f"
+      {
+        sed -n '1p' "$f"
+        printf '%s\n\n' "$SH_HEADER"
+        tail -n +2 "$f"
+      } > "$f.tmp"
+      mv "$f.tmp" "$f"
+    fi
+  else
+    check_or_fix "$f" "$SH_HEADER" "# Copyright" || MISSING=$((MISSING + 1))
+  fi
 done < <(list_files sh)
 
 echo ""

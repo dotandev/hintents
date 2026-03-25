@@ -1,26 +1,23 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/dotandev/hintents/internal/cmd"
-	"github.com/dotandev/hintents/internal/updater"
 )
 
 var Version = "dev"
 
 func main() {
-	// Set version in cmd package
+	// Set version in cmd package (used for upgrade banner and async version check)
 	cmd.Version = Version
 
-	// Start update checker in background (non-blocking)
-	checker := updater.NewChecker(Version)
-	go checker.CheckForUpdates()
-
 	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

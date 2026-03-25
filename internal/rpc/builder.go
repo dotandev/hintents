@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package rpc
@@ -16,20 +16,27 @@ import (
 type ClientOption func(*clientBuilder) error
 
 type clientBuilder struct {
-	network      Network
-	token        string
-	horizonURL   string
-	sorobanURL   string
-	altURLs      []string
-	cacheEnabled bool
-	config       *NetworkConfig
-	httpClient   *http.Client
+	network         Network
+	token           string
+	horizonURL      string
+	sorobanURL      string
+	altURLs         []string
+	cacheEnabled    bool
+	methodTelemetry MethodTelemetry
+	config          *NetworkConfig
+	httpClient      *http.Client
+	requestTimeout  time.Duration
+	middlewares     []Middleware
 }
+
+const defaultHTTPTimeout = 15 * time.Second
 
 func newBuilder() *clientBuilder {
 	return &clientBuilder{
-		network:      Mainnet,
-		cacheEnabled: true,
+		network:         Mainnet,
+		cacheEnabled:    true,
+		methodTelemetry: defaultMethodTelemetry(),
+		requestTimeout:  defaultHTTPTimeout,
 	}
 }
 
@@ -110,9 +117,38 @@ func WithCacheEnabled(enabled bool) ClientOption {
 	}
 }
 
+// WithRequestTimeout sets a custom HTTP request timeout for all RPC calls.
+// Use this to override the default 15-second timeout, for example on slow connections.
+// A value of 0 disables the timeout (not recommended for production use).
+func WithRequestTimeout(d time.Duration) ClientOption {
+	return func(b *clientBuilder) error {
+		b.requestTimeout = d
+		return nil
+	}
+}
+
 func WithHTTPClient(client *http.Client) ClientOption {
 	return func(b *clientBuilder) error {
 		b.httpClient = client
+		return nil
+	}
+}
+
+// WithMethodTelemetry injects an optional telemetry hook for SDK method timings.
+// If nil is provided, a no-op implementation is used.
+func WithMethodTelemetry(telemetry MethodTelemetry) ClientOption {
+	return func(b *clientBuilder) error {
+		if telemetry == nil {
+			telemetry = defaultMethodTelemetry()
+		}
+		b.methodTelemetry = telemetry
+		return nil
+	}
+}
+
+func WithMiddleware(middlewares ...Middleware) ClientOption {
+	return func(b *clientBuilder) error {
+		b.middlewares = append(b.middlewares, middlewares...)
 		return nil
 	}
 }
@@ -193,7 +229,7 @@ func (b *clientBuilder) build() (*Client, error) {
 	}
 
 	if b.httpClient == nil {
-		b.httpClient = createHTTPClient(b.token)
+		b.httpClient = createHTTPClient(b.token, b.requestTimeout, b.middlewares...)
 	}
 
 	if len(b.altURLs) == 0 && b.horizonURL != "" {
@@ -214,14 +250,16 @@ func (b *clientBuilder) build() (*Client, error) {
 			HorizonURL: b.horizonURL,
 			HTTP:       b.httpClient,
 		},
-		Network:      b.network,
-		SorobanURL:   b.sorobanURL,
-		AltURLs:      b.altURLs,
-		httpClient:   b.httpClient,
-		token:        b.token,
-		Config:       *b.config,
-		CacheEnabled: b.cacheEnabled,
-		failures:     make(map[string]int),
-		lastFailure:  make(map[string]time.Time),
+		Network:         b.network,
+		SorobanURL:      b.sorobanURL,
+		AltURLs:         b.altURLs,
+		httpClient:      b.httpClient,
+		token:           b.token,
+		Config:          *b.config,
+		CacheEnabled:    b.cacheEnabled,
+		methodTelemetry: b.methodTelemetry,
+		failures:        make(map[string]int),
+		lastFailure:     make(map[string]time.Time),
+		middlewares:     b.middlewares,
 	}, nil
 }

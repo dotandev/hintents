@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package sourcemap
@@ -29,6 +29,9 @@ type CacheEntry struct {
 
 // SourceCache provides local disk caching for downloaded source code.
 // It prevents redundant network requests for previously fetched sources.
+// Both an in-process sync.RWMutex and OS-level advisory file locks (flock)
+// are used to prevent corruption from concurrent writes across multiple
+// processes (e.g. parallel test suites).
 type SourceCache struct {
 	cacheDir string
 	ttl      time.Duration
@@ -60,6 +63,15 @@ func (sc *SourceCache) Get(contractID string) *SourceCode {
 	defer sc.mu.RUnlock()
 
 	path := sc.entryPath(contractID)
+
+	// Acquire a shared OS-level file lock on the lock file before reading.
+	lf, err := sc.acquireLock(path, false)
+	if err != nil {
+		logger.Logger.Warn("Failed to acquire read lock", "contract_id", contractID, "error", err)
+		return nil
+	}
+	defer sc.releaseLock(lf)
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -97,8 +109,22 @@ func (sc *SourceCache) Put(source *SourceCode) error {
 	}
 
 	path := sc.entryPath(source.ContractID)
-	if err := os.WriteFile(path, data, 0600); err != nil {
+
+	// Acquire an exclusive OS-level file lock before writing.
+	lf, err := sc.acquireLock(path, true)
+	if err != nil {
+		return fmt.Errorf("failed to acquire write lock for cache entry: %w", err)
+	}
+	defer sc.releaseLock(lf)
+
+	// Write atomically: write to a temp file then rename to avoid partial reads.
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write cache entry: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to commit cache entry: %w", err)
 	}
 
 	logger.Logger.Debug("Source cached", "contract_id", source.ContractID, "path", path)
@@ -111,7 +137,14 @@ func (sc *SourceCache) Invalidate(contractID string) error {
 	defer sc.mu.Unlock()
 
 	path := sc.entryPath(contractID)
-	err := os.Remove(path)
+
+	lf, err := sc.acquireLock(path, true)
+	if err != nil {
+		return fmt.Errorf("failed to acquire lock for invalidation: %w", err)
+	}
+	defer sc.releaseLock(lf)
+
+	err = os.Remove(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -147,3 +180,11 @@ func (sc *SourceCache) entryPath(contractID string) string {
 	filename := fmt.Sprintf("%x.json", hash[:8])
 	return filepath.Join(sc.cacheDir, filename)
 }
+
+// lockPath returns the path for the advisory lock file for a given cache entry.
+func (sc *SourceCache) lockPath(entryPath string) string {
+	return entryPath + ".lock"
+}
+
+// acquireLock and releaseLock are implemented in
+// cache_lock_unix.go and cache_lock_windows.go.

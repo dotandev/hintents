@@ -74,3 +74,39 @@ When tracing is disabled (default), there is zero performance overhead. When ena
 # Debug with custom OTLP endpoint
 ./erst debug --tracing --otlp-url http://my-collector:4318 <tx-hash>
 ```
+
+## Testing graceful degradation
+
+Telemetry is designed to **fail silently**: if the metrics collector is down, core SDK paths do not block and no errors are logged.
+
+### 1. Unit tests
+
+Run the telemetry tests (no collector required):
+
+```bash
+go test ./internal/telemetry/... -v
+```
+
+- `TestInit` and `TestGetTracer` confirm Init and tracer work with tracing on/off.
+- `TestInit_UnreachableCollector` confirms that with tracing enabled and an unreachable OTLP URL, Init still succeeds and spans can be created without blocking.
+
+### 2. Run daemon with collector down
+
+Build and start the daemon with tracing enabled but an OTLP URL that nothing is listening on. The daemon should start and keep running (no error, no hang):
+
+```bash
+make build
+./bin/erst daemon --tracing --otlp-url http://127.0.0.1:37999 --port 8080
+```
+
+You should see `Starting ERST daemon on port 8080` and the process stays up. Without graceful degradation, Init would have failed and the daemon would exit with an error.
+
+### 3. Run debug with collector down
+
+Same idea: debug should complete even if the OTLP endpoint is unreachable:
+
+```bash
+./bin/erst debug --tracing --otlp-url http://127.0.0.1:37999 <tx-hash>
+```
+
+Debug runs as normal; traces are dropped silently when the collector is down.

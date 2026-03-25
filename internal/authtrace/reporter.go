@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package authtrace
@@ -25,7 +25,7 @@ func (r *DetailedReporter) GenerateReport() string {
 		status = "FAILED"
 	}
 
-	sb.WriteString(fmt.Sprintf("=== MULTI-SIGNATURE AUTHORIZATION DEBUG REPORT ===\n\n"))
+	sb.WriteString("=== MULTI-SIGNATURE AUTHORIZATION DEBUG REPORT ===\n\n")
 	sb.WriteString(fmt.Sprintf("Authorization: %s\n", status))
 	sb.WriteString(fmt.Sprintf("Account: %s\n", r.trace.AccountID))
 	sb.WriteString(fmt.Sprintf("Total Signers: %d\n", r.trace.SignerCount))

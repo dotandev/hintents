@@ -1,12 +1,71 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schemas/simulation-request.schema.json",
+  "$id": "https://simulator.stellar.org/schemas/v1/simulation-request.schema.json",
+  "version": "1.0.0",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "request_id", "network", "xdr"],
+  "required": ["version", "request_id", "network", "xdr", "envelope_xdr", "result_meta_xdr"],
+  "$defs": {
+    "AuthTraceOptions": {
+      "type": "object",
+      "required": ["enabled", "trace_custom_contracts", "capture_sig_details"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable authentication tracing"
+        },
+        "trace_custom_contracts": {
+          "type": "boolean",
+          "description": "Trace custom contract authentication"
+        },
+        "capture_sig_details": {
+          "type": "boolean",
+          "description": "Capture signature details"
+        },
+        "max_event_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum event depth to trace"
+        }
+      }
+    },
+    "ResourceCalibration": {
+      "type": "object",
+      "required": ["sha256_fixed", "sha256_per_byte", "keccak256_fixed", "keccak256_per_byte", "ed25519_fixed"],
+      "additionalProperties": false,
+      "properties": {
+        "sha256_fixed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Fixed cost for SHA-256 operations"
+        },
+        "sha256_per_byte": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-byte cost for SHA-256 operations"
+        },
+        "keccak256_fixed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Fixed cost for Keccak-256 operations"
+        },
+        "keccak256_per_byte": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-byte cost for Keccak-256 operations"
+        },
+        "ed25519_fixed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Fixed cost for Ed25519 operations"
+        }
+      }
+    }
+  },
   "properties": {
     "version": {
-      "$ref": "common.schema.json#/definitions/Version"
+      "$ref": "common.schema.json#/$defs/Version"
     },
     "request_id": {
       "type": "string",
@@ -17,7 +76,73 @@
       "enum": ["public", "testnet", "futurenet"]
     },
     "xdr": {
-      "$ref": "common.schema.json#/definitions/XDRBase64"
+      "$ref": "common.schema.json#/$defs/XDRBase64"
+    },
+    "envelope_xdr": {
+      "$ref": "common.schema.json#/$defs/XDRBase64",
+      "description": "Base64-encoded XDR transaction envelope"
+    },
+    "result_meta_xdr": {
+      "$ref": "common.schema.json#/$defs/XDRBase64",
+      "description": "Base64-encoded XDR result metadata"
+    },
+    "ledger_entries": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "common.schema.json#/$defs/XDRBase64"
+      },
+      "description": "Optional ledger entries as key-value pairs with XDR-encoded values"
+    },
+    "timestamp": {
+      "type": "integer",
+      "description": "Optional timestamp for the simulation"
+    },
+    "ledger_sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional ledger sequence number"
+    },
+    "wasm_path": {
+      "type": "string",
+      "description": "Optional path to WASM file"
+    },
+    "mock_args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional array of mock arguments"
+    },
+    "profile": {
+      "type": "boolean",
+      "description": "Optional flag to enable profiling"
+    },
+    "protocol_version": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional protocol version"
+    },
+    "mock_base_fee": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional mock base fee"
+    },
+    "mock_gas_price": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional mock gas price"
+    },
+    "auth_trace_opts": {
+      "$ref": "#/$defs/AuthTraceOptions",
+      "description": "Optional authentication trace options"
+    },
+    "resource_calibration": {
+      "$ref": "#/$defs/ResourceCalibration",
+      "description": "Optional resource calibration parameters"
+    },
+    "custom_auth_config": {
+      "type": "object",
+      "description": "Optional custom authentication configuration (flexible structure)"
     }
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package logger
@@ -18,6 +18,11 @@ var (
 	mu     sync.Mutex
 )
 
+// Custom log levels
+const (
+	LevelTrace = slog.Level(-8) // More verbose than Debug (-4)
+)
+
 func init() {
 	lvl := parseLevelFromEnv()
 	initLogger(lvl, os.Stderr, false)
@@ -25,17 +30,63 @@ func init() {
 
 func parseLevelFromEnv() slog.Level {
 	env := strings.ToUpper(os.Getenv("ERST_LOG_LEVEL"))
-	switch env {
+	return ParseLevel(env)
+}
+
+// ParseLevel converts a string to a slog.Level
+func ParseLevel(levelStr string) slog.Level {
+	switch strings.ToUpper(levelStr) {
+	case "TRACE":
+		return LevelTrace
 	case "DEBUG":
 		return slog.LevelDebug
 	case "INFO":
 		return slog.LevelInfo
-	case "WARN":
+	case "WARN", "WARNING":
 		return slog.LevelWarn
 	case "ERROR":
 		return slog.LevelError
 	default:
 		return slog.LevelInfo
+	}
+}
+
+// ParseLogLevel converts a human-readable level string (e.g. "debug", "info",
+// "warn", "error") into the corresponding slog.Level. Unknown values default
+// to slog.LevelInfo.
+func ParseLogLevel(s string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "trace", "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+// RustLogFilter returns the RUST_LOG-compatible filter string that corresponds
+// to the given ERST log level name. This is used when spawning the Rust
+// simulator subprocess so that a single ERST_LOG_LEVEL value controls both the
+// Go logger and the Rust tracing subscriber.
+func RustLogFilter(erstLevel string) string {
+	switch strings.ToLower(strings.TrimSpace(erstLevel)) {
+	case "trace":
+		return "trace"
+	case "debug":
+		return "debug"
+	case "info":
+		return "info"
+	case "warn", "warning":
+		return "warn"
+	case "error":
+		return "error"
+	default:
+		return "info"
 	}
 }
 
@@ -101,4 +152,36 @@ func (h *TextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 func (h *TextHandler) WithGroup(name string) slog.Handler {
 	return &TextHandler{handler: h.handler.WithGroup(name)}
+}
+
+// Trace logs at trace level (more verbose than debug)
+func Trace(msg string, args ...any) {
+	Logger.Log(context.Background(), LevelTrace, msg, args...)
+}
+
+// GetRustLogLevel returns the Rust env_logger compatible log level string
+func GetRustLogLevel() string {
+	currentLevel := level.Level()
+	switch {
+	case currentLevel <= LevelTrace:
+		return "trace"
+	case currentLevel <= slog.LevelDebug:
+		return "debug"
+	case currentLevel <= slog.LevelInfo:
+		return "info"
+	case currentLevel <= slog.LevelWarn:
+		return "warn"
+	default:
+		return "error"
+	}
+}
+
+// GetRustLogFormat returns the format for Rust logger (json or text)
+func GetRustLogFormat() string {
+	// Check if we're using JSON format by inspecting the handler
+	// For now, we'll use an environment variable or default to text
+	if format := os.Getenv("ERST_LOG_FORMAT"); format == "json" {
+		return "json"
+	}
+	return "text"
 }

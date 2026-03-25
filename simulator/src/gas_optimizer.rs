@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 use serde::{Deserialize, Serialize};
@@ -132,7 +132,8 @@ impl GasOptimizationAdvisor {
                 category: "Budget Allocation".to_string(),
                 severity: "high".to_string(),
                 message: format!(
-                    "This operation consumes {cpu_percentage:.1}% of the CPU budget; consider batching multiple operations or caching results."
+                    "This operation consumes {:.1}% of the CPU budget; consider batching multiple operations or caching results.",
+                    cpu_percentage
                 ),
                 estimated_savings: "20-40% with batching".to_string(),
                 code_location: Some("Contract invocation".to_string()),
@@ -145,7 +146,8 @@ impl GasOptimizationAdvisor {
                 category: "Memory Efficiency".to_string(),
                 severity: "medium".to_string(),
                 message: format!(
-                    "Memory usage is {memory_percentage:.1}% of budget. Consider using references instead of cloning data."
+                    "Memory usage is {:.1}% of budget. Consider using references instead of cloning data.",
+                    memory_percentage
                 ),
                 estimated_savings: "10-25% with better memory management".to_string(),
                 code_location: None,
@@ -210,7 +212,8 @@ impl GasOptimizationAdvisor {
                 category: "Loop Optimization".to_string(),
                 severity: "high".to_string(),
                 message: format!(
-                    "Loop executes {count} times consuming {cpu_cost} CPU instructions. Consider batching or reducing iterations."
+                    "Loop executes {} times consuming {} CPU instructions. Consider batching or reducing iterations.",
+                    count, cpu_cost
                 ),
                 estimated_savings: "30-50% with batching".to_string(),
                 code_location: Some("Loop body".to_string()),
@@ -219,7 +222,8 @@ impl GasOptimizationAdvisor {
                 category: "Storage Access".to_string(),
                 severity: "medium".to_string(),
                 message: format!(
-                    "{count} storage reads detected. Cache frequently accessed values."
+                    "{} storage reads detected. Cache frequently accessed values.",
+                    count
                 ),
                 estimated_savings: "15-30% with caching".to_string(),
                 code_location: Some("Storage operations".to_string()),
@@ -228,7 +232,8 @@ impl GasOptimizationAdvisor {
                 category: "Storage Access".to_string(),
                 severity: "high".to_string(),
                 message: format!(
-                    "{count} storage writes detected. Batch writes or use temporary variables."
+                    "{} storage writes detected. Batch writes or use temporary variables.",
+                    count
                 ),
                 estimated_savings: "25-40% with batching".to_string(),
                 code_location: Some("Storage operations".to_string()),

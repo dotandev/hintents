@@ -1,18 +1,24 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schemas/simulation-response.schema.json",
+  "$id": "https://simulator.stellar.org/schemas/v1/simulation-response.schema.json",
+  "version": "1.0.0",
+  "title": "SimulationResponse Schema",
+  "description": "Complete simulator response structure containing execution results, events, diagnostics, and metadata",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "request_id", "success"],
+  "required": ["version", "request_id", "status"],
   "properties": {
     "version": {
-      "$ref": "common.schema.json#/definitions/Version"
+      "$ref": "common.schema.json#/$defs/Version"
     },
     "request_id": {
-      "type": "string"
+      "type": "string",
+      "description": "Unique identifier for the simulation request"
     },
-    "success": {
-      "type": "boolean"
+    "status": {
+      "type": "string",
+      "enum": ["success", "error"],
+      "description": "Status of the simulation execution"
     },
     "result": {
       "type": "object",
@@ -27,27 +33,80 @@
       }
     },
     "error": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["code", "message"],
-      "properties": {
-        "code": {
-          "type": "string"
-        },
-        "message": {
-          "type": "string"
-        }
-      }
+      "type": "string",
+      "description": "Error message when status is error"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Array of event strings for backward compatibility"
+    },
+    "diagnostic_events": {
+      "type": "array",
+      "items": {
+        "$ref": "diagnostic-event.schema.json"
+      },
+      "description": "Array of structured diagnostic events emitted during execution"
+    },
+    "logs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Array of host debug log strings"
+    },
+    "flamegraph": {
+      "type": "string",
+      "description": "SVG content of the execution flamegraph"
+    },
+    "auth_trace": {
+      "$ref": "auth-trace.schema.json",
+      "description": "Authentication trace data capturing signature verification flow"
+    },
+    "budget_usage": {
+      "$ref": "budget-usage.schema.json",
+      "description": "Resource consumption metrics including CPU and memory usage"
+    },
+    "categorized_events": {
+      "type": "array",
+      "items": {
+        "$ref": "categorized-event.schema.json"
+      },
+      "description": "Array of categorized events"
+    },
+    "protocol_version": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional protocol version used for the simulation"
+    },
+    "stack_trace": {
+      "$ref": "wasm-stack-trace.schema.json",
+      "description": "Optional WASM stack trace captured when a trap occurs"
+    },
+    "source_location": {
+      "type": "string",
+      "description": "Optional source code location information"
+    },
+    "wasm_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional byte offset in the WASM module"
     }
   },
   "allOf": [
     {
-      "if": { "properties": { "success": { "const": true } } },
-      "then": { "required": ["result"] }
-    },
-    {
-      "if": { "properties": { "success": { "const": false } } },
-      "then": { "required": ["error"] }
+      "if": {
+        "properties": {
+          "status": {
+            "const": "error"
+          }
+        }
+      },
+      "then": {
+        "required": ["error"]
+      }
     }
   ]
 }

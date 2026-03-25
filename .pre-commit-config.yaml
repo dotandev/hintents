@@ -1,8 +1,25 @@
-# Pre-commit hooks for strict linting
+# Pre-commit hooks for strict formatting and linting
 # Install: pip install pre-commit && pre-commit install
 # Run manually: pre-commit run --all-files
 
 repos:
+  # ──────────────────────────────────────────────
+  # Go formatting: gofmt + goimports (auto-fix)
+  # ──────────────────────────────────────────────
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+        name: gofmt (auto-format)
+        description: Runs gofmt and auto-formats Go files
+
+      - id: go-imports
+        name: goimports (auto-format)
+        description: Runs goimports to fix imports and formatting in Go files
+
+  # ──────────────────────────────────────────────
+  # Go linting: golangci-lint (strict)
+  # ──────────────────────────────────────────────
   - repo: https://github.com/golangci/golangci-lint
     rev: v1.61.0
     hooks:
@@ -13,6 +30,9 @@ repos:
           - --max-issues-per-linter=0
           - --max-same-issues=0
 
+  # ──────────────────────────────────────────────
+  # Local hooks: go vet, cargo fmt, cargo clippy
+  # ──────────────────────────────────────────────
   - repo: local
     hooks:
       - id: go-vet
@@ -22,23 +42,26 @@ repos:
         pass_filenames: false
         files: \.go$
 
-      - id: rust-clippy
+      - id: cargo-fmt
+        name: cargo fmt (auto-format)
+        entry: bash -c 'cd simulator && cargo fmt'
+        language: system
+        pass_filenames: false
+        files: \.rs$
+        description: Runs cargo fmt to auto-format all Rust files in simulator/
+
+      - id: cargo-fmt-check
+        name: cargo fmt --check (verify)
+        entry: bash -c 'cd simulator && cargo fmt --check'
+        language: system
+        pass_filenames: false
+        files: \.rs$
+        stages: [pre-push]
+        description: Verifies Rust formatting on push (strict gate)
+
+      - id: cargo-clippy
         name: cargo clippy (strict)
         entry: bash -c 'cd simulator && cargo clippy --all-targets --all-features -- -D warnings -D clippy::all -D unused-variables -D unused-imports -D unused-mut -D dead-code -D unused-assignments -W clippy::pedantic -W clippy::nursery'
         language: system
         pass_filenames: false
         files: \.rs$
-
-      - id: rust-fmt
-        name: cargo fmt
-        entry: bash -c 'cd simulator && cargo fmt --check'
-        language: system
-        pass_filenames: false
-        files: \.rs$
-
-      - id: go-fmt
-        name: go fmt
-        entry: bash -c 'test -z "$(gofmt -l .)"'
-        language: system
-        pass_filenames: false
-        files: \.go$

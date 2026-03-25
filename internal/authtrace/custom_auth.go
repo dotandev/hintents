@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package authtrace
@@ -13,6 +13,11 @@ type ContractAuthHandler interface {
 	GetAuthName() string
 	GetAuthDetails() map[string]interface{}
 }
+
+var (
+	_ ContractAuthHandler = (*MultiSigContractAuth)(nil)
+	_ ContractAuthHandler = (*RecoveryAuth)(nil)
+)
 
 type CustomContractAuthValidator struct {
 	contracts map[string]ContractAuthHandler

@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "network": "testnet",
+  "contracts": [
+    {
+      "name": "Token",
+      "wasm": "./contracts/token.wasm",
+      "initArgs": ["init", "1000000"]
+    },
+    {
+      "name": "Vault",
+      "wasm": "./contracts/vault.wasm",
+      "dependencies": ["Token"],
+      "initArgs": ["init", "$CONTRACT_Token"]
+    },
+    {
+      "name": "Swap",
+      "wasm": "./contracts/swap.wasm",
+      "dependencies": ["Token", "Vault"],
+      "initArgs": ["init", "$CONTRACT_Token", "$CONTRACT_Vault"]
+    }
+  ]
+}

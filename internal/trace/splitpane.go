@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package trace
@@ -104,7 +104,7 @@ func DefaultSplitPane() *SplitPane {
 func (p *SplitPane) Render(w io.Writer, node *TraceNode, src *SourceContext) {
 	width := p.resolveWidth()
 	bw := bufio.NewWriter(w)
-	defer bw.Flush()
+	defer bw.Flush() //nolint:errcheck
 
 	p.renderTracePane(bw, node, width)
 	p.renderDivider(bw, width, src)
@@ -139,18 +139,18 @@ func paneRows(configured, dflt int) int {
 }
 
 func (p *SplitPane) renderTracePane(w io.Writer, node *TraceNode, width int) {
-	fmt.Fprintln(w, hBorder(" Trace Node ", width))
+	_, _ = fmt.Fprintln(w, hBorder(" Trace Node ", width))
 	limit := paneRows(p.TraceRows, defaultTraceRows)
 	lines := nodeDisplayLines(node)
 	for i, line := range lines {
 		if i >= limit {
-			fmt.Fprintf(w, "  %s\n", visualizer.Colorize(fmt.Sprintf("... (%d more)", len(lines)-limit), "dim"))
+			_, _ = fmt.Fprintf(w, "  %s\n", visualizer.Colorize(fmt.Sprintf("... (%d more)", len(lines)-limit), "dim"))
 			break
 		}
-		fmt.Fprintf(w, "  %s\n", line)
+		_, _ = fmt.Fprintf(w, "  %s\n", line)
 	}
 	for i := len(lines); i < limit; i++ {
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
 }
 
@@ -167,17 +167,17 @@ func (p *SplitPane) renderDivider(w io.Writer, width int, src *SourceContext) {
 		}
 		label = raw
 	}
-	fmt.Fprintln(w, hBorder(label, width))
+	_, _ = fmt.Fprintln(w, hBorder(label, width))
 }
 
 func (p *SplitPane) renderSourcePane(w io.Writer, src *SourceContext, width int) {
 	limit := paneRows(p.SrcRows, defaultSrcRows)
 	if src == nil || len(src.Lines) == 0 {
-		fmt.Fprintf(w, "  %s\n", visualizer.Colorize("No source mapping available for this node.", "dim"))
+		_, _ = fmt.Fprintf(w, "  %s\n", visualizer.Colorize("No source mapping available for this node.", "dim"))
 		for i := 1; i < limit; i++ {
-			fmt.Fprintln(w)
+			_, _ = fmt.Fprintln(w)
 		}
-		fmt.Fprintln(w, hBorder("", width))
+		_, _ = fmt.Fprintln(w, hBorder("", width))
 		return
 	}
 	startLine := src.Ref.Line - src.FocusIndex
@@ -186,21 +186,21 @@ func (p *SplitPane) renderSourcePane(w io.Writer, src *SourceContext, width int)
 	}
 	for i, line := range src.Lines {
 		if i >= limit {
-			fmt.Fprintf(w, "  %s\n", visualizer.Colorize(fmt.Sprintf("... (%d more)", len(src.Lines)-limit), "dim"))
+			_, _ = fmt.Fprintf(w, "  %s\n", visualizer.Colorize(fmt.Sprintf("... (%d more)", len(src.Lines)-limit), "dim"))
 			break
 		}
 		lineNum := startLine + i
 		numStr := fmt.Sprintf("%4d", lineNum)
 		if i == src.FocusIndex {
-			fmt.Fprintf(w, "%s | %s\n", visualizer.Colorize(numStr, "yellow"), visualizer.Colorize(line, "bold"))
+			_, _ = fmt.Fprintf(w, "%s | %s\n", visualizer.Colorize(numStr, "yellow"), visualizer.Colorize(line, "bold"))
 		} else {
-			fmt.Fprintf(w, "%s | %s\n", visualizer.Colorize(numStr, "dim"), line)
+			_, _ = fmt.Fprintf(w, "%s | %s\n", visualizer.Colorize(numStr, "dim"), line)
 		}
 	}
 	for i := len(src.Lines); i < limit; i++ {
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
-	fmt.Fprintln(w, hBorder("", width))
+	_, _ = fmt.Fprintln(w, hBorder("", width))
 }
 
 // nodeDisplayLines converts a TraceNode into display strings for the trace pane.

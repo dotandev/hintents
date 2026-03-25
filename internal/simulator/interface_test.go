@@ -1,11 +1,13 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package simulator
 
 import (
+	"context"
 	"testing"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,7 +27,7 @@ func TestNewRunnerInterface(t *testing.T) {
 	// but the interface structure is correct
 	if err != nil {
 		// Expected in test environment without erst-sim binary
-		assert.Contains(t, err.Error(), "erst-sim binary not found")
+		assert.True(t, errors.Is(err, errors.ErrSimulatorNotFound))
 	} else {
 		// If binary exists, verify interface is returned
 		assert.NotNil(t, runner)
@@ -36,13 +38,14 @@ func TestNewRunnerInterface(t *testing.T) {
 func TestExampleUsage(t *testing.T) {
 	// Create a mock implementation for testing
 	mockRunner := &mockRunnerForTest{}
+	ctx := context.Background()
 
 	req := &SimulationRequest{
 		EnvelopeXdr:   "test-envelope",
 		ResultMetaXdr: "test-meta",
 	}
 
-	resp, err := ExampleUsage(mockRunner, req)
+	resp, err := ExampleUsage(ctx, mockRunner, req)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
@@ -52,9 +55,13 @@ func TestExampleUsage(t *testing.T) {
 // Simple mock for testing the interface
 type mockRunnerForTest struct{}
 
-func (m *mockRunnerForTest) Run(req *SimulationRequest) (*SimulationResponse, error) {
+func (m *mockRunnerForTest) Run(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 	return &SimulationResponse{
 		Status: "success",
 		Events: []string{"mock-event"},
 	}, nil
+}
+
+func (m *mockRunnerForTest) Close() error {
+	return nil
 }

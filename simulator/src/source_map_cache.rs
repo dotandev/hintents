@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 //! Source Map Caching Layer
@@ -15,7 +15,67 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+// Inline OS-level advisory file locking using libc, which is a transitive
+// dependency of soroban-env-host. This avoids adding a new crate while still
+// providing cross-process protection against concurrent writes.
+#[cfg(unix)]
+mod flock {
+    use std::fs::File;
+    use std::os::unix::io::AsRawFd;
+
+    extern "C" {
+        fn flock(fd: libc::c_int, operation: libc::c_int) -> libc::c_int;
+    }
+
+    /// Acquires a shared (read) lock on `file`, blocking until it succeeds.
+    pub fn lock_shared(file: &File) -> Result<(), String> {
+        let rc = unsafe { flock(file.as_raw_fd(), libc::LOCK_SH) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(format!("flock(LOCK_SH) failed: errno {}", rc))
+        }
+    }
+
+    /// Acquires an exclusive (write) lock on `file`, blocking until it succeeds.
+    pub fn lock_exclusive(file: &File) -> Result<(), String> {
+        let rc = unsafe { flock(file.as_raw_fd(), libc::LOCK_EX) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(format!("flock(LOCK_EX) failed: errno {}", rc))
+        }
+    }
+
+    /// Releases any lock held on `file`.
+    pub fn unlock(file: &File) -> Result<(), String> {
+        let rc = unsafe { flock(file.as_raw_fd(), libc::LOCK_UN) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(format!("flock(LOCK_UN) failed: errno {}", rc))
+        }
+    }
+}
+
+#[cfg(not(unix))]
+mod flock {
+    use std::fs::File;
+    // On non-Unix platforms we fall back to no-op locks. The race risk on
+    // Windows test environments is accepted until a platform-specific
+    // implementation is added.
+    pub fn lock_shared(_: &File) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn lock_exclusive(_: &File) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn unlock(_: &File) -> Result<(), String> {
+        Ok(())
+    }
+}
 
 /// Default cache directory name
 pub const CACHE_DIR_NAME: &str = "sourcemaps";
@@ -73,11 +133,56 @@ impl SourceMapCache {
         self.cache_dir.join(format!("{}.bin", wasm_hash))
     }
 
-    /// Gets a cached source map entry if it exists and is valid
-    pub fn get(&self, wasm_hash: &str) -> Option<SourceMapCacheEntry> {
+    /// Gets the advisory lock file path for a given cache path.
+    fn get_lock_path(cache_path: &Path) -> PathBuf {
+        let mut p = cache_path.to_path_buf();
+        let file_name = p
+            .file_name()
+            .map(|n| format!("{}.lock", n.to_string_lossy()))
+            .unwrap_or_else(|| ".lock".to_string());
+        p.set_file_name(file_name);
+        p
+    }
+
+    /// Opens or creates the advisory lock file for a cache path,
+    /// returning the file handle (lock is held until the file is dropped/closed).
+    fn open_lock_file(cache_path: &Path) -> Result<File, String> {
+        let lock_path = Self::get_lock_path(cache_path);
+        File::options()
+            .create(true)
+            .truncate(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|e| format!("Failed to open lock file {:?}: {}", lock_path, e))
+    }
+
+    /// Gets a cached source map entry if it exists and is valid.
+    /// When `no_cache` is true, skips the cache and returns None immediately,
+    /// forcing the caller to re-parse WASM symbols from scratch.
+    pub fn get(&self, wasm_hash: &str, no_cache: bool) -> Option<SourceMapCacheEntry> {
+        if no_cache {
+            println!("Cache bypassed via --no-cache flag. Re-parsing WASM symbols.");
+            return None;
+        }
+
         let cache_path = self.get_cache_path(wasm_hash);
 
         if !cache_path.exists() {
+            return None;
+        }
+
+        // Acquire a shared OS-level lock so concurrent readers don't race with
+        // a writer that may be in the middle of replacing the file.
+        let lock_file = match Self::open_lock_file(&cache_path) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to open lock file for reading: {}", e);
+                return None;
+            }
+        };
+        if let Err(e) = flock::lock_shared(&lock_file) {
+            eprintln!("Failed to acquire shared lock: {}", e);
             return None;
         }
 
@@ -86,6 +191,7 @@ impl SourceMapCache {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("Failed to open cache file: {}", e);
+                let _ = flock::unlock(&lock_file);
                 return None;
             }
         };
@@ -93,10 +199,11 @@ impl SourceMapCache {
         let mut bytes = Vec::new();
         if let Err(e) = file.read_to_end(&mut bytes) {
             eprintln!("Failed to read cache file: {}", e);
+            let _ = flock::unlock(&lock_file);
             return None;
         };
 
-        match bincode::deserialize(&bytes) {
+        let result = match bincode::deserialize(&bytes) {
             Ok(entry) => {
                 println!(
                     "Cache hit! Loading source map from cache for WASM: {}",
@@ -108,10 +215,15 @@ impl SourceMapCache {
                 eprintln!("Failed to deserialize cache entry: {}", e);
                 None
             }
-        }
+        };
+
+        let _ = flock::unlock(&lock_file);
+        result
     }
 
-    /// Stores a source map entry in the cache
+    /// Stores a source map entry in the cache.
+    /// Uses an exclusive OS-level file lock and atomic write (temp file + rename)
+    /// to prevent data corruption when multiple processes write concurrently.
     pub fn store(&self, entry: SourceMapCacheEntry) -> Result<(), String> {
         // Ensure cache directory exists
         fs::create_dir_all(&self.cache_dir)
@@ -119,19 +231,37 @@ impl SourceMapCache {
 
         let cache_path = self.get_cache_path(&entry.wasm_hash);
 
+        // Acquire an exclusive OS-level lock before writing.
+        let lock_file = Self::open_lock_file(&cache_path)?;
+        flock::lock_exclusive(&lock_file)?;
+
         // Serialize the entry
         let bytes = bincode::serialize(&entry)
             .map_err(|e| format!("Failed to serialize cache entry: {}", e))?;
 
-        // Write to file
-        let mut file =
-            File::create(&cache_path).map_err(|e| format!("Failed to create cache file: {}", e))?;
+        // Write atomically: write to a tmp file then rename to avoid readers
+        // observing a partially-written file.
+        let tmp_path = self.cache_dir.join(format!("{}.tmp", entry.wasm_hash));
+        let write_result = (|| {
+            let mut file = File::create(&tmp_path)
+                .map_err(|e| format!("Failed to create temp cache file: {}", e))?;
+            file.write_all(&bytes)
+                .map_err(|e| format!("Failed to write temp cache file: {}", e))?;
+            fs::rename(&tmp_path, &cache_path)
+                .map_err(|e| format!("Failed to rename temp cache file: {}", e))?;
+            Ok::<(), String>(())
+        })();
 
-        file.write_all(&bytes)
-            .map_err(|e| format!("Failed to write cache file: {}", e))?;
+        let _ = flock::unlock(&lock_file);
+
+        // Clean up tmp file on failure.
+        if write_result.is_err() {
+            let _ = fs::remove_file(&tmp_path);
+        }
+
+        write_result?;
 
         println!("Cached source map for WASM: {}", &entry.wasm_hash[..8]);
-
         Ok(())
     }
 
@@ -221,7 +351,7 @@ impl SourceMapCache {
     }
 
     /// Returns the cache directory path
-    pub fn get_cache_dir(&self) -> &PathBuf {
+    pub fn get_cache_dir(&self) -> &Path {
         &self.cache_dir
     }
 }
@@ -286,6 +416,8 @@ mod tests {
                 file: "test.rs".to_string(),
                 line: 42,
                 column: Some(10),
+                column_end: None,
+                github_link: None,
             },
         );
 
@@ -299,8 +431,8 @@ mod tests {
         // Store the entry
         cache.store(entry.clone()).unwrap();
 
-        // Retrieve the entry
-        let retrieved = cache.get(&wasm_hash).unwrap();
+        // Retrieve the entry — no_cache=false so cache is used normally
+        let retrieved = cache.get(&wasm_hash, false).unwrap();
         assert_eq!(retrieved.wasm_hash, wasm_hash);
         assert!(retrieved.has_symbols);
         assert_eq!(retrieved.mappings.len(), 1);
@@ -310,7 +442,30 @@ mod tests {
     fn test_get_missing() {
         let (cache, _temp) = create_test_cache();
 
-        let result = cache.get("nonexistent_hash_12345678901234567890123456789012");
+        let result = cache.get("nonexistent_hash_12345678901234567890123456789012", false);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_no_cache_bypasses_cache() {
+        let (cache, _temp) = create_test_cache();
+
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        let wasm_hash = SourceMapCache::compute_wasm_hash(&wasm_bytes);
+
+        let entry = SourceMapCacheEntry {
+            wasm_hash: wasm_hash.clone(),
+            has_symbols: true,
+            mappings: HashMap::new(),
+            created_at: 1234567890,
+        };
+
+        // Store an entry so it exists on disk
+        cache.store(entry).unwrap();
+        assert!(cache.get(&wasm_hash, false).is_some());
+
+        // With no_cache=true, it should return None even though cache exists
+        let result = cache.get(&wasm_hash, true);
         assert!(result.is_none());
     }
 
@@ -329,11 +484,11 @@ mod tests {
         };
 
         cache.store(entry).unwrap();
-        assert!(cache.get(&wasm_hash).is_some());
+        assert!(cache.get(&wasm_hash, false).is_some());
 
         let count = cache.clear().unwrap();
         assert_eq!(count, 1);
-        assert!(cache.get(&wasm_hash).is_none());
+        assert!(cache.get(&wasm_hash, false).is_none());
     }
 
     #[test]
@@ -353,6 +508,8 @@ mod tests {
                 file: "test.rs".to_string(),
                 line: 42,
                 column: Some(10),
+                column_end: None,
+                github_link: None,
             },
         );
 

@@ -1,9 +1,10 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package trace
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -192,6 +193,8 @@ func TestTraceNode_ApplyHeuristics(t *testing.T) {
 	assert.Equal(t, 10, len(root.Children[5].Children))
 	assert.Equal(t, "child-5", root.Children[5].Children[0].ID)
 	assert.Equal(t, "child-14", root.Children[5].Children[9].ID)
+}
+
 func TestTraceNode_IsCrossContractCall(t *testing.T) {
 	parent := NewTraceNode("parent", "contract_call")
 	parent.ContractID = "CABC"

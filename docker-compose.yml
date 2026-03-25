@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  erst:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+        - linux/arm64
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT_SHA: ${COMMIT_SHA:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    image: erst:local
+    container_name: erst
+    volumes:
+      - ./erst.example.toml:/app/erst.toml:ro
+    command: ["--help"]
+    restart: "no"
+
+  # Optional: Include Jaeger for tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "14268:14268" # Jaeger collector HTTP
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    command: ["--collector.otlp.enabled=true"]
+    profiles:
+      - tracing

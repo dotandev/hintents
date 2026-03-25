@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package trace
@@ -7,11 +7,11 @@ import "strings"
 
 // Event type filter constants for trace viewer filtering
 const (
-	EventTypeTrap          = "trap"
-	EventTypeContractCall  = "contract_call"
-	EventTypeHostFunction  = "host_function"
-	EventTypeAuth          = "auth"
-	EventTypeOther         = "other"
+	EventTypeTrap         = "trap"
+	EventTypeContractCall = "contract_call"
+	EventTypeHostFunction = "host_function"
+	EventTypeAuth         = "auth"
+	EventTypeOther        = "other"
 )
 
 // AllFilterableEventTypes returns the list of event types that can be used for filtering

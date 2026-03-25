@@ -1,10 +1,49 @@
 {
-    "name": "erst-vscode",
-    "displayName": "ERST Tracer",
-    "description": "",
-    "version": "0.0.1",
-    "engines": {
-        "vscode": "^1.90.0"
+  "name": "erst-vscode",
+  "displayName": "ERST Tracer",
+  "description": "",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "erst.triggerDebug",
+        "title": "ERST: Trigger Debug",
+        "category": "ERST"
+      },
+      {
+        "command": "erst.setTraceSearchQuery",
+        "title": "ERST: Set Trace Search Query",
+        "category": "ERST"
+      },
+      {
+        "command": "erst.exportTraceTree",
+        "title": "ERST: Export Trace Tree (JSON/HTML)",
+        "category": "ERST"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "erst.exportTraceTree",
+        "key": "e",
+        "when": "view == erst-traces && listFocus"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "erst-explorer",
+          "title": "ERST",
+          "icon": "$(debug-console)"
+        }
+      ]
     },
     "categories": [
         "Debuggers"
@@ -57,4 +96,26 @@
         "typescript": "^5.4.0",
         "@vscode/test-electron": "^2.4.0"
     }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "test:unit": "npm run compile && node --test out/traceExport.test.js"
+  },
+  "dependencies": {
+    "vscode-jsonrpc": "^8.2.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.4.0",
+    "@vscode/test-electron": "^2.4.0"
+  }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -49,7 +49,7 @@ For detailed instructions on setting up completions for your shell, consult your
 
 		switch shell {
 		case "bash":
-			return rootCmd.GenBashCompletion(os.Stdout)
+			return rootCmd.GenBashCompletionV2(os.Stdout, true)
 		case "zsh":
 			return rootCmd.GenZshCompletion(os.Stdout)
 		case "fish":
