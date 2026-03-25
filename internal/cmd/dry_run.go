@@ -187,3 +187,44 @@ func extractLedgerKeysFromEnvelope(env *xdr.TransactionEnvelope) ([]string, erro
 	_ = env
 	return []string{}, nil
 }
+
+
+func extractSignerCountFromEnvelope(env *xdr.TransactionEnvelope) uint32 {
+	var sigs int
+	var ops []xdr.Operation
+
+	switch env.Type {
+	case xdr.EnvelopeTypeEnvelopeTypeTx:
+		sigs = len(env.V1.Signatures)
+		ops = env.V1.Tx.Operations
+	case xdr.EnvelopeTypeEnvelopeTypeTxV0:
+		sigs = len(env.V0.Signatures)
+		ops = env.V0.Tx.Operations
+	case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
+		sigs = len(env.FeeBump.Signatures)
+		if env.FeeBump.Tx.InnerTx.Type == xdr.EnvelopeTypeEnvelopeTypeTx {
+			ops = env.FeeBump.Tx.InnerTx.V1.Tx.Operations
+		}
+	default:
+		return 1
+	}
+
+	// Already partially signed — use the existing count so we don't over-pad.
+	if sigs > 0 {
+		return uint32(sigs)
+	}
+
+	// Count InvokeHostFunction operations as a proxy for required signers.
+	invokeCount := 0
+	for _, op := range ops {
+		if op.Body.Type == xdr.OperationTypeInvokeHostFunction {
+			invokeCount++
+		}
+	}
+	if invokeCount > 0 {
+		return uint32(invokeCount)
+	}
+
+	// Minimum: at least one signer for any transaction.
+	return 1
+}

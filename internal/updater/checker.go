@@ -1,4 +1,8 @@
+<<<<<<< HEAD
+// Copyright 2025 Erst Users
+=======
 // Copyright 2026 Erst Users
+>>>>>>> origin/main
 // SPDX-License-Identifier: Apache-2.0
 
 package updater
@@ -76,13 +80,29 @@ func (c *Checker) CheckForUpdates() {
 		return
 	}
 
+<<<<<<< HEAD
+	// Update cache with the latest version
+=======
 	// Update cache with the latest version (banner is shown from cache at next run start)
+>>>>>>> origin/main
 	if err := c.updateCache(latestVersion); err != nil {
 		// Silent failure
 		return
 	}
+<<<<<<< HEAD
+
+	// Compare versions
+	needsUpdate, err := c.compareVersions(c.currentVersion, latestVersion)
+	if err != nil || !needsUpdate {
+		return
+	}
+
+	// Display notification
+	c.displayNotification(latestVersion)
+=======
 	// Do not display here; banner is shown once per run from ShowBannerFromCache to avoid
 	// mid-output or duplicate messages.
+>>>>>>> origin/main
 }
 
 // shouldCheck determines if we should check based on cache
@@ -169,15 +189,24 @@ func (c *Checker) compareVersions(current, latest string) (bool, error) {
 	return latestVer.GreaterThan(currentVer), nil
 }
 
+<<<<<<< HEAD
+// displayNotification prints the update message to stderr
+func (c *Checker) displayNotification(latestVersion string) {
+	message := fmt.Sprintf(
+		"\n[INFO] A new version (%s) is available! Run 'go install github.com/dotandev/hintents/cmd/erst@latest' to update.\n\n",
+=======
 // displayNotification prints the update message to stderr (small one-line banner)
 func (c *Checker) displayNotification(latestVersion string) {
 	message := fmt.Sprintf(
 		"Upgrade available: %s — run 'go install github.com/dotandev/hintents/cmd/erst@latest' to update\n",
+>>>>>>> origin/main
 		latestVersion,
 	)
 	fmt.Fprint(os.Stderr, message)
 }
 
+<<<<<<< HEAD
+=======
 // ShowBannerFromCache reads the last update check cache and, if a newer version
 // was found, prints a small "Upgrade available" banner to stderr. Called at CLI
 // start so the banner appears once per run without blocking. Skips if update
@@ -215,6 +244,7 @@ func (c *Checker) showBannerFromCache() {
 	c.displayNotification(cache.LatestVersion)
 }
 
+>>>>>>> origin/main
 // updateCache updates the cache file with the latest check time and version
 func (c *Checker) updateCache(latestVersion string) error {
 	// Ensure cache directory exists

@@ -83,5 +83,4 @@ func run(execute func() error, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 1
 	}
-	return 0
 }
