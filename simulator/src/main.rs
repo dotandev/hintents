@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use std::env;
 use std::io::{self, Read};
 use tracing_subscriber::{fmt, EnvFilter};
+use colored::*;
 
 // Use types::SimulationRequest directly
 
@@ -71,6 +72,23 @@ fn send_error(msg: String) {
     };
     println!("{}", serde_json::to_string(&res).unwrap());
     std::process::exit(1);
+}
+
+
+fn print_diff(before: &Vec<String>, after: &Vec<String>) {
+    eprintln!("\n=== Simulation Diff ===");
+
+    for line in before {
+        if !after.contains(line) {
+            eprintln!("{}", format!("- {}", line).red());
+        }
+    }
+
+    for line in after {
+        if !before.contains(line) {
+            eprintln!("{}", format!("+ {}", line).green());
+        }
+    }
 }
 
 fn execute_operations(host: &Host, operations: &[Operation]) -> Result<Vec<String>, HostError> {
@@ -561,6 +579,7 @@ fn main() {
                 format!("Memory Bytes Used: {}", mem_bytes),
             ];
             final_logs.extend(exec_logs);
+            print_diff(&exec_logs, &final_logs);
 
             if let Some(required_fee) = mocked_required_fee_stroops(
                 &request,
