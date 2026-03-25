@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
@@ -27,10 +28,10 @@ func (e *DiagnosticEvent) ParseData() (xdr.ScVal, error) {
 	}
 	raw, err := base64.StdEncoding.DecodeString(e.Data)
 	if err != nil {
-		return val, fmt.Errorf("decode data base64: %w", err)
+		return val, errors.WrapUnmarshalFailed(err, "decode data base64")
 	}
 	if err := xdr.SafeUnmarshal(raw, &val); err != nil {
-		return val, fmt.Errorf("unmarshal data xdr: %w", err)
+		return val, errors.WrapUnmarshalFailed(err, "unmarshal data xdr")
 	}
 	return val, nil
 }
@@ -42,10 +43,10 @@ func (e *DiagnosticEvent) ParseTopics() ([]xdr.ScVal, error) {
 		var val xdr.ScVal
 		raw, err := base64.StdEncoding.DecodeString(t)
 		if err != nil {
-			return nil, fmt.Errorf("decode topic[%d] base64: %w", i, err)
+			return nil, errors.WrapUnmarshalFailed(err, fmt.Sprintf("decode topic[%d] base64", i))
 		}
 		if err := xdr.SafeUnmarshal(raw, &val); err != nil {
-			return nil, fmt.Errorf("unmarshal topic[%d] xdr: %w", i, err)
+			return nil, errors.WrapUnmarshalFailed(err, fmt.Sprintf("unmarshal topic[%d] xdr", i))
 		}
 		vals = append(vals, val)
 	}

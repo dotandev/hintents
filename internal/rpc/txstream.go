@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -111,7 +112,7 @@ type wsStreamer struct {
 func (s *wsStreamer) Stream(ctx context.Context, hash string) (<-chan TxStatus, error) {
 	conn, err := wsDialUpgrade(ctx, s.wsURL, s.client.token)
 	if err != nil {
-		return nil, fmt.Errorf("ws streamer: dial: %w", err)
+		return nil, errors.WrapRPCConnectionFailed(err)
 	}
 
 	ch := make(chan TxStatus, 8)
@@ -283,31 +284,31 @@ func (s *pollingStreamer) queryTxStatus(ctx context.Context, hash string) (TxSta
 
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
-		return TxStatus{}, fmt.Errorf("poll: marshal: %w", err)
+		return TxStatus{}, errors.WrapMarshalFailed(err)
 	}
 
 	targetURL := s.client.SorobanURL
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewBuffer(reqBytes))
 	if err != nil {
-		return TxStatus{}, fmt.Errorf("poll: create request: %w", err)
+		return TxStatus{}, errors.WrapRPCConnectionFailed(err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	httpResp, err := s.client.getHTTPClient().Do(httpReq)
 	if err != nil {
-		return TxStatus{}, fmt.Errorf("poll: http: %w", err)
+		return TxStatus{}, errors.WrapRPCConnectionFailed(err)
 	}
 	defer httpResp.Body.Close()
 
 	respBytes, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return TxStatus{}, fmt.Errorf("poll: read body: %w", err)
+		return TxStatus{}, errors.WrapUnmarshalFailed(err, "body read error")
 	}
 
 	var rpcResp jsonrpcResponse
 	if err := json.Unmarshal(respBytes, &rpcResp); err != nil {
-		return TxStatus{}, fmt.Errorf("poll: unmarshal: %w", err)
+		return TxStatus{}, errors.WrapUnmarshalFailed(err, string(respBytes))
 	}
 
 	if rpcResp.Error != nil {

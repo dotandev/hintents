@@ -14,15 +14,23 @@ const (
 	ErstValidationFailed ErstErrorCode = "VALIDATION_FAILED"
 	ErstConfigFailed     ErstErrorCode = "CONFIG_ERROR"
 	// RPC
-	ErstRPCConnectionFailed ErstErrorCode = "RPC_CONNECTION_FAILED"
-	ErstRPCTimeout          ErstErrorCode = "RPC_TIMEOUT"
-	ErstAllRPCFailed        ErstErrorCode = "ALL_RPC_FAILED"
-	ErstRPCError            ErstErrorCode = "RPC_ERROR"
+	ErstRPCConnectionFailed   ErstErrorCode = "RPC_CONNECTION_FAILED"
+	ErstRPCTimeout            ErstErrorCode = "RPC_TIMEOUT"
+	ErstAllRPCFailed          ErstErrorCode = "RPC_ALL_FAILED"
+	ErstRPCError              ErstErrorCode = "RPC_ERROR"
+	ErstRPCResponseTooLarge   ErstErrorCode = "RPC_RESPONSE_TOO_LARGE"
+	ErstRPCRequestTooLarge    ErstErrorCode = "RPC_REQUEST_TOO_LARGE"
+	ErstRPCRateLimitExceeded  ErstErrorCode = "RPC_RATE_LIMIT_EXCEEDED"
+	ErstRPCMarshalFailed      ErstErrorCode = "RPC_MARSHAL_FAILED"
+	ErstRPCUnmarshalFailed    ErstErrorCode = "RPC_UNMARSHAL_FAILED"
+	ErstTransactionNotFound   ErstErrorCode = "RPC_TRANSACTION_NOT_FOUND"
 	// Simulator
-	ErstSimulatorNotFound    ErstErrorCode = "SIMULATOR_NOT_FOUND"
-	ErstSimulationFailed     ErstErrorCode = "SIMULATION_FAILED"
-	ErstSimCrash             ErstErrorCode = "SIMULATOR_CRASH"
-	ErstSimulationLogicError ErstErrorCode = "SIMULATION_LOGIC_ERROR"
+	ErstSimulatorNotFound     ErstErrorCode = "SIM_BINARY_NOT_FOUND"
+	ErstSimulationFailed      ErstErrorCode = "SIM_EXECUTION_FAILED"
+	ErstSimCrash              ErstErrorCode = "SIM_PROCESS_CRASHED"
+	ErstSimulationLogicError  ErstErrorCode = "SIM_LOGIC_ERROR"
+	ErstSimMemoryLimitExceeded ErstErrorCode = "SIM_MEMORY_LIMIT_EXCEEDED"
+	ErstSimProtoUnsup         ErstErrorCode = "SIM_PROTOCOL_UNSUPPORTED"
 	// Ledger/Network
 	ErstLedgerNotFound  ErstErrorCode = "LEDGER_NOT_FOUND"
 	ErstLedgerArchived  ErstErrorCode = "LEDGER_ARCHIVED"
@@ -48,22 +56,9 @@ func (e *ErstError) Error() string {
 	return string(e.Code) + ": " + e.Message
 }
 
-func (e *ErstError) Unwrap() error {
-	return e.OrigErr
-}
-
 // Is allows errors.Is to match an ErstError against its corresponding sentinel
-// errors. It checks both the codeToSentinel map (for Code* constants) and the
-// errorCodeRegistry reverse mapping (for Erst* constants).
+// errors by checking the errorCodeRegistry reverse mapping.
 func (e *ErstError) Is(target error) bool {
-	// Check the Code* -> sentinel mapping
-	if sentinel, ok := codeToSentinel[e.Code]; ok {
-		if target == sentinel {
-			return true
-		}
-	}
-	// Check the reverse of errorCodeRegistry: if the target sentinel
-	// maps to the same ErstErrorCode as this error, it's a match.
 	if code, ok := errorCodeRegistry[target]; ok {
 		return code == e.Code
 	}
@@ -71,8 +66,10 @@ func (e *ErstError) Is(target error) bool {
 }
 
 // Registry mapping Go errors to ErstErrorCode
+// Registry mapping Go errors (sentinels) to ErstErrorCode.
+// This is the source of truth for both ClassifyError and ErstError.Is.
 var errorCodeRegistry = map[error]ErstErrorCode{
-	ErrTransactionNotFound:  ErstLedgerNotFound,
+	ErrTransactionNotFound:  ErstTransactionNotFound,
 	ErrRPCConnectionFailed:  ErstRPCConnectionFailed,
 	ErrRPCTimeout:           ErstRPCTimeout,
 	ErrAllRPCFailed:         ErstAllRPCFailed,
@@ -80,12 +77,12 @@ var errorCodeRegistry = map[error]ErstErrorCode{
 	ErrSimulationFailed:     ErstSimulationFailed,
 	ErrSimCrash:             ErstSimCrash,
 	ErrInvalidNetwork:       ErstInvalidNetwork,
-	ErrMarshalFailed:        ErstValidationFailed,
-	ErrUnmarshalFailed:      ErstValidationFailed,
+	ErrMarshalFailed:        ErstRPCMarshalFailed,
+	ErrUnmarshalFailed:      ErstRPCUnmarshalFailed,
 	ErrSimulationLogicError: ErstSimulationLogicError,
 	ErrRPCError:             ErstRPCError,
 	ErrValidationFailed:     ErstValidationFailed,
-	ErrProtocolUnsupported:  ErstValidationFailed,
+	ErrProtocolUnsupported:  ErstSimProtoUnsup,
 	ErrArgumentRequired:     ErstValidationFailed,
 	ErrAuditLogInvalid:      ErstValidationFailed,
 	ErrSessionNotFound:      ErstValidationFailed,
@@ -95,6 +92,8 @@ var errorCodeRegistry = map[error]ErstErrorCode{
 	ErrRateLimitExceeded:    ErstRateLimitExceeded,
 	ErrConfigFailed:         ErstConfigFailed,
 	ErrNetworkNotFound:      ErstNetworkNotFound,
+	ErrRPCResponseTooLarge:  ErstRPCResponseTooLarge,
+	ErrRPCRequestTooLarge:   ErstRPCRequestTooLarge,
 }
 
 // ClassifyError maps an error to an ErstError with a code and preserves the original error string.

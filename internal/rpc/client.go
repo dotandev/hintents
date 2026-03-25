@@ -487,11 +487,11 @@ func (c *Client) getTransactionAttempt(ctx context.Context, hash string) (txResp
 
 	// Fail fast if circuit breaker is open for this Horizon endpoint.
 	if !c.isHealthy(c.HorizonURL) {
-		err := fmt.Errorf("circuit breaker open for %s", c.HorizonURL)
+		err := errors.WrapRPCConnectionFailed(fmt.Errorf("circuit breaker open for %s", c.HorizonURL))
 		span.RecordError(err)
 		// Record failed remote node response
 		metrics.RecordRemoteNodeResponse(c.HorizonURL, string(c.Network), false, time.Since(startTime))
-		return nil, errors.WrapRPCConnectionFailed(err)
+		return nil, err
 	}
 
 	tx, err := c.Horizon.TransactionDetail(hash)
@@ -637,9 +637,9 @@ func (c *Client) getLedgerHeaderAttempt(ctx context.Context, sequence uint32) (l
 
 	// Fail fast if circuit breaker is open for this Horizon endpoint.
 	if !c.isHealthy(c.HorizonURL) {
-		err := fmt.Errorf("circuit breaker open for %s", c.HorizonURL)
+		err := errors.WrapRPCConnectionFailed(fmt.Errorf("circuit breaker open for %s", c.HorizonURL))
 		span.RecordError(err)
-		return nil, errors.WrapRPCConnectionFailed(err)
+		return nil, err
 	}
 
 	// Fetch ledger from Horizon
@@ -673,10 +673,10 @@ func (c *Client) handleLedgerError(err error, sequence uint32) error {
 		switch hErr.Problem.Status {
 		case 404:
 			logger.Logger.Warn("Ledger not found", "sequence", sequence, "status", 404)
-			return errors.WrapLedgerNotFound(sequence)
+			return errors.WrapLedgerNotFound(sequence, err)
 		case 410:
 			logger.Logger.Warn("Ledger archived", "sequence", sequence, "status", 410)
-			return errors.WrapLedgerArchived(sequence)
+			return errors.WrapLedgerArchived(sequence, err)
 		case 413:
 			logger.Logger.Warn("Response too large", "sequence", sequence, "status", 413)
 			return errors.WrapRPCResponseTooLarge(c.HorizonURL)
@@ -685,7 +685,7 @@ func (c *Client) handleLedgerError(err error, sequence uint32) error {
 			return errors.WrapRateLimitExceeded()
 		default:
 			logger.Logger.Error("Horizon error", "sequence", sequence, "status", hErr.Problem.Status, "detail", hErr.Problem.Detail)
-			return errors.WrapRPCError(c.HorizonURL, hErr.Problem.Detail, hErr.Problem.Status)
+			return errors.WrapRPCError(c.HorizonURL, err, hErr.Problem.Status)
 		}
 	}
 
@@ -899,7 +899,7 @@ func (c *Client) getLedgerEntriesConcurrent(ctx context.Context, batches [][]str
 
 	// If any batch failed, return error
 	if len(errs) > 0 {
-		return nil, fmt.Errorf("failed to fetch %d/%d batches: %v", len(errs), len(batches), errs[0])
+		return nil, errors.WrapAllRPCFailed(errs[0])
 	}
 
 	logger.Logger.Info("Concurrent ledger entry fetch completed",
@@ -946,9 +946,7 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 	startTime := time.Now()
 	// Fail fast if circuit breaker is open for this Soroban endpoint.
 	if !c.isHealthy(targetURL) {
-		err := errors.WrapRPCConnectionFailed(
-			fmt.Errorf("circuit breaker open for %s", targetURL),
-		)
+		err := errors.WrapRPCConnectionFailed(fmt.Errorf("circuit breaker open for %s", targetURL))
 		// Record failed remote node response
 		metrics.RecordRemoteNodeResponse(targetURL, string(c.Network), false, time.Since(startTime))
 
@@ -1010,7 +1008,7 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 	if rpcResp.Error != nil {
 		// Record failed remote node response
 		metrics.RecordRemoteNodeResponse(targetURL, string(c.Network), false, duration)
-		return nil, errors.WrapRPCError(targetURL, rpcResp.Error.Message, rpcResp.Error.Code)
+		return nil, errors.WrapRPCError(targetURL, stdErrors.New(rpcResp.Error.Message), rpcResp.Error.Code)
 	}
 
 	// Record successful remote node response
@@ -1032,7 +1030,7 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 
 	// Cryptographically verify all returned ledger entries
 	if err := VerifyLedgerEntries(keysToFetch, entries); err != nil {
-		return nil, fmt.Errorf("ledger entry verification failed: %w", err)
+		return nil, errors.WrapValidationError("ledger entry verification failed", err)
 	}
 
 	logger.Logger.Info("Ledger entries fetched",
@@ -1274,9 +1272,7 @@ func (c *Client) simulateTransactionAttempt(ctx context.Context, envelopeXdr str
 
 	// Fail fast if circuit breaker is open for this Soroban endpoint.
 	if !c.isHealthy(targetURL) {
-		return nil, errors.WrapRPCConnectionFailed(
-			fmt.Errorf("circuit breaker open for %s", targetURL),
-		)
+		return nil, errors.WrapRPCConnectionFailed(fmt.Errorf("circuit breaker open for %s", targetURL))
 	}
 
 	reqBody := SimulateTransactionRequest{
@@ -1323,7 +1319,7 @@ func (c *Client) simulateTransactionAttempt(ctx context.Context, envelopeXdr str
 	}
 
 	if rpcResp.Error != nil {
-		return nil, errors.WrapRPCError(targetURL, rpcResp.Error.Message, rpcResp.Error.Code)
+		return nil, errors.WrapRPCError(targetURL, stdErrors.New(rpcResp.Error.Message), rpcResp.Error.Code)
 	}
 
 	return &rpcResp, nil
@@ -1371,9 +1367,7 @@ func (c *Client) getHealthAttempt(ctx context.Context) (healthResp *GetHealthRes
 
 	// Fail fast if circuit breaker is open for this Soroban endpoint.
 	if !c.isHealthy(targetURL) {
-		return nil, errors.NewRPCError(errors.CodeRPCConnectionFailed,
-			fmt.Errorf("circuit breaker open for %s", targetURL),
-		)
+		return nil, errors.WrapRPCConnectionFailed(fmt.Errorf("circuit breaker open for %s", targetURL))
 	}
 
 	reqBody := GetHealthRequest{
@@ -1384,7 +1378,7 @@ func (c *Client) getHealthAttempt(ctx context.Context) (healthResp *GetHealthRes
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, errors.NewRPCError(errors.CodeRPCMarshalFailed, err)
+		return nil, errors.WrapMarshalFailed(err)
 	}
 
 	// Prefer SorobanURL but fall back to the currently active HorizonURL so that
@@ -1396,61 +1390,63 @@ func (c *Client) getHealthAttempt(ctx context.Context) (healthResp *GetHealthRes
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
-		return nil, errors.NewRPCError(errors.CodeRPCConnectionFailed, err)
+		return nil, errors.WrapRPCConnectionFailed(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.getHTTPClient().Do(req)
 	if err != nil {
-		return nil, errors.NewRPCError(errors.CodeRPCConnectionFailed, err)
+		return nil, errors.WrapRPCConnectionFailed(err)
 	}
 	defer resp.Body.Close()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, errors.NewRPCError(errors.CodeRPCUnmarshalFailed, err)
+		return nil, errors.WrapUnmarshalFailed(err, "body read error")
 	}
 
 	var rpcResp GetHealthResponse
 	if err := json.Unmarshal(respBytes, &rpcResp); err != nil {
-		return nil, errors.NewRPCError(errors.CodeRPCUnmarshalFailed, err)
+		return nil, errors.WrapUnmarshalFailed(err, string(respBytes))
 	}
 
 	if rpcResp.Error != nil {
-		return nil, errors.NewRPCError(errors.CodeRPCError, fmt.Errorf("rpc error from %s: %s (code %d)", targetURL, rpcResp.Error.Message, rpcResp.Error.Code))
+		return nil, errors.WrapRPCError(targetURL, stdErrors.New(rpcResp.Error.Message), rpcResp.Error.Code)
 	}
 
 	logger.Logger.Info("Soroban RPC health check successful", "url", targetURL, "status", rpcResp.Result.Status)
 	return &rpcResp, nil
 }
 
-//  Warn if RPC node is lagging behind current ledge
-
+// Warn if RPC node is lagging behind current ledge
 func (c *Client) postRequest(ctx context.Context, payload interface{}, result interface{}) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
+		return errors.WrapMarshalFailed(err)
 	}
 
 	// Use c.SorobanURL as the endpoint
 	req, err := http.NewRequestWithContext(ctx, "POST", c.SorobanURL, bytes.NewBuffer(data))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return errors.WrapRPCConnectionFailed(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	// Use the client's internal httpClient
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.getHTTPClient().Do(req)
 	if err != nil {
-		return fmt.Errorf("http request failed: %w", err)
+		return errors.WrapRPCConnectionFailed(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return errors.WrapRPCError(c.SorobanURL, nil, resp.StatusCode)
 	}
 
-	return json.NewDecoder(resp.Body).Decode(result)
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		return errors.WrapUnmarshalFailed(err, "body decode error")
+	}
+	return nil
 }
 
 // GetLatestLedgerSequence fetches the latest ledger from the node this client is configured for.

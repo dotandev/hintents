@@ -106,16 +106,16 @@ func (b *SimulationRequestBuilder) WithMockBaseFee(baseFee uint32) *SimulationRe
 func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 	// Check for any errors collected during building
 	if len(b.errors) > 0 {
-		return nil, errors.WrapValidationError(fmt.Sprintf("%v", b.errors))
+		return nil, errors.WrapValidationError(fmt.Sprintf("%v", b.errors), nil)
 	}
 
 	// Validate required fields
 	if b.envelopeXdr == "" {
-		return nil, errors.WrapValidationError("envelope XDR is required")
+		return nil, errors.WrapValidationError("envelope XDR is required", nil)
 	}
 
 	if b.resultMetaXdr == "" {
-		return nil, errors.WrapValidationError("result meta XDR is required")
+		return nil, errors.WrapValidationError("result meta XDR is required", nil)
 	}
 
 	// Build the request

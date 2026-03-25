@@ -33,19 +33,19 @@ func VerifyLedgerEntryHash(requestedKeyB64, returnedKeyB64 string) error {
 	if requestedKeyB64 != returnedKeyB64 {
 		return errors.WrapValidationError(
 			fmt.Sprintf("ledger entry key mismatch: requested %s but received %s",
-				requestedKeyB64, returnedKeyB64))
+				requestedKeyB64, returnedKeyB64), nil)
 	}
 
 	// Decode the base64-encoded XDR key
 	keyBytes, err := base64.StdEncoding.DecodeString(requestedKeyB64)
 	if err != nil {
-		return errors.WrapValidationError(fmt.Sprintf("failed to decode ledger key: %v", err))
+		return errors.WrapValidationError(fmt.Sprintf("failed to decode ledger key: %v", err), err)
 	}
 
 	// Unmarshal into LedgerKey to validate structure
 	var ledgerKey xdr.LedgerKey
 	if err := xdr.SafeUnmarshal(keyBytes, &ledgerKey); err != nil {
-		return errors.WrapValidationError(fmt.Sprintf("failed to unmarshal ledger key: %v", err))
+		return errors.WrapValidationError(fmt.Sprintf("failed to unmarshal ledger key: %v", err), err)
 	}
 
 	// Compute hash for logging/debugging
@@ -76,12 +76,12 @@ func VerifyLedgerEntries(requestedKeys []string, returnedEntries map[string]stri
 	for _, requestedKey := range requestedKeys {
 		if _, exists := returnedEntries[requestedKey]; !exists {
 			return errors.WrapValidationError(
-				fmt.Sprintf("requested ledger entry not found in response: %s", requestedKey))
+				fmt.Sprintf("requested ledger entry not found in response: %s", requestedKey), nil)
 		}
 
 		// Verify the hash of the returned entry
 		if err := VerifyLedgerEntryHash(requestedKey, requestedKey); err != nil {
-			return fmt.Errorf("verification failed for key %s: %w", requestedKey, err)
+			return errors.WrapValidationError("verification failed", err)
 		}
 	}
 

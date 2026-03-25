@@ -199,7 +199,7 @@ func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationRe
 	}()
 
 	if req == nil {
-		return nil, errors.NewSimErrorMsg(errors.CodeValidationFailed, "simulation request cannot be nil")
+		return nil, errors.WrapValidationError("simulation request cannot be nil", nil)
 	}
 
 	if req.MemoryLimit == nil {
@@ -356,7 +356,7 @@ func (r *Runner) trackCommand(cmd *exec.Cmd) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return fmt.Errorf("runner is closed")
+		return errors.WrapSimulatorNotFound("runner is closed")
 	}
 	r.activeCmds[cmd] = struct{}{}
 	return nil

@@ -139,7 +139,7 @@ func (e *MissingLedgerKeyError) Is(target error) bool {
 // Wrap functions for consistent error wrapping
 func WrapTransactionNotFound(err error) error {
 	return &ErstError{
-		Code:    ErstLedgerNotFound,
+		Code:    ErstTransactionNotFound,
 		Message: "transaction not found",
 		OrigErr: err,
 	}
@@ -153,17 +153,26 @@ func WrapRPCConnectionFailed(err error) error {
 	}
 }
 
-func WrapSimulatorNotFound(msg string) error {
+func WrapSimulatorNotFound(err error) error {
+	msg := "simulator binary not found"
+	if err != nil {
+		msg = err.Error()
+	}
 	return &ErstError{
 		Code:    ErstSimulatorNotFound,
 		Message: msg,
+		OrigErr: err,
 	}
 }
 
 func WrapSimulationFailed(err error, stderr string) error {
+	msg := "simulation failed"
+	if stderr != "" {
+		msg = fmt.Sprintf("simulation failed: %s", stderr)
+	}
 	return &ErstError{
 		Code:    ErstSimulationFailed,
-		Message: stderr,
+		Message: msg,
 		OrigErr: err,
 	}
 }
@@ -171,13 +180,13 @@ func WrapSimulationFailed(err error, stderr string) error {
 func WrapInvalidNetwork(network string) error {
 	return &ErstError{
 		Code:    ErstInvalidNetwork,
-		Message: network + ". Must be one of: testnet, mainnet, futurenet",
+		Message: fmt.Sprintf("invalid network: %s. Must be one of: testnet, mainnet, futurenet", network),
 	}
 }
 
 func WrapMarshalFailed(err error) error {
 	return &ErstError{
-		Code:    ErstValidationFailed,
+		Code:    ErstRPCMarshalFailed,
 		Message: "failed to marshal request",
 		OrigErr: err,
 	}
@@ -185,16 +194,17 @@ func WrapMarshalFailed(err error) error {
 
 func WrapUnmarshalFailed(err error, output string) error {
 	return &ErstError{
-		Code:    ErstValidationFailed,
+		Code:    ErstRPCUnmarshalFailed,
 		Message: output,
 		OrigErr: err,
 	}
 }
 
-func WrapSimulationLogicError(msg string) error {
+func WrapSimulationLogicError(msg string, err error) error {
 	return &ErstError{
 		Code:    ErstSimulationLogicError,
 		Message: msg,
+		OrigErr: err,
 	}
 }
 
@@ -206,17 +216,23 @@ func WrapRPCTimeout(err error) error {
 	}
 }
 
-func WrapAllRPCFailed() error {
+func WrapAllRPCFailed(err error) error {
 	return &ErstError{
 		Code:    ErstAllRPCFailed,
 		Message: "all RPC endpoints failed",
+		OrigErr: err,
 	}
 }
 
-func WrapRPCError(url string, msg string, code int) error {
+func WrapRPCError(url string, err error, code int) error {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
 	return &ErstError{
 		Code:    ErstRPCError,
 		Message: fmt.Sprintf("from %s: %s (code %d)", url, msg, code),
+		OrigErr: err,
 	}
 }
 
@@ -232,16 +248,17 @@ func WrapSimCrash(err error, stderr string) error {
 	}
 }
 
-func WrapValidationError(msg string) error {
+func WrapValidationError(msg string, err error) error {
 	return &ErstError{
 		Code:    ErstValidationFailed,
 		Message: msg,
+		OrigErr: err,
 	}
 }
 
 func WrapProtocolUnsupported(version uint32) error {
 	return &ErstError{
-		Code:    ErstValidationFailed,
+		Code:    ErstSimProtoUnsup,
 		Message: fmt.Sprintf("unsupported protocol version: %d", version),
 	}
 }
@@ -280,17 +297,19 @@ func WrapUnauthorized(msg string) error {
 	}
 }
 
-func WrapLedgerNotFound(sequence uint32) error {
+func WrapLedgerNotFound(sequence uint32, err error) error {
 	return &ErstError{
 		Code:    ErstLedgerNotFound,
 		Message: fmt.Sprintf("ledger %d not found (may be archived or not yet created)", sequence),
+		OrigErr: err,
 	}
 }
 
-func WrapLedgerArchived(sequence uint32) error {
+func WrapLedgerArchived(sequence uint32, err error) error {
 	return &ErstError{
 		Code:    ErstLedgerArchived,
 		Message: fmt.Sprintf("ledger %d has been archived and is no longer available", sequence),
+		OrigErr: err,
 	}
 }
 
@@ -305,6 +324,7 @@ func WrapConfigError(msg string, err error) error {
 	return &ErstError{
 		Code:    ErstConfigFailed,
 		Message: msg,
+		OrigErr: err,
 	}
 }
 
@@ -354,59 +374,7 @@ func WrapMissingLedgerKey(key string) error {
 	return &MissingLedgerKeyError{Key: key}
 }
 
-const (
-	// RPC origin
-	CodeRPCConnectionFailed  ErstErrorCode = "RPC_CONNECTION_FAILED"
-	CodeRPCTimeout           ErstErrorCode = "RPC_TIMEOUT"
-	CodeRPCAllFailed         ErstErrorCode = "RPC_ALL_ENDPOINTS_FAILED"
-	CodeRPCError             ErstErrorCode = "RPC_SERVER_ERROR"
-	CodeRPCResponseTooLarge  ErstErrorCode = "RPC_RESPONSE_TOO_LARGE"
-	CodeRPCRequestTooLarge   ErstErrorCode = "RPC_REQUEST_TOO_LARGE"
-	CodeRPCRateLimitExceeded ErstErrorCode = "RPC_RATE_LIMIT_EXCEEDED"
-	CodeRPCMarshalFailed     ErstErrorCode = "RPC_MARSHAL_FAILED"
-	CodeRPCUnmarshalFailed   ErstErrorCode = "RPC_UNMARSHAL_FAILED"
-	CodeTransactionNotFound  ErstErrorCode = "RPC_TRANSACTION_NOT_FOUND"
-	CodeLedgerNotFound       ErstErrorCode = "RPC_LEDGER_NOT_FOUND"
-	CodeLedgerArchived       ErstErrorCode = "RPC_LEDGER_ARCHIVED"
-
-	// Simulator origin
-	CodeSimNotFound            ErstErrorCode = "SIM_BINARY_NOT_FOUND"
-	CodeSimCrash               ErstErrorCode = "SIM_PROCESS_CRASHED"
-	CodeSimExecFailed          ErstErrorCode = "SIM_EXECUTION_FAILED"
-	CodeSimMemoryLimitExceeded ErstErrorCode = "ERR_MEMORY_LIMIT_EXCEEDED"
-	CodeSimLogicError          ErstErrorCode = "SIM_LOGIC_ERROR"
-	CodeSimProtoUnsup          ErstErrorCode = "SIM_PROTOCOL_UNSUPPORTED"
-
-	// Shared / general
-	CodeValidationFailed ErstErrorCode = "VALIDATION_FAILED"
-	CodeConfigFailed     ErstErrorCode = "CONFIG_ERROR"
-	CodeUnknown          ErstErrorCode = "UNKNOWN"
-)
-
-// codeToSentinel maps each ErstErrorCode to its corresponding sentinel error
-// so that errors.Is(erstErr, sentinel) works reliably.
-var codeToSentinel = map[ErstErrorCode]error{
-	CodeRPCConnectionFailed:    ErrRPCConnectionFailed,
-	CodeRPCTimeout:             ErrRPCTimeout,
-	CodeRPCAllFailed:           ErrAllRPCFailed,
-	CodeRPCError:               ErrRPCError,
-	CodeRPCResponseTooLarge:    ErrRPCResponseTooLarge,
-	CodeRPCRequestTooLarge:     ErrRPCRequestTooLarge,
-	CodeRPCRateLimitExceeded:   ErrRateLimitExceeded,
-	CodeRPCMarshalFailed:       ErrMarshalFailed,
-	CodeRPCUnmarshalFailed:     ErrUnmarshalFailed,
-	CodeTransactionNotFound:    ErrTransactionNotFound,
-	CodeLedgerNotFound:         ErrLedgerNotFound,
-	CodeLedgerArchived:         ErrLedgerArchived,
-	CodeSimNotFound:            ErrSimulatorNotFound,
-	CodeSimCrash:               ErrSimCrash,
-	CodeSimExecFailed:          ErrSimulationFailed,
-	CodeSimMemoryLimitExceeded: ErrSimulationFailed,
-	CodeSimLogicError:          ErrSimulationLogicError,
-	CodeSimProtoUnsup:          ErrProtocolUnsupported,
-	CodeValidationFailed:       ErrValidationFailed,
-	CodeConfigFailed:           ErrConfigFailed,
-}
+// --- Registry and internal helpers ---
 
 // newErstError is the internal constructor.
 func newErstError(code ErstErrorCode, message string, original error) *ErstError {

@@ -104,25 +104,24 @@ func TestErstError_Is_MatchesSentinel(t *testing.T) {
 		code     ErstErrorCode
 		sentinel error
 	}{
-		{"RPC connection failed", CodeRPCConnectionFailed, ErrRPCConnectionFailed},
-		{"RPC timeout", CodeRPCTimeout, ErrRPCTimeout},
-		{"All RPC failed", CodeRPCAllFailed, ErrAllRPCFailed},
-		{"RPC error", CodeRPCError, ErrRPCError},
-		{"RPC response too large", CodeRPCResponseTooLarge, ErrRPCResponseTooLarge},
-		{"RPC request too large", CodeRPCRequestTooLarge, ErrRPCRequestTooLarge},
-		{"Rate limit exceeded", CodeRPCRateLimitExceeded, ErrRateLimitExceeded},
-		{"Marshal failed", CodeRPCMarshalFailed, ErrMarshalFailed},
-		{"Unmarshal failed", CodeRPCUnmarshalFailed, ErrUnmarshalFailed},
-		{"Transaction not found", CodeTransactionNotFound, ErrTransactionNotFound},
-		{"Ledger not found", CodeLedgerNotFound, ErrLedgerNotFound},
-		{"Ledger archived", CodeLedgerArchived, ErrLedgerArchived},
-		{"Sim not found", CodeSimNotFound, ErrSimulatorNotFound},
-		{"Sim crash", CodeSimCrash, ErrSimCrash},
-		{"Sim exec failed", CodeSimExecFailed, ErrSimulationFailed},
-		{"Sim memory limit", CodeSimMemoryLimitExceeded, ErrSimulationFailed},
-		{"Sim logic error", CodeSimLogicError, ErrSimulationLogicError},
-		{"Sim proto unsupported", CodeSimProtoUnsup, ErrProtocolUnsupported},
-		{"Validation failed", CodeValidationFailed, ErrValidationFailed},
+		{"RPC connection failed", ErstRPCConnectionFailed, ErrRPCConnectionFailed},
+		{"RPC timeout", ErstRPCTimeout, ErrRPCTimeout},
+		{"All RPC failed", ErstAllRPCFailed, ErrAllRPCFailed},
+		{"RPC error", ErstRPCError, ErrRPCError},
+		{"RPC response too large", ErstRPCResponseTooLarge, ErrRPCResponseTooLarge},
+		{"RPC request too large", ErstRPCRequestTooLarge, ErrRPCRequestTooLarge},
+		{"Rate limit exceeded", ErstRPCRateLimitExceeded, ErrRateLimitExceeded},
+		{"Marshal failed", ErstRPCMarshalFailed, ErrMarshalFailed},
+		{"Unmarshal failed", ErstRPCUnmarshalFailed, ErrUnmarshalFailed},
+		{"Transaction not found", ErstTransactionNotFound, ErrTransactionNotFound},
+		{"Ledger not found", ErstLedgerNotFound, ErrLedgerNotFound},
+		{"Ledger archived", ErstLedgerArchived, ErrLedgerArchived},
+		{"Sim not found", ErstSimulatorNotFound, ErrSimulatorNotFound},
+		{"Sim crash", ErstSimCrash, ErrSimCrash},
+		{"Sim exec failed", ErstSimulationFailed, ErrSimulationFailed},
+		{"Sim logic error", ErstSimulationLogicError, ErrSimulationLogicError},
+		{"Sim proto unsupported", ErstSimProtoUnsup, ErrProtocolUnsupported},
+		{"Validation failed", ErstValidationFailed, ErrValidationFailed},
 	}
 
 	for _, tt := range tests {
@@ -135,7 +134,7 @@ func TestErstError_Is_MatchesSentinel(t *testing.T) {
 }
 
 func TestErstError_Is_DoesNotMatchWrongSentinel(t *testing.T) {
-	erstErr := NewSimError(CodeSimCrash, fmt.Errorf("crash"))
+	erstErr := NewSimError(ErstSimCrash, fmt.Errorf("crash"))
 
 	assert.False(t, errors.Is(erstErr, ErrRPCConnectionFailed))
 	assert.False(t, errors.Is(erstErr, ErrRateLimitExceeded))
@@ -143,7 +142,7 @@ func TestErstError_Is_DoesNotMatchWrongSentinel(t *testing.T) {
 }
 
 func TestErstError_Is_UnknownCodeMatchesNothing(t *testing.T) {
-	erstErr := NewSimError(CodeUnknown, fmt.Errorf("unknown"))
+	erstErr := NewSimError(ErstUnknown, fmt.Errorf("unknown"))
 
 	assert.False(t, errors.Is(erstErr, ErrSimCrash))
 	assert.False(t, errors.Is(erstErr, ErrRPCConnectionFailed))
@@ -152,7 +151,7 @@ func TestErstError_Is_UnknownCodeMatchesNothing(t *testing.T) {
 
 func TestErstError_Unwrap_ReturnsOrigErr(t *testing.T) {
 	origErr := fmt.Errorf("crash")
-	erstErr := NewSimError(CodeSimCrash, origErr)
+	erstErr := NewSimError(ErstSimCrash, origErr)
 	assert.Equal(t, origErr, erstErr.Unwrap(), "Unwrap should return the original error")
 }
 

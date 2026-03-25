@@ -55,18 +55,18 @@ Example:
 		} else if traceFile != "" {
 			filename = traceFile
 		} else {
-			return errors.WrapCliArgumentRequired("file")
+			return errors.WrapValidationError("file argument is required", nil)
 		}
 
 		// Check if file exists
 		if _, err := os.Stat(filename); os.IsNotExist(err) {
-			return errors.WrapValidationError(fmt.Sprintf("trace file not found: %s", filename))
+			return errors.WrapValidationError(fmt.Sprintf("trace file not found: %s", filename), nil)
 		}
 
 		// Load trace from file
 		data, err := os.ReadFile(filename)
 		if err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("failed to read trace file: %v", err))
+			return errors.WrapValidationError(fmt.Sprintf("failed to read trace file: %s", filename), err)
 		}
 
 		executionTrace, err := trace.FromJSON(data)

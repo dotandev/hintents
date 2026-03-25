@@ -52,9 +52,7 @@ var sandboxFundCmd = &cobra.Command{
 		account := args[0]
 
 		if err := validateSandboxAccount(account); err != nil {
-			return errors.WrapValidationError(
-				fmt.Sprintf("invalid Stellar account ID %q: %v", account, err),
-			)
+			return errors.WrapValidationError(fmt.Sprintf("invalid Stellar account ID %q", account), err)
 		}
 
 		amountXLM := sandboxAmountFlag
@@ -67,7 +65,7 @@ var sandboxFundCmd = &cobra.Command{
 		}
 
 		if err := ensureSandboxDir(filepath.Dir(sandboxStateFile)); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("failed to prepare sandbox directory: %v", err))
+			return errors.WrapValidationError("failed to prepare sandbox directory", err)
 		}
 
 		if err := writeSandboxFunding(account, amountXLM, sandboxStateFile); err != nil {
@@ -112,23 +110,19 @@ func writeSandboxFunding(account string, amountXLM uint64, path string) error {
 		// Best-effort parse; on failure we surface a clear error instead of
 		// silently discarding the existing file.
 		if err := json.Unmarshal(data, &override); err != nil {
-			return errors.WrapValidationError(
-				fmt.Sprintf("failed to parse existing sandbox state %s: %v", path, err),
-			)
+			return errors.WrapValidationError(fmt.Sprintf("failed to parse existing sandbox state %s", path), err)
 		}
 		if override.LedgerEntries == nil {
 			override.LedgerEntries = make(map[string]string)
 		}
 	} else if !os.IsNotExist(err) {
-		return errors.WrapValidationError(
-			fmt.Sprintf("failed to read existing sandbox state %s: %v", path, err),
-		)
+		return errors.WrapValidationError(fmt.Sprintf("failed to read existing sandbox state %s", path), err)
 	}
 
 	accountID := xdr.MustAddress(account)
 
 	if amountXLM > math.MaxInt64/sandboxStroopsPerXLM {
-		return errors.WrapValidationError("requested amount is too large for sandbox balance")
+		return errors.WrapValidationError("requested amount is too large for sandbox balance", nil)
 	}
 	amountStroops := int64(amountXLM * sandboxStroopsPerXLM)
 
@@ -167,11 +161,11 @@ func writeSandboxFunding(account string, amountXLM uint64, path string) error {
 
 	data, err := json.MarshalIndent(override, "", "  ")
 	if err != nil {
-		return errors.WrapValidationError(fmt.Sprintf("failed to serialize sandbox state: %v", err))
+		return errors.WrapValidationError("failed to serialize sandbox state", err)
 	}
 
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return errors.WrapValidationError(fmt.Sprintf("failed to write sandbox state %s: %v", path, err))
+		return errors.WrapValidationError(fmt.Sprintf("failed to write sandbox state %s", path), err)
 	}
 
 	return nil

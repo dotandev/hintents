@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dotandev/hintents/internal/config"
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +48,7 @@ var rpcHealthCmd = &cobra.Command{
 		}
 
 		if len(urls) == 0 {
-			return fmt.Errorf("no RPC URLs configured and none provided via --rpc")
+			return errors.WrapValidationError("no RPC URLs configured and none provided via --rpc", nil)
 		}
 
 		fmt.Println("[STATS] RPC Endpoint Status:")

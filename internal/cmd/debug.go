@@ -134,7 +134,7 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
 
 	client, err := rpc.NewClient(opts...)
 	if err != nil {
-		return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
+		return errors.WrapValidationError("failed to create client", err)
 	}
 
 	fmt.Printf("Debugging transaction: %s\n", txHash)
@@ -205,11 +205,11 @@ Local WASM Replay Mode:
 		}
 
 		if len(args) == 0 {
-			return errors.WrapValidationError("transaction hash is required when not using --wasm or --demo flag")
+			return errors.WrapValidationError("transaction hash is required when not using --wasm or --demo flag", nil)
 		}
 
 		if err := rpc.ValidateTransactionHash(args[0]); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("invalid transaction hash format: %v", err))
+			return errors.WrapValidationError("invalid transaction hash format", err)
 		}
 
 		if !cmd.Flags().Changed("network") {
@@ -290,7 +290,7 @@ Local WASM Replay Mode:
 				ServiceName: "erst",
 			})
 			if err != nil {
-				return errors.WrapValidationError(fmt.Sprintf("failed to initialize telemetry: %v", err))
+				return errors.WrapValidationError("failed to initialize telemetry", err)
 			}
 			defer cleanup()
 		}
@@ -342,7 +342,7 @@ Local WASM Replay Mode:
 
 		client, err := rpc.NewClient(opts...)
 		if err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
+			return errors.WrapValidationError("failed to create client", err)
 		}
 
 		if horizonURL == "" {
@@ -382,7 +382,7 @@ Local WASM Replay Mode:
 
 			if err != nil {
 				spinner.StopWithError("Failed to poll for transaction")
-				return errors.WrapSimulationLogicError(fmt.Sprintf("watch mode error: %v", err))
+				return errors.WrapSimulationLogicError("watch mode error", err)
 			}
 
 			if !result.Found {
@@ -410,7 +410,7 @@ Local WASM Replay Mode:
 		// Initialize Simulator Runner
 		runner, err := simulator.NewRunnerWithMockTime("", tracingEnabled, mockTimeFlag)
 		if err != nil {
-			return errors.WrapSimulatorNotFound(err.Error())
+			return errors.WrapSimulatorNotFound(err)
 		}
 
 		// Determine timestamps to simulate
@@ -438,7 +438,7 @@ Local WASM Replay Mode:
 				if snapshotFlag != "" {
 					snap, err := snapshot.Load(snapshotFlag)
 					if err != nil {
-						return errors.WrapValidationError(fmt.Sprintf("failed to load snapshot: %v", err))
+						return errors.WrapValidationError("failed to load snapshot", err)
 					}
 					ledgerEntries = snap.ToMap()
 					fmt.Printf("Loaded %d ledger entries from snapshot\n", len(ledgerEntries))
@@ -468,7 +468,7 @@ Local WASM Replay Mode:
 				// Apply protocol version override if specified
 				if protocolVersionFlag > 0 {
 					if err := simulator.Validate(protocolVersionFlag); err != nil {
-						return fmt.Errorf("invalid protocol version %d: %w", protocolVersionFlag, err)
+						return errors.WrapValidationError(fmt.Sprintf("invalid protocol version %d", protocolVersionFlag), err)
 					}
 					simReq.ProtocolVersion = &protocolVersionFlag
 					fmt.Printf("Using protocol version override: %d\n", protocolVersionFlag)
@@ -524,7 +524,7 @@ Local WASM Replay Mode:
 					}
 					compareClient, clientErr := rpc.NewClient(compareOpts...)
 					if clientErr != nil {
-						compareErr = errors.WrapValidationError(fmt.Sprintf("failed to create compare client: %v", clientErr))
+						compareErr = errors.WrapValidationError("failed to create compare client", clientErr)
 						return
 					}
 					if noCacheFlag {
@@ -580,7 +580,7 @@ Local WASM Replay Mode:
 		}
 
 		if lastSimResp == nil {
-			return errors.WrapSimulationLogicError("no simulation results generated")
+			return errors.WrapSimulationLogicError("no simulation results generated", nil)
 		}
 
 		// Analysis: Error Suggestions (Heuristic-based)
@@ -691,7 +691,7 @@ Local WASM Replay Mode:
 		// Publish signed audit trail to decentralised storage when requested.
 		if publishIPFSFlag || publishArweaveFlag {
 			if auditKeyFlag == "" {
-				return errors.WrapCliArgumentRequired("audit-key")
+				return errors.WrapValidationError("audit-key required for publishing", nil)
 			}
 			auditLog, auditErr := Generate(
 				txHash,
@@ -703,11 +703,11 @@ Local WASM Replay Mode:
 				nil,
 			)
 			if auditErr != nil {
-				return fmt.Errorf("failed to generate audit log: %w", auditErr)
+				return errors.WrapSimulationLogicError("failed to generate audit log", auditErr)
 			}
 			auditBytes, auditErr := json.Marshal(auditLog)
 			if auditErr != nil {
-				return fmt.Errorf("failed to marshal audit log: %w", auditErr)
+				return errors.WrapMarshalFailed(auditErr)
 			}
 
 			pub := decenstorage.New(decenstorage.PublishConfig{
@@ -773,7 +773,7 @@ func runLocalWasmReplay() error {
 
 	// Verify WASM file exists
 	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
-		return errors.WrapValidationError(fmt.Sprintf("WASM file not found: %s", wasmPath))
+		return errors.WrapValidationError(fmt.Sprintf("WASM file not found: %s", wasmPath), nil)
 	}
 
 	fmt.Printf("%s Local WASM Replay Mode\n", visualizer.Symbol("wrench"))
@@ -784,7 +784,7 @@ func runLocalWasmReplay() error {
 	// Create simulator runner
 	runner, err := simulator.NewRunner("", tracingEnabled)
 	if err != nil {
-		return errors.WrapSimulatorNotFound(err.Error())
+		return errors.WrapSimulatorNotFound(err)
 	}
 
 	// Create simulation request with local WASM
