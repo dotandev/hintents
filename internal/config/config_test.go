@@ -326,6 +326,43 @@ log_level = "trace"`
 	}
 }
 
+func TestLoadPrefersErstTomlInWorkingDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(originalWD)
+	}()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to chdir: %v", err)
+	}
+
+	content := `rpc_url = "https://local.testnet.example"
+network = "testnet"
+cache_path = ".erst/cache"`
+	if err := os.WriteFile("erst.toml", []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write erst.toml: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error loading erst.toml: %v", err)
+	}
+
+	if cfg.RpcUrl != "https://local.testnet.example" {
+		t.Errorf("expected RpcUrl from erst.toml, got %s", cfg.RpcUrl)
+	}
+	if cfg.Network != NetworkTestnet {
+		t.Errorf("expected Network testnet, got %s", cfg.Network)
+	}
+	if cfg.CachePath != ".erst/cache" {
+		t.Errorf("expected CachePath from erst.toml, got %s", cfg.CachePath)
+	}
+}
+
 func TestValidNetworks(t *testing.T) {
 	networks := []Network{NetworkPublic, NetworkTestnet, NetworkFuturenet, NetworkStandalone}
 

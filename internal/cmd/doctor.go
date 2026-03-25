@@ -257,8 +257,10 @@ func checkConfigTOML(verbose bool) DependencyStatus {
 	}
 
 	paths := []string{
+		"erst.toml",
 		".erst.toml",
 		filepath.Join(os.ExpandEnv("$HOME"), ".erst.toml"),
+		filepath.Join(os.ExpandEnv("$HOME"), "erst.toml"),
 		"/etc/erst/config.toml",
 	}
 

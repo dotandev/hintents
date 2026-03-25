@@ -317,8 +317,10 @@ type fileParser struct{}
 
 func (fileParser) Parse(cfg *Config) error {
 	paths := []string{
+		"erst.toml",
 		".erst.toml",
 		filepath.Join(os.ExpandEnv("$HOME"), ".erst.toml"),
+		filepath.Join(os.ExpandEnv("$HOME"), "erst.toml"),
 		"/etc/erst/config.toml",
 	}
 

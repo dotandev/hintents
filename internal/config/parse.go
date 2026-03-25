@@ -75,8 +75,10 @@ func splitAndTrim(s string) []string {
 
 func (c *Config) loadFromFile() error {
 	paths := []string{
+		"erst.toml",
 		".erst.toml",
 		filepath.Join(os.ExpandEnv("$HOME"), ".erst.toml"),
+		filepath.Join(os.ExpandEnv("$HOME"), "erst.toml"),
 		"/etc/erst/config.toml",
 	}
 
