@@ -409,6 +409,7 @@ mod contract_execution_tests {
             envelope_xdr: String::new(),
             result_meta_xdr: String::new(),
             ledger_entries: None,
+            storage_override: None,
             contract_wasm: None,
             wasm_path: None,
             no_cache: false,
@@ -424,6 +425,7 @@ mod contract_execution_tests {
             resource_calibration: None,
             memory_limit: None,
             restore_preamble: None,
+            include_linear_memory: false,
         };
         let result = execute_operations(&host, &operations, &request, None, &mut coverage);
         assert!(result.is_ok());

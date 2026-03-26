@@ -50,6 +50,7 @@ mod restore_preamble_tests {
             envelope_xdr: "".to_string(),
             result_meta_xdr: "".to_string(),
             ledger_entries: None,
+            storage_override: None,
             contract_wasm: None,
             wasm_path: None,
             no_cache: false,

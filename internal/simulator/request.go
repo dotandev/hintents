@@ -18,6 +18,7 @@ type SimulationRequest struct {
 	MemoryLimit      *uint64           `json:"memory_limit,omitempty"`
 	EnableCoverage   bool              `json:"enable_coverage,omitempty"`
 	CoverageLCOVPath *string           `json:"coverage_lcov_path,omitempty"`
+	StorageOverride  map[string]string `json:"storage_override,omitempty"`
 
 	RestorePreamble map[string]interface{} `json:"restore_preamble,omitempty"`
 

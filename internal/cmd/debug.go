@@ -67,6 +67,7 @@ var (
 	mockGasPriceFlag    uint64
 	asyncFlag           bool
 	asyncTimeoutFlag    int
+	storageOverrideFlag string
 )
 
 // DebugCommand holds dependencies for the debug command
@@ -463,6 +464,16 @@ Local WASM Replay Mode:
 					LedgerEntries:   ledgerEntries,
 					Timestamp:       ts,
 					ProtocolVersion: nil,
+				}
+
+				// Load storage override for what-if analysis
+				if storageOverrideFlag != "" {
+					entries, err := loadOverrideState(storageOverrideFlag)
+					if err != nil {
+						return fmt.Errorf("failed to load storage override: %w", err)
+					}
+					simReq.StorageOverride = entries
+					fmt.Printf("Loaded storage override from: %s (%d entries)\n", storageOverrideFlag, len(entries))
 				}
 
 				// Apply protocol version override if specified
@@ -1144,6 +1155,7 @@ func init() {
 	debugCmd.Flags().StringVar(&themeFlag, "theme", "", "Color theme override (dark, light, none)")
 	debugCmd.Flags().Int64Var(&mockTimeFlag, "mock-time", 0, "Override ledger timestamp for simulation (Unix seconds)")
 	debugCmd.Flags().Uint32Var(&protocolVersionFlag, "protocol-version", 0, "Override protocol version for simulation")
+	debugCmd.Flags().StringVar(&storageOverrideFlag, "storage-override", "", "JSON file with storage entries to override (what-if analysis)")
 
 	rootCmd.AddCommand(debugCmd)
 }

@@ -495,48 +495,54 @@ fn main() {
 
     let mut loaded_entries_count = 0;
 
-    // Populate Host Storage
+    // Helper function to validate storage override entries (parses but doesn't inject)
+    let validate_entry = |key_xdr: &str, entry_xdr: &str| -> Result<(), String> {
+        let key_bytes = base64::engine::general_purpose::STANDARD
+            .decode(key_xdr)
+            .map_err(|e| format!("Failed to decode LedgerKey Base64: {}", e))?;
+
+        let entry_bytes = base64::engine::general_purpose::STANDARD
+            .decode(entry_xdr)
+            .map_err(|e| format!("Failed to decode LedgerEntry Base64: {}", e))?;
+
+        soroban_env_host::xdr::LedgerKey::from_xdr(
+            &key_bytes,
+            soroban_env_host::xdr::Limits::none(),
+        )
+        .map_err(|e| format!("Failed to parse LedgerKey XDR: {}", e))?;
+
+        soroban_env_host::xdr::LedgerEntry::from_xdr(
+            &entry_bytes,
+            soroban_env_host::xdr::Limits::none(),
+        )
+        .map_err(|e| format!("Failed to parse LedgerEntry XDR: {}", e))?;
+
+        Ok(())
+    };
+
+    // Populate Host Storage from ledger_entries
     if let Some(entries) = &request.ledger_entries {
         for (key_xdr, entry_xdr) in entries {
-            match base64::engine::general_purpose::STANDARD.decode(key_xdr) {
-                Ok(b) => match soroban_env_host::xdr::LedgerKey::from_xdr(
-                    b,
-                    soroban_env_host::xdr::Limits::none(),
-                ) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        send_error(format!("Failed to parse LedgerKey XDR: {}", e));
-                        return;
-                    }
-                },
-                Err(e) => {
-                    send_error(format!("Failed to decode LedgerKey Base64: {}", e));
-                    return;
-                }
-            };
-
-            match base64::engine::general_purpose::STANDARD.decode(entry_xdr) {
-                Ok(b) => match soroban_env_host::xdr::LedgerEntry::from_xdr(
-                    b,
-                    soroban_env_host::xdr::Limits::none(),
-                ) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        send_error(format!("Failed to parse LedgerEntry XDR: {}", e));
-                        return;
-                    }
-                },
-                Err(e) => {
-                    send_error(format!("Failed to decode LedgerEntry Base64: {}", e));
-                    return;
-                }
-            };
-
-            // TODO: Inject into host storage.
-            // For MVP, we verify we can parse them.
-            eprintln!("Parsed Ledger Entry from XDR successfully");
+            if let Err(e) = validate_entry(key_xdr, entry_xdr) {
+                send_error(e);
+                return;
+            }
             loaded_entries_count += 1;
         }
+        eprintln!("Validated {} ledger entries", loaded_entries_count);
+    }
+
+    // Apply storage overrides (these take precedence over ledger_entries)
+    if let Some(overrides) = &request.storage_override {
+        let mut override_count = 0;
+        for (key_xdr, entry_xdr) in overrides {
+            if let Err(e) = validate_entry(key_xdr, entry_xdr) {
+                send_error(format!("Storage override error: {}", e));
+                return;
+            }
+            override_count += 1;
+        }
+        eprintln!("Validated {} storage overrides", override_count);
     }
 
     let operations = match &envelope {
