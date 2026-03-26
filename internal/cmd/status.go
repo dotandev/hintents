@@ -19,11 +19,12 @@ import (
 
 var statusFixFlag bool
 
-var statusCmd = &cobra.Command{
-	Use:     "status",
-	GroupID: "utility",
-	Short:   "Check protocol registration and system health",
-	Long: `Inspect the health of the erst:// protocol handler registration.
+func NewStatusCmd() *cobra.Command {
+	statusCmd := &cobra.Command{
+		Use:     "status",
+		GroupID: "utility",
+		Short:   "Check protocol registration and system health",
+		Long: `Inspect the health of the erst:// protocol handler registration.
 
 This command verifies that the custom URI scheme (erst://) is properly
 registered with the operating system so that deep links work correctly.
@@ -34,13 +35,16 @@ On failure it can interactively offer to repair the registration:
   - Linux:   rewrites ~/.local/share/applications/erst-protocol.desktop
 
 Use --fix to skip the interactive prompt and repair automatically.`,
-	Example: `  # Check protocol registration status
+		Example: `  # Check protocol registration status
   erst status
 
   # Automatically repair without prompting
   erst status --fix`,
-	Args: cobra.NoArgs,
-	RunE: runStatus,
+		Args: cobra.NoArgs,
+		RunE: runStatus,
+	}
+	statusCmd.Flags().BoolVar(&statusFixFlag, "fix", false, "Automatically repair broken protocol registration without prompting")
+	return statusCmd
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
@@ -336,9 +340,4 @@ func promptYesNo(cmd *cobra.Command, prompt string) bool {
 
 	answer := strings.TrimSpace(strings.ToLower(input))
 	return answer == "y" || answer == "yes"
-}
-
-func init() {
-	statusCmd.Flags().BoolVar(&statusFixFlag, "fix", false, "Automatically repair broken protocol registration without prompting")
-	rootCmd.AddCommand(statusCmd)
 }

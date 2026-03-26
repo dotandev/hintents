@@ -25,11 +25,12 @@ var (
 	shellInitState   string
 )
 
-var shellCmd = &cobra.Command{
-	Use:     "shell",
-	GroupID: "development",
-	Short:   "Start an interactive shell for contract invocations",
-	Long: `Start a persistent interactive shell where you can invoke multiple contracts
+func NewShellCmd() *cobra.Command {
+	shellCmd := &cobra.Command{
+		Use:     "shell",
+		GroupID: "development",
+		Short:   "Start an interactive shell for contract invocations",
+		Long: `Start a persistent interactive shell where you can invoke multiple contracts
 consecutively without losing the local ledger state between commands.
 
 The shell maintains a stateful ledger that persists across invocations, allowing
@@ -48,26 +49,23 @@ Shell Commands:
   state reset                                   Reset to initial state
   help                                          Show available commands
   exit                                          Exit the shell`,
-	Args: cobra.NoArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		// Validate network flag
-		switch rpc.Network(shellNetworkFlag) {
-		case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
-			return nil
-		default:
-			return errors.WrapInvalidNetwork(shellNetworkFlag)
-		}
-	},
-	RunE: runShell,
-}
-
-func init() {
+		Args: cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			// Validate network flag
+			switch rpc.Network(shellNetworkFlag) {
+			case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
+				return nil
+			default:
+				return errors.WrapInvalidNetwork(shellNetworkFlag)
+			}
+		},
+		RunE: runShell,
+	}
 	shellCmd.Flags().StringVarP(&shellNetworkFlag, "network", "n", string(rpc.Testnet), "Stellar network to use (testnet, mainnet, futurenet)")
 	shellCmd.Flags().StringVar(&shellRPCURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
 	shellCmd.Flags().StringVar(&shellRPCToken, "rpc-token", "", "RPC authentication token")
 	shellCmd.Flags().StringVar(&shellInitState, "init-state", "", "Initial ledger state file (JSON)")
-
-	rootCmd.AddCommand(shellCmd)
+	return shellCmd
 }
 
 func runShell(cmd *cobra.Command, args []string) error {

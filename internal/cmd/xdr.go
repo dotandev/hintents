@@ -18,12 +18,21 @@ var (
 	xdrType   string
 )
 
-var xdrCmd = &cobra.Command{
-	Use:     "xdr",
-	GroupID: "utility",
-	Short:   "Format and decode XDR data",
-	Long:    `Decode and format XDR structures to JSON or table format for easy inspection.`,
-	RunE:    xdrExec,
+func NewXdrCmd() *cobra.Command {
+	xdrCmd := &cobra.Command{
+		Use:     "xdr",
+		GroupID: "utility",
+		Short:   "Format and decode XDR data",
+		Long:    `Decode and format XDR structures to JSON or table format for easy inspection.`,
+		RunE:    xdrExec,
+	}
+	xdrCmd.Flags().StringVar(&xdrData, "data", "", "Base64-encoded XDR data to decode")
+	xdrCmd.Flags().StringVar(&xdrFormat, "format", "json", "Output format: json or table")
+	xdrCmd.Flags().StringVar(&xdrType, "type", "ledger-entry", "XDR type: ledger-entry, diagnostic-event")
+	_ = xdrCmd.MarkFlagRequired("data")
+	_ = xdrCmd.RegisterFlagCompletionFunc("format", completeXDRFormatFlag)
+	_ = xdrCmd.RegisterFlagCompletionFunc("type", completeXDRTypeFlag)
+	return xdrCmd
 }
 
 func xdrExec(cmd *cobra.Command, args []string) error {
@@ -65,17 +74,4 @@ func xdrExec(cmd *cobra.Command, args []string) error {
 
 	fmt.Println(result)
 	return nil
-}
-
-func init() {
-	rootCmd.AddCommand(xdrCmd)
-
-	xdrCmd.Flags().StringVar(&xdrData, "data", "", "Base64-encoded XDR data to decode")
-	xdrCmd.Flags().StringVar(&xdrFormat, "format", "json", "Output format: json or table")
-	xdrCmd.Flags().StringVar(&xdrType, "type", "ledger-entry", "XDR type: ledger-entry, diagnostic-event")
-
-	_ = xdrCmd.MarkFlagRequired("data")
-
-	_ = xdrCmd.RegisterFlagCompletionFunc("format", completeXDRFormatFlag)
-	_ = xdrCmd.RegisterFlagCompletionFunc("type", completeXDRTypeFlag)
 }

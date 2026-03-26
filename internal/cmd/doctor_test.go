@@ -174,7 +174,8 @@ func TestCheckRPC(t *testing.T) {
 }
 
 func TestDoctorCommand(t *testing.T) {
-	// Test that the command is registered
+	// Test that the command is properly initialized via factory
+	doctorCmd := NewDoctorCmd()
 	if doctorCmd == nil {
 		t.Fatal("doctorCmd should not be nil")
 	}

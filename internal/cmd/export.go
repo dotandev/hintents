@@ -21,62 +21,71 @@ var decodeSnapshotFlag string
 var decodeOffsetFlag int
 var decodeLengthFlag int
 
-var exportCmd = &cobra.Command{
-	Use:     "export",
-	GroupID: "utility",
-	Short:   "Export data from the current session",
-	Long:    `Export debugging data, such as state snapshots, from the currently active session.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if exportSnapshotFlag == "" {
-			return errors.WrapCliArgumentRequired("snapshot")
-		}
-
-		// Get current session
-		data := GetCurrentSession()
-		if data == nil {
-			return errors.WrapSimulationLogicError("no active session. Run 'erst debug <tx-hash>' first")
-		}
-
-		// Unwrap simulation request to get ledger entries
-		var simReq simulator.SimulationRequest
-		if err := json.Unmarshal([]byte(data.SimRequestJSON), &simReq); err != nil {
-			return errors.WrapUnmarshalFailed(err, "session data")
-		}
-
-		if len(simReq.LedgerEntries) == 0 {
-			fmt.Println("Warning: No ledger entries found in the current session.")
-		}
-
-		var memoryDump []byte
-		if exportIncludeMemoryFlag {
-			var simResp simulator.SimulationResponse
-			if err := json.Unmarshal([]byte(data.SimResponseJSON), &simResp); err != nil {
-				return errors.WrapUnmarshalFailed(err, "simulation response")
+func NewExportCmd() *cobra.Command {
+	exportCmd := &cobra.Command{
+		Use:     "export",
+		GroupID: "utility",
+		Short:   "Export data from the current session",
+		Long:    `Export debugging data, such as state snapshots, from the currently active session.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if exportSnapshotFlag == "" {
+				return errors.WrapCliArgumentRequired("snapshot")
 			}
-			if simResp.LinearMemoryDump == "" {
-				fmt.Println("Warning: Simulator response does not include a linear memory dump.")
-			} else {
-				decoded, err := base64.StdEncoding.DecodeString(simResp.LinearMemoryDump)
-				if err != nil {
-					return errors.WrapValidationError(fmt.Sprintf("failed to decode simulator linear memory dump: %v", err))
+
+			// Get current session
+			data := GetCurrentSession()
+			if data == nil {
+				return errors.WrapSimulationLogicError("no active session. Run 'erst debug <tx-hash>' first")
+			}
+
+			// Unwrap simulation request to get ledger entries
+			var simReq simulator.SimulationRequest
+			if err := json.Unmarshal([]byte(data.SimRequestJSON), &simReq); err != nil {
+				return errors.WrapUnmarshalFailed(err, "session data")
+			}
+
+			if len(simReq.LedgerEntries) == 0 {
+				fmt.Println("Warning: No ledger entries found in the current session.")
+			}
+
+			var memoryDump []byte
+			if exportIncludeMemoryFlag {
+				var simResp simulator.SimulationResponse
+				if err := json.Unmarshal([]byte(data.SimResponseJSON), &simResp); err != nil {
+					return errors.WrapUnmarshalFailed(err, "simulation response")
 				}
-				memoryDump = decoded
+				if simResp.LinearMemoryDump == "" {
+					fmt.Println("Warning: Simulator response does not include a linear memory dump.")
+				} else {
+					decoded, err := base64.StdEncoding.DecodeString(simResp.LinearMemoryDump)
+					if err != nil {
+						return errors.WrapValidationError(fmt.Sprintf("failed to decode simulator linear memory dump: %v", err))
+					}
+					memoryDump = decoded
+				}
 			}
-		}
 
-		snap := snapshot.FromMapWithOptions(simReq.LedgerEntries, snapshot.BuildOptions{LinearMemory: memoryDump})
+			snap := snapshot.FromMapWithOptions(simReq.LedgerEntries, snapshot.BuildOptions{LinearMemory: memoryDump})
 
-		// Save
-		if err := snapshot.Save(exportSnapshotFlag, snap); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("failed to save snapshot: %v", err))
-		}
+			// Save
+			if err := snapshot.Save(exportSnapshotFlag, snap); err != nil {
+				return errors.WrapValidationError(fmt.Sprintf("failed to save snapshot: %v", err))
+			}
 
-		fmt.Printf("Snapshot exported to %s (%d entries)\n", exportSnapshotFlag, len(snap.LedgerEntries))
-		if snap.LinearMemory != "" {
-			fmt.Printf("Included linear memory dump: %d bytes (base64)\n", len(memoryDump))
-		}
-		return nil
-	},
+			fmt.Printf("Snapshot exported to %s (%d entries)\n", exportSnapshotFlag, len(snap.LedgerEntries))
+			if snap.LinearMemory != "" {
+				fmt.Printf("Included linear memory dump: %d bytes (base64)\n", len(memoryDump))
+			}
+			return nil
+		},
+	}
+	exportCmd.Flags().StringVar(&exportSnapshotFlag, "snapshot", "", "Output file for JSON snapshot")
+	exportCmd.Flags().BoolVar(&exportIncludeMemoryFlag, "include-memory", false, "Include Wasm linear memory dump from simulation response when available")
+	exportDecodeMemoryCmd.Flags().StringVar(&decodeSnapshotFlag, "snapshot", "", "Snapshot file that contains linear memory")
+	exportDecodeMemoryCmd.Flags().IntVar(&decodeOffsetFlag, "offset", 0, "Start offset in bytes")
+	exportDecodeMemoryCmd.Flags().IntVar(&decodeLengthFlag, "length", 256, "Number of bytes to print")
+	exportCmd.AddCommand(exportDecodeMemoryCmd)
+	return exportCmd
 }
 
 var exportDecodeMemoryCmd = &cobra.Command{
@@ -144,18 +153,6 @@ var exportDecodeMemoryCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	exportCmd.Flags().StringVar(&exportSnapshotFlag, "snapshot", "", "Output file for JSON snapshot")
-	exportCmd.Flags().BoolVar(&exportIncludeMemoryFlag, "include-memory", false, "Include Wasm linear memory dump from simulation response when available")
-
-	exportDecodeMemoryCmd.Flags().StringVar(&decodeSnapshotFlag, "snapshot", "", "Snapshot file that contains linear memory")
-	exportDecodeMemoryCmd.Flags().IntVar(&decodeOffsetFlag, "offset", 0, "Start offset in bytes")
-	exportDecodeMemoryCmd.Flags().IntVar(&decodeLengthFlag, "length", 256, "Number of bytes to print")
-
-	exportCmd.AddCommand(exportDecodeMemoryCmd)
-	rootCmd.AddCommand(exportCmd)
 }
 
 func extractLinearMemoryBase64(simResponseJSON string) (string, error) {

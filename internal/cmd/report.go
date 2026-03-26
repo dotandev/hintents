@@ -21,11 +21,12 @@ var (
 	reportFile   string
 )
 
-var reportCmd = &cobra.Command{
-	Use:     "report",
-	GroupID: "utility",
-	Short:   "Generate debugging reports from traces",
-	Long: `Generate professional PDF or HTML reports from execution traces.
+func NewReportCmd() *cobra.Command {
+	reportCmd := &cobra.Command{
+		Use:     "report",
+		GroupID: "utility",
+		Short:   "Generate debugging reports from traces",
+		Long: `Generate professional PDF or HTML reports from execution traces.
 
 Reports include:
   - Executive summary with key findings
@@ -38,7 +39,13 @@ Examples:
   erst report --file trace.json --format html --output reports/
   erst report --file trace.json --format pdf --output reports/
   erst report --file trace.json --format html,pdf --output reports/`,
-	RunE: reportExec,
+		RunE: reportExec,
+	}
+	reportCmd.Flags().StringVar(&reportFormat, "format", "html", "Output format: html, pdf, json, or html,pdf")
+	reportCmd.Flags().StringVar(&reportOutput, "output", ".", "Output directory for reports")
+	reportCmd.Flags().StringVar(&reportFile, "file", "", "Trace file to analyze")
+	_ = reportCmd.RegisterFlagCompletionFunc("format", completeReportFormatFlag)
+	return reportCmd
 }
 
 func reportExec(cmd *cobra.Command, args []string) error {
@@ -213,14 +220,4 @@ func calculateRiskScore(states []trace.ExecutionState) float64 {
 
 	errorCount := countErrors(states)
 	return (float64(errorCount) / float64(len(states))) * 100
-}
-
-func init() {
-	reportCmd.Flags().StringVar(&reportFormat, "format", "html", "Output format: html, pdf, json, or html,pdf")
-	reportCmd.Flags().StringVar(&reportOutput, "output", ".", "Output directory for reports")
-	reportCmd.Flags().StringVar(&reportFile, "file", "", "Trace file to analyze")
-
-	_ = reportCmd.RegisterFlagCompletionFunc("format", completeReportFormatFlag)
-
-	rootCmd.AddCommand(reportCmd)
 }

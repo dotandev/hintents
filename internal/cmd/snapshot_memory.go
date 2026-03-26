@@ -18,47 +18,53 @@ var (
 	snapshotMemoryLengthFlag int
 )
 
-var snapshotMemoryCmd = &cobra.Command{
-	Use:     "snapshot-memory",
-	GroupID: "utility",
-	Short:   "Decode and inspect linear memory from a snapshot",
-	Long:    `Decode a snapshot's base64 memory dump and print human-readable segments.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if snapshotMemoryFileFlag == "" {
-			return errors.WrapCliArgumentRequired("snapshot")
-		}
+func NewSnapshotMemoryCmd() *cobra.Command {
+	snapshotMemoryCmd := &cobra.Command{
+		Use:     "snapshot-memory",
+		GroupID: "utility",
+		Short:   "Decode and inspect linear memory from a snapshot",
+		Long:    `Decode a snapshot's base64 memory dump and print human-readable segments.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if snapshotMemoryFileFlag == "" {
+				return errors.WrapCliArgumentRequired("snapshot")
+			}
 
-		snap, err := snapshot.Load(snapshotMemoryFileFlag)
-		if err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("failed to load snapshot: %v", err))
-		}
+			snap, err := snapshot.Load(snapshotMemoryFileFlag)
+			if err != nil {
+				return errors.WrapValidationError(fmt.Sprintf("failed to load snapshot: %v", err))
+			}
 
-		mem, err := snap.DecodeLinearMemory()
-		if err != nil {
-			return errors.WrapValidationError(err.Error())
-		}
-		if len(mem) == 0 {
-			return errors.WrapValidationError("snapshot does not contain linear memory dump")
-		}
+			mem, err := snap.DecodeLinearMemory()
+			if err != nil {
+				return errors.WrapValidationError(err.Error())
+			}
+			if len(mem) == 0 {
+				return errors.WrapValidationError("snapshot does not contain linear memory dump")
+			}
 
-		if snapshotMemoryOffsetFlag < 0 || snapshotMemoryOffsetFlag > len(mem) {
-			return errors.WrapValidationError("offset out of bounds")
-		}
+			if snapshotMemoryOffsetFlag < 0 || snapshotMemoryOffsetFlag > len(mem) {
+				return errors.WrapValidationError("offset out of bounds")
+			}
 
-		length := snapshotMemoryLengthFlag
-		if length <= 0 {
-			length = 256
-		}
-		end := snapshotMemoryOffsetFlag + length
-		if end > len(mem) {
-			end = len(mem)
-		}
+			length := snapshotMemoryLengthFlag
+			if length <= 0 {
+				length = 256
+			}
+			end := snapshotMemoryOffsetFlag + length
+			if end > len(mem) {
+				end = len(mem)
+			}
 
-		fmt.Printf("Linear memory bytes: %d\n", len(mem))
-		fmt.Printf("Showing range [%d:%d]\n", snapshotMemoryOffsetFlag, end)
-		printMemorySegment(mem[snapshotMemoryOffsetFlag:end], snapshotMemoryOffsetFlag)
-		return nil
-	},
+			fmt.Printf("Linear memory bytes: %d\n", len(mem))
+			fmt.Printf("Showing range [%d:%d]\n", snapshotMemoryOffsetFlag, end)
+			printMemorySegment(mem[snapshotMemoryOffsetFlag:end], snapshotMemoryOffsetFlag)
+			return nil
+		},
+	}
+	snapshotMemoryCmd.Flags().StringVar(&snapshotMemoryFileFlag, "snapshot", "", "Snapshot JSON file to inspect")
+	snapshotMemoryCmd.Flags().IntVar(&snapshotMemoryOffsetFlag, "offset", 0, "Byte offset to start printing")
+	snapshotMemoryCmd.Flags().IntVar(&snapshotMemoryLengthFlag, "length", 256, "Number of bytes to print")
+	return snapshotMemoryCmd
 }
 
 func printMemorySegment(data []byte, baseOffset int) {
@@ -86,11 +92,4 @@ func printMemorySegment(data []byte, baseOffset int) {
 
 		fmt.Printf("%08x  %s  |%s|\n", baseOffset+i, strings.Join(hexParts, " "), string(ascii))
 	}
-}
-
-func init() {
-	snapshotMemoryCmd.Flags().StringVar(&snapshotMemoryFileFlag, "snapshot", "", "Snapshot JSON file to inspect")
-	snapshotMemoryCmd.Flags().IntVar(&snapshotMemoryOffsetFlag, "offset", 0, "Byte offset to start printing")
-	snapshotMemoryCmd.Flags().IntVar(&snapshotMemoryLengthFlag, "length", 256, "Number of bytes to print")
-	rootCmd.AddCommand(snapshotMemoryCmd)
 }

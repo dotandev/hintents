@@ -25,11 +25,12 @@ var (
 	initInteractiveFlag       bool
 )
 
-var initCmd = &cobra.Command{
-	Use:     "init [directory]",
-	GroupID: "development",
-	Short:   "Scaffold a local Erst debugging workspace",
-	Long: `Create project-local scaffolding for Erst debugging workflows.
+func NewInitCmd() *cobra.Command {
+	initCmd := &cobra.Command{
+		Use:     "init [directory]",
+		GroupID: "development",
+		Short:   "Scaffold a local Erst debugging workspace",
+		Long: `Create project-local scaffolding for Erst debugging workflows.
 
 This command generates:
   - erst.toml
@@ -38,37 +39,45 @@ This command generates:
 
 When run in an interactive terminal, it launches a setup wizard to configure
 the preferred RPC URL and network passphrase.`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		targetDir := "."
-		if len(args) == 1 {
-			targetDir = args[0]
-		}
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			targetDir := "."
+			if len(args) == 1 {
+				targetDir = args[0]
+			}
 
-		opts := initScaffoldOptions{
-			Force:             initForceFlag,
-			Network:           initNetworkName,
-			RPCURL:            initRPCURLFlag,
-			NetworkPassphrase: initNetworkPassphraseFlag,
-		}
+			opts := initScaffoldOptions{
+				Force:             initForceFlag,
+				Network:           initNetworkName,
+				RPCURL:            initRPCURLFlag,
+				NetworkPassphrase: initNetworkPassphraseFlag,
+			}
 
-		if !isValidInitNetwork(opts.Network) {
-			return fmt.Errorf("invalid network %q (valid: public, testnet, futurenet, standalone)", opts.Network)
-		}
+			if !isValidInitNetwork(opts.Network) {
+				return fmt.Errorf("invalid network %q (valid: public, testnet, futurenet, standalone)", opts.Network)
+			}
 
-		if shouldRunInitWizard(cmd, initInteractiveFlag) {
-			if err := runInitWizard(cmd, &opts); err != nil {
+			if shouldRunInitWizard(cmd, initInteractiveFlag) {
+				if err := runInitWizard(cmd, &opts); err != nil {
+					return err
+				}
+			}
+
+			if err := scaffoldErstProject(targetDir, opts); err != nil {
 				return err
 			}
-		}
 
-		if err := scaffoldErstProject(targetDir, opts); err != nil {
-			return err
-		}
-
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Initialized Erst project scaffold in %s\n", targetDir) //nolint:errcheck
-		return nil
-	},
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Initialized Erst project scaffold in %s\n", targetDir) //nolint:errcheck
+			return nil
+		},
+	}
+	initCmd.Flags().BoolVar(&initForceFlag, "force", false, "Overwrite generated files when they already exist")
+	initCmd.Flags().BoolVar(&initInteractiveFlag, "interactive", true, "Run an interactive setup wizard for RPC URL and network passphrase")
+	initCmd.Flags().StringVar(&initNetworkName, "network", "testnet", "Default network to write into erst.toml (public, testnet, futurenet, standalone)")
+	initCmd.Flags().StringVar(&initRPCURLFlag, "rpc-url", "", "RPC URL to write into erst.toml (skips wizard default for this value)")
+	initCmd.Flags().StringVar(&initNetworkPassphraseFlag, "network-passphrase", "", "Network passphrase to write into erst.toml (skips wizard default for this value)")
+	_ = initCmd.RegisterFlagCompletionFunc("network", completeInitNetworkFlag)
+	return initCmd
 }
 
 type initScaffoldOptions struct {
@@ -297,16 +306,4 @@ func isValidInitNetwork(network string) bool {
 		}
 	}
 	return false
-}
-
-func init() {
-	initCmd.Flags().BoolVar(&initForceFlag, "force", false, "Overwrite generated files when they already exist")
-	initCmd.Flags().BoolVar(&initInteractiveFlag, "interactive", true, "Run an interactive setup wizard for RPC URL and network passphrase")
-	initCmd.Flags().StringVar(&initNetworkName, "network", "testnet", "Default network to write into erst.toml (public, testnet, futurenet, standalone)")
-	initCmd.Flags().StringVar(&initRPCURLFlag, "rpc-url", "", "RPC URL to write into erst.toml (skips wizard default for this value)")
-	initCmd.Flags().StringVar(&initNetworkPassphraseFlag, "network-passphrase", "", "Network passphrase to write into erst.toml (skips wizard default for this value)")
-
-	_ = initCmd.RegisterFlagCompletionFunc("network", completeInitNetworkFlag)
-
-	rootCmd.AddCommand(initCmd)
 }

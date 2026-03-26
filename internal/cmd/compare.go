@@ -38,11 +38,12 @@ var (
 )
 
 // compareCmd implements `erst compare`.
-var compareCmd = &cobra.Command{
-	Use:     "compare <transaction-hash>",
-	GroupID: "testing",
-	Short:   "Compare replay: local WASM vs on-chain WASM side-by-side",
-	Long: `Simultaneously replay a transaction against a local WASM file and the on-chain
+func NewCompareCmd() *cobra.Command {
+	compareCmd := &cobra.Command{
+		Use:     "compare <transaction-hash>",
+		GroupID: "testing",
+		Short:   "Compare replay: local WASM vs on-chain WASM side-by-side",
+		Long: `Simultaneously replay a transaction against a local WASM file and the on-chain
 contract, then display a side-by-side diff of events, diagnostic output, budget
 usage, and divergent call paths.
 
@@ -64,29 +65,27 @@ Examples:
 
   # Override the protocol version used for both passes
   erst compare <tx-hash> --wasm ./contract.wasm --protocol-version 22`,
-	Args: cobra.ExactArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		if cmpLocalWasmFlag == "" {
-			return errors.WrapValidationError("--wasm flag is required for compare mode")
-		}
-		if _, statErr := os.Stat(cmpLocalWasmFlag); os.IsNotExist(statErr) {
-			return errors.WrapValidationError(fmt.Sprintf("WASM file not found: %s", cmpLocalWasmFlag))
-		}
-		if validateErr := rpc.ValidateTransactionHash(args[0]); validateErr != nil {
-			return errors.WrapValidationError(fmt.Sprintf("invalid transaction hash: %v", validateErr))
-		}
-		switch rpc.Network(cmpNetworkFlag) {
-		case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
-			// valid
-		default:
-			return errors.WrapInvalidNetwork(cmpNetworkFlag)
-		}
-		return nil
-	},
-	RunE: runCompare,
-}
-
-func init() {
+		Args: cobra.ExactArgs(1),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if cmpLocalWasmFlag == "" {
+				return errors.WrapValidationError("--wasm flag is required for compare mode")
+			}
+			if _, statErr := os.Stat(cmpLocalWasmFlag); os.IsNotExist(statErr) {
+				return errors.WrapValidationError(fmt.Sprintf("WASM file not found: %s", cmpLocalWasmFlag))
+			}
+			if validateErr := rpc.ValidateTransactionHash(args[0]); validateErr != nil {
+				return errors.WrapValidationError(fmt.Sprintf("invalid transaction hash: %v", validateErr))
+			}
+			switch rpc.Network(cmpNetworkFlag) {
+			case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
+				// valid
+			default:
+				return errors.WrapInvalidNetwork(cmpNetworkFlag)
+			}
+			return nil
+		},
+		RunE: runCompare,
+	}
 	compareCmd.Flags().StringVarP(&cmpNetworkFlag, "network", "n", string(rpc.Mainnet),
 		"Stellar network (testnet, mainnet, futurenet)")
 	compareCmd.Flags().StringVar(&cmpRPCURLFlag, "rpc-url", "",
@@ -109,7 +108,7 @@ func init() {
 		"Override protocol version for both simulation passes (20, 21, 22, …)")
 	_ = compareCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
 	_ = compareCmd.RegisterFlagCompletionFunc("theme", completeThemeFlag)
-	rootCmd.AddCommand(compareCmd)
+	return compareCmd
 }
 
 // ─── main handler ─────────────────────────────────────────────────────────────

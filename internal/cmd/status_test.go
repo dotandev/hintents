@@ -13,6 +13,7 @@ import (
 )
 
 func TestStatusCommandRegistered(t *testing.T) {
+	statusCmd := NewStatusCmd()
 	if statusCmd == nil {
 		t.Fatal("statusCmd should not be nil")
 	}
@@ -25,6 +26,7 @@ func TestStatusCommandRegistered(t *testing.T) {
 }
 
 func TestStatusFixFlag(t *testing.T) {
+	statusCmd := NewStatusCmd()
 	flag := statusCmd.Flags().Lookup("fix")
 	if flag == nil {
 		t.Fatal("status command should have --fix flag")
@@ -134,7 +136,7 @@ func TestPromptYesNo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			cmd := statusCmd
+			cmd := NewStatusCmd()
 			cmd.SetIn(strings.NewReader(tt.input))
 			cmd.SetOut(&bytes.Buffer{})
 
@@ -206,7 +208,7 @@ func TestRepairProtocolLinux(t *testing.T) {
 func TestStatusOutputRegistered(t *testing.T) {
 	// Run the status command and capture output — just verify it doesn't panic
 	var buf bytes.Buffer
-	cmd := statusCmd
+	cmd := NewStatusCmd()
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
 	cmd.SetIn(strings.NewReader("n\n")) // answer "no" to any prompt

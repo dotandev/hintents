@@ -34,11 +34,12 @@ type contractStat struct {
 	seenTypes     map[string]bool
 }
 
-var statsCmd = &cobra.Command{
-	Use:     "stats",
-	GroupID: "utility",
-	Short:   "Summarize budget usage and call depth for the top contract calls",
-	Long: `Returns a non-interactive table of the top 5 most expensive contract calls.
+func NewStatsCmd() *cobra.Command {
+	statsCmd := &cobra.Command{
+		Use:     "stats",
+		GroupID: "utility",
+		Short:   "Summarize budget usage and call depth for the top contract calls",
+		Long: `Returns a non-interactive table of the top 5 most expensive contract calls.
 
 Cost is estimated based on weighted operations:
   - Storage writes: weight 3
@@ -46,8 +47,11 @@ Cost is estimated based on weighted operations:
   - Other events:   weight 1
 
 Call depth counts the number of distinct event types observed per contract.`,
-	Args: cobra.NoArgs,
-	RunE: runStats,
+		Args: cobra.NoArgs,
+		RunE: runStats,
+	}
+	statsCmd.Flags().StringVar(&statsSessionFlag, "session", "", "Load a saved session by ID")
+	return statsCmd
 }
 
 func runStats(cmd *cobra.Command, args []string) error {
@@ -169,9 +173,4 @@ func printStatsTable(stats []contractStat) {
 		}
 		fmt.Printf("%d. %-41s | %-12d | %-7d\n", i+1, displayID, s.estimatedCost, s.callDepth)
 	}
-}
-
-func init() {
-	statsCmd.Flags().StringVar(&statsSessionFlag, "session", "", "Load a saved session by ID")
-	rootCmd.AddCommand(statsCmd)
 }

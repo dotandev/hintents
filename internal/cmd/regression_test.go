@@ -18,26 +18,6 @@ var (
 	regressionMaxWorkers      int
 )
 
-var regressionTestCmd = &cobra.Command{
-	Use:     "regression-test",
-	GroupID: "testing",
-	Short:   "Run protocol regression tests against historic transactions",
-	Long: `Execute a comprehensive regression test suite by downloading historic failed
-transactions from Mainnet and ensuring erst-sim yields identical results.
-
-This command fetches up to the specified number of failed transactions and
-simulates them in parallel, verifying that the simulator produces the same
-traps and events as the original network execution.
-
-The tests help ensure that protocol changes don't introduce regressions.
-
-Example:
-  erst regression-test --count 100
-  erst regression-test --count 1000 --workers 8
-  erst regression-test --count 500 --network mainnet --protocol-version 22`,
-	RunE: runRegressionTest,
-}
-
 func runRegressionTest(cmd *cobra.Command, args []string) error {
 	if regressionTestCount <= 0 {
 		return fmt.Errorf("--count must be greater than 0")
@@ -119,7 +99,27 @@ func runRegressionTest(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func init() {
+func NewRegressionTestCmd() *cobra.Command {
+	regressionTestCmd := &cobra.Command{
+		Use:     "regression-test",
+		GroupID: "testing",
+		Short:   "Run protocol regression tests against historic transactions",
+		Long: `Execute a comprehensive regression test suite by downloading historic failed
+transactions from Mainnet and ensuring erst-sim yields identical results.
+
+This command fetches up to the specified number of failed transactions and
+simulates them in parallel, verifying that the simulator produces the same
+traps and events as the original network execution.
+
+The tests help ensure that protocol changes don't introduce regressions.
+
+Example:
+  erst regression-test --count 100
+  erst regression-test --count 1000 --workers 8
+  erst regression-test --count 500 --network mainnet --protocol-version 22`,
+		RunE: runRegressionTest,
+	}
+
 	regressionTestCmd.Flags().IntVar(
 		&regressionTestCount,
 		"count",
@@ -178,5 +178,5 @@ func init() {
 		"Enable verbose output",
 	)
 
-	rootCmd.AddCommand(regressionTestCmd)
+	return regressionTestCmd
 }

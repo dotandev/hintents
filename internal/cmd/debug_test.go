@@ -175,7 +175,8 @@ func (m *MockRunner) Close() error {
 }
 
 func TestDebugCommand_Setup(t *testing.T) {
-	// Test that the debugCmd is properly initialized
+	// Test that the debugCmd is properly initialized via factory
+	debugCmd := NewDebugCmd()
 	assert.NotNil(t, debugCmd)
 	assert.Equal(t, "debug", debugCmd.Use[:5])
 

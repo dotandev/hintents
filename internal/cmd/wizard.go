@@ -12,41 +12,38 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var wizardCmd = &cobra.Command{
-	Use:     "wizard",
-	GroupID: "development",
-	Short:   "Interactive transaction selection wizard",
-	Long:    "Find and select recent failed transactions for debugging.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		account, _ := cmd.Flags().GetString("account")
-		network, _ := cmd.Flags().GetString("network")
+func NewWizardCmd() *cobra.Command {
+	wizardCmd := &cobra.Command{
+		Use:     "wizard",
+		GroupID: "development",
+		Short:   "Interactive transaction selection wizard",
+		Long:    "Find and select recent failed transactions for debugging.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			account, _ := cmd.Flags().GetString("account")
+			network, _ := cmd.Flags().GetString("network")
 
-		if account == "" {
-			return errors.WrapCliArgumentRequired("account")
-		}
+			if account == "" {
+				return errors.WrapCliArgumentRequired("account")
+			}
 
-		client, err := rpc.NewClient(rpc.WithNetwork(rpc.Network(network)))
-		if err != nil {
-			return errors.WrapValidationError(err.Error())
-		}
+			client, err := rpc.NewClient(rpc.WithNetwork(rpc.Network(network)))
+			if err != nil {
+				return errors.WrapValidationError(err.Error())
+			}
 
-		w := wizard.New(client)
-		result, err := w.SelectTransaction(cmd.Context(), account)
-		if err != nil {
-			return err
-		}
+			w := wizard.New(client)
+			result, err := w.SelectTransaction(cmd.Context(), account)
+			if err != nil {
+				return err
+			}
 
-		fmt.Printf("\nSelected: %s\nStatus: %s\nCreated: %s\n\nRun: erst debug %s\n",
-			result.Hash, result.Status, result.CreatedAt, result.Hash)
-		return nil
-	},
-}
-
-func init() {
+			fmt.Printf("\nSelected: %s\nStatus: %s\nCreated: %s\n\nRun: erst debug %s\n",
+				result.Hash, result.Status, result.CreatedAt, result.Hash)
+			return nil
+		},
+	}
 	wizardCmd.Flags().StringP("account", "a", "", "Stellar account address")
 	wizardCmd.Flags().StringP("network", "n", string(rpc.Mainnet), "Network (testnet, mainnet, futurenet)")
-
 	_ = wizardCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
-
-	rootCmd.AddCommand(wizardCmd)
+	return wizardCmd
 }

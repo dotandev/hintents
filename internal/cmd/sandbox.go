@@ -29,13 +29,29 @@ var (
 )
 
 // sandboxCmd is the parent command for local sandbox helpers.
-var sandboxCmd = &cobra.Command{
-	Use:   "sandbox",
-	Short: "Local sandbox utilities for simulated ledger state",
-	Long: `Manage a local \"sandbox\" overlay for simulations.
+func NewSandboxCmd() *cobra.Command {
+	sandboxCmd := &cobra.Command{
+		Use:   "sandbox",
+		Short: "Local sandbox utilities for simulated ledger state",
+		Long: `Manage a local \"sandbox\" overlay for simulations.
 
 This command family operates purely on local override state and never
 submits transactions on-chain.`,
+	}
+	sandboxFundCmd.Flags().Uint64Var(
+		&sandboxAmountFlag,
+		"amount",
+		sandboxDefaultAmountXLM,
+		"Amount of native tokens (XLM) to mock-fund in the sandbox ledger",
+	)
+	sandboxFundCmd.Flags().StringVar(
+		&sandboxStateFile,
+		"state-file",
+		sandboxDefaultStateFile,
+		"JSON override file to create/update for sandbox ledger state",
+	)
+	sandboxCmd.AddCommand(sandboxFundCmd)
+	return sandboxCmd
 }
 
 // sandboxFundCmd implements:
@@ -175,22 +191,4 @@ func writeSandboxFunding(account string, amountXLM uint64, path string) error {
 	}
 
 	return nil
-}
-
-func init() {
-	sandboxFundCmd.Flags().Uint64Var(
-		&sandboxAmountFlag,
-		"amount",
-		sandboxDefaultAmountXLM,
-		"Amount of native tokens (XLM) to mock-fund in the sandbox ledger",
-	)
-	sandboxFundCmd.Flags().StringVar(
-		&sandboxStateFile,
-		"state-file",
-		sandboxDefaultStateFile,
-		"JSON override file to create/update for sandbox ledger state",
-	)
-
-	sandboxCmd.AddCommand(sandboxFundCmd)
-	rootCmd.AddCommand(sandboxCmd)
 }

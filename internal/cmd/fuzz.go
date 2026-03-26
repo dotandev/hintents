@@ -20,11 +20,12 @@ var (
 	fuzzTargetContract string
 )
 
-var fuzzCmd = &cobra.Command{
-	Use:     "fuzz",
-	GroupID: "testing",
-	Short:   "Fuzz test XDR inputs against Soroban contracts",
-	Long: `Perform fuzzing of XDR inputs to discover edge cases and potential crashes
+func NewFuzzCmd() *cobra.Command {
+	fuzzCmd := &cobra.Command{
+		Use:     "fuzz",
+		GroupID: "testing",
+		Short:   "Fuzz test XDR inputs against Soroban contracts",
+		Long: `Perform fuzzing of XDR inputs to discover edge cases and potential crashes
 in Soroban contract execution.
 
 This command uses coverage-guided fuzzing to generate random inputs that are
@@ -38,7 +39,45 @@ Examples:
   erst fuzz --iterations 10000
   erst fuzz --iterations 50000 --workers 8
   erst fuzz --xdr <hex-encoded-xdr> --iterations 5000`,
-	RunE: runFuzz,
+		RunE: runFuzz,
+	}
+	fuzzCmd.Flags().Uint64Var(
+		&fuzzIterations,
+		"iterations",
+		0,
+		"Number of fuzzing iterations (required)",
+	)
+	fuzzCmd.Flags().Uint64Var(
+		&fuzzTimeout,
+		"timeout",
+		5000,
+		"Timeout per fuzz iteration in milliseconds",
+	)
+	fuzzCmd.Flags().IntVar(
+		&fuzzMaxSize,
+		"max-size",
+		262144,
+		"Maximum input size in bytes (default 256KB)",
+	)
+	fuzzCmd.Flags().StringVar(
+		&fuzzInputXDR,
+		"xdr",
+		"",
+		"Optional base XDR input to fuzz (hex-encoded)",
+	)
+	fuzzCmd.Flags().BoolVar(
+		&fuzzEnableCov,
+		"coverage",
+		false,
+		"Enable code coverage tracking (requires instrumented binary)",
+	)
+	fuzzCmd.Flags().StringVar(
+		&fuzzTargetContract,
+		"target",
+		"",
+		"Optional target contract ID to focus fuzzing on",
+	)
+	return fuzzCmd
 }
 
 func runFuzz(cmd *cobra.Command, args []string) error {
@@ -165,50 +204,4 @@ func min(a, b int) int {
 		return a
 	}
 	return b
-}
-
-func init() {
-	fuzzCmd.Flags().Uint64Var(
-		&fuzzIterations,
-		"iterations",
-		0,
-		"Number of fuzzing iterations (required)",
-	)
-
-	fuzzCmd.Flags().Uint64Var(
-		&fuzzTimeout,
-		"timeout",
-		5000,
-		"Timeout per fuzz iteration in milliseconds",
-	)
-
-	fuzzCmd.Flags().IntVar(
-		&fuzzMaxSize,
-		"max-size",
-		262144,
-		"Maximum input size in bytes (default 256KB)",
-	)
-
-	fuzzCmd.Flags().StringVar(
-		&fuzzInputXDR,
-		"xdr",
-		"",
-		"Optional base XDR input to fuzz (hex-encoded)",
-	)
-
-	fuzzCmd.Flags().BoolVar(
-		&fuzzEnableCov,
-		"coverage",
-		false,
-		"Enable code coverage tracking (requires instrumented binary)",
-	)
-
-	fuzzCmd.Flags().StringVar(
-		&fuzzTargetContract,
-		"target",
-		"",
-		"Optional target contract ID to focus fuzzing on",
-	)
-
-	rootCmd.AddCommand(fuzzCmd)
 }

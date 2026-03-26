@@ -28,11 +28,12 @@ type DependencyStatus struct {
 	FixHint   string
 }
 
-var doctorCmd = &cobra.Command{
-	Use:     "doctor",
-	GroupID: "development",
-	Short:   "Diagnose development environment setup",
-	Long: `Check the status of required dependencies and development tools.
+func NewDoctorCmd() *cobra.Command {
+	doctorCmd := &cobra.Command{
+		Use:     "doctor",
+		GroupID: "development",
+		Short:   "Diagnose development environment setup",
+		Long: `Check the status of required dependencies and development tools.
 
 This command verifies:
   - Go installation and version (matches go.mod)
@@ -43,13 +44,16 @@ This command verifies:
   - Deep link registration (erst:// URL scheme)
 
 Use this to troubleshoot installation issues or verify your setup.`,
-	Example: `  # Check environment status
+		Example: `  # Check environment status
   erst doctor
 
   # View detailed diagnostics
   erst doctor --verbose`,
-	Args: cobra.NoArgs,
-	RunE: runDoctor,
+		Args: cobra.NoArgs,
+		RunE: runDoctor,
+	}
+	doctorCmd.Flags().BoolP("verbose", "v", false, "Show detailed diagnostic information")
+	return doctorCmd
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
@@ -381,9 +385,4 @@ func buildDeepLinkFixHint(steps []string) string {
 		return "Run 'erst install-scheme' to register the erst:// URL scheme"
 	}
 	return steps[0]
-}
-
-func init() {
-	rootCmd.AddCommand(doctorCmd)
-	doctorCmd.Flags().BoolP("verbose", "v", false, "Show detailed diagnostic information")
 }

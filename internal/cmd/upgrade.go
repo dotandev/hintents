@@ -21,110 +21,109 @@ var (
 	upgradeOptimizeFlag bool
 )
 
-var upgradeCmd = &cobra.Command{
-	Use:     "simulate-upgrade <transaction-hash> --new-wasm <path>",
-	GroupID: "utility",
-	Short:   "Simulate a transaction with upgraded contract code",
-	Long: `Replay a transaction but replace the contract code with a new WASM file.
+func NewUpgradeCmd() *cobra.Command {
+	upgradeCmd := &cobra.Command{
+		Use:     "simulate-upgrade <transaction-hash> --new-wasm <path>",
+		GroupID: "utility",
+		Short:   "Simulate a transaction with upgraded contract code",
+		Long: `Replay a transaction but replace the contract code with a new WASM file.
 This allows verifying if a planned upgrade will break existing functionality.
 
 Example:
   erst simulate-upgrade 5c0a... --new-wasm ./new_v2.wasm --network mainnet`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		txHash := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			txHash := args[0]
 
-		if newWasmPath == "" {
-			return errors.WrapCliArgumentRequired("new-wasm")
-		}
+			if newWasmPath == "" {
+				return errors.WrapCliArgumentRequired("new-wasm")
+			}
 
-		// 1. Read New WASM
-		newWasmBytes, err := os.ReadFile(newWasmPath)
-		if err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("failed to read WASM file: %v", err))
-		}
-		optimizedWasmBytes, report, err := optimizeWasmBytesIfRequested(newWasmBytes, upgradeOptimizeFlag)
-		if err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("failed to optimize WASM: %v", err))
-		}
-		newWasmBytes = optimizedWasmBytes
-		fmt.Printf("Loaded new WASM code: %d bytes\n", len(newWasmBytes))
-		if upgradeOptimizeFlag {
-			printOptimizationReport(report)
-		}
+			// 1. Read New WASM
+			newWasmBytes, err := os.ReadFile(newWasmPath)
+			if err != nil {
+				return errors.WrapValidationError(fmt.Sprintf("failed to read WASM file: %v", err))
+			}
+			optimizedWasmBytes, report, err := optimizeWasmBytesIfRequested(newWasmBytes, upgradeOptimizeFlag)
+			if err != nil {
+				return errors.WrapValidationError(fmt.Sprintf("failed to optimize WASM: %v", err))
+			}
+			newWasmBytes = optimizedWasmBytes
+			fmt.Printf("Loaded new WASM code: %d bytes\n", len(newWasmBytes))
+			if upgradeOptimizeFlag {
+				printOptimizationReport(report)
+			}
 
-		// 2. Setup Client
-		opts := []rpc.ClientOption{
-			rpc.WithNetwork(rpc.Network(networkFlag)),
-		}
-		if rpcURLFlag != "" {
-			opts = append(opts, rpc.WithHorizonURL(rpcURLFlag))
-		}
+			// 2. Setup Client
+			opts := []rpc.ClientOption{
+				rpc.WithNetwork(rpc.Network(networkFlag)),
+			}
+			if rpcURLFlag != "" {
+				opts = append(opts, rpc.WithHorizonURL(rpcURLFlag))
+			}
 
-		client, err := rpc.NewClient(opts...)
-		if err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
-		}
-		registerCacheFlushHook()
+			client, err := rpc.NewClient(opts...)
+			if err != nil {
+				return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
+			}
+			registerCacheFlushHook()
 
-		// 3. Fetch Transaction
-		fmt.Printf("Fetching transaction: %s from %s\n", txHash, networkFlag)
-		resp, err := client.GetTransaction(cmd.Context(), txHash)
-		if err != nil {
-			return errors.WrapRPCConnectionFailed(err)
-		}
+			// 3. Fetch Transaction
+			fmt.Printf("Fetching transaction: %s from %s\n", txHash, networkFlag)
+			resp, err := client.GetTransaction(cmd.Context(), txHash)
+			if err != nil {
+				return errors.WrapRPCConnectionFailed(err)
+			}
 
-		// 4. Extract Keys & Fetch State
-		keys, err := extractLedgerKeys(resp.ResultMetaXdr)
-		if err != nil {
-			return errors.WrapUnmarshalFailed(err, "result meta")
-		}
+			// 4. Extract Keys & Fetch State
+			keys, err := extractLedgerKeys(resp.ResultMetaXdr)
+			if err != nil {
+				return errors.WrapUnmarshalFailed(err, "result meta")
+			}
 
-		entries, err := client.GetLedgerEntries(cmd.Context(), keys)
-		if err != nil {
-			return errors.WrapRPCConnectionFailed(err)
-		}
-		fmt.Printf("Fetched %d ledger entries\n", len(entries))
+			entries, err := client.GetLedgerEntries(cmd.Context(), keys)
+			if err != nil {
+				return errors.WrapRPCConnectionFailed(err)
+			}
+			fmt.Printf("Fetched %d ledger entries\n", len(entries))
 
-		// 5. Identify Contract ID and Inject New Code
-		contractID, err := getContractIDFromEnvelope(resp.EnvelopeXdr)
-		if err != nil {
-			return errors.WrapSimulationLogicError(fmt.Sprintf("failed to identify contract from transaction: %v", err))
-		}
-		fmt.Printf("Identified target contract: %x\n", *contractID)
+			// 5. Identify Contract ID and Inject New Code
+			contractID, err := getContractIDFromEnvelope(resp.EnvelopeXdr)
+			if err != nil {
+				return errors.WrapSimulationLogicError(fmt.Sprintf("failed to identify contract from transaction: %v", err))
+			}
+			fmt.Printf("Identified target contract: %x\n", *contractID)
 
-		if injectErr := injectNewCode(entries, *contractID, newWasmBytes); injectErr != nil {
-			return errors.WrapSimulationLogicError(fmt.Sprintf("failed to inject new code: %v", injectErr))
-		}
-		fmt.Println("Injected new WASM code into simulation state.")
+			if injectErr := injectNewCode(entries, *contractID, newWasmBytes); injectErr != nil {
+				return errors.WrapSimulationLogicError(fmt.Sprintf("failed to inject new code: %v", injectErr))
+			}
+			fmt.Println("Injected new WASM code into simulation state.")
 
-		// 6. Run Simulation
-		runner, err := simulator.NewRunner("", false)
-		if err != nil {
-			return errors.WrapSimulatorNotFound(err.Error())
-		}
-		registerRunnerCloseHook("upgrade-simulator-runner", runner)
-		defer func() { _ = runner.Close() }()
+			// 6. Run Simulation
+			runner, err := simulator.NewRunner("", false)
+			if err != nil {
+				return errors.WrapSimulatorNotFound(err.Error())
+			}
+			registerRunnerCloseHook("upgrade-simulator-runner", runner)
+			defer func() { _ = runner.Close() }()
 
-		simReq := &simulator.SimulationRequest{
-			EnvelopeXdr:   resp.EnvelopeXdr,
-			ResultMetaXdr: resp.ResultMetaXdr,
-			LedgerEntries: entries,
-		}
+			simReq := &simulator.SimulationRequest{
+				EnvelopeXdr:   resp.EnvelopeXdr,
+				ResultMetaXdr: resp.ResultMetaXdr,
+				LedgerEntries: entries,
+			}
 
-		fmt.Println("Running simulation with upgraded code...")
-		result, err := runner.Run(cmd.Context(), simReq)
-		if err != nil {
-			return errors.WrapSimulationFailed(err, "")
-		}
+			fmt.Println("Running simulation with upgraded code...")
+			result, err := runner.Run(cmd.Context(), simReq)
+			if err != nil {
+				return errors.WrapSimulationFailed(err, "")
+			}
 
-		printSimulationResult("Upgraded Contract", result)
+			printSimulationResult("Upgraded Contract", result)
 
-		return nil
-	},
-}
-
-func init() {
+			return nil
+		},
+	}
 	upgradeCmd.Flags().StringVar(&newWasmPath, "new-wasm", "", "Path to the new WASM file")
 	upgradeCmd.Flags().BoolVar(&upgradeOptimizeFlag, "optimize", false, "Run dead-code elimination on the new WASM before simulation")
 	// Reuse network flags from debug.go if possible, but they are var blocks there.
@@ -132,10 +131,8 @@ func init() {
 	// BUT we need to register flags for THIS command too.
 	upgradeCmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use")
 	upgradeCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL")
-
 	_ = upgradeCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
-
-	rootCmd.AddCommand(upgradeCmd)
+	return upgradeCmd
 }
 
 func getContractIDFromEnvelope(envelopeXdr string) (*xdr.Hash, error) {

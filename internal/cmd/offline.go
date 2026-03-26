@@ -25,10 +25,11 @@ var (
 )
 
 // offlineCmd is the parent command for the air-gapped signing workflow.
-var offlineCmd = &cobra.Command{
-	Use:   "offline",
-	Short: "Air-gapped transaction signing pipeline",
-	Long: `Manage the offline (air-gapped) transaction signing workflow.
+func NewOfflineCmd() *cobra.Command {
+	offlineCmd := &cobra.Command{
+		Use:   "offline",
+		Short: "Air-gapped transaction signing pipeline",
+		Long: `Manage the offline (air-gapped) transaction signing workflow.
 
 The pipeline has four stages:
   1. generate  – Build an unsigned envelope and save it to a portable JSON file.
@@ -46,6 +47,22 @@ Example workflow:
   # Copy signed tx.erst.json back via USB
   erst offline verify tx.erst.json
   erst offline submit tx.erst.json`,
+	}
+	// generate flags
+	offlineGenerateCmd.Flags().StringVarP(&offlineNetworkFlag, "network", "n", string(rpc.Mainnet), "Target Stellar network (testnet, mainnet, futurenet)")
+	offlineGenerateCmd.Flags().StringVarP(&offlineOutputFlag, "output", "o", "", "Output file path (default: unsigned.erst.json)")
+	offlineGenerateCmd.Flags().StringVar(&offlineDescFlag, "desc", "", "Human-readable description to embed in the file")
+	offlineGenerateCmd.Flags().StringVar(&offlineSourceFlag, "source", "", "Source account address to embed in metadata")
+	// sign flags
+	offlineSignCmd.Flags().StringVar(&offlineKeyFlag, "key", "", "Hex-encoded ed25519 private key (32-byte seed or 64-byte full key)")
+	// submit flags
+	offlineSubmitCmd.Flags().StringVar(&offlineRPCURLFlag, "rpc-url", "", "Custom Soroban RPC URL (overrides network default)")
+	// wire tree
+	offlineCmd.AddCommand(offlineGenerateCmd)
+	offlineCmd.AddCommand(offlineSignCmd)
+	offlineCmd.AddCommand(offlineVerifyCmd)
+	offlineCmd.AddCommand(offlineSubmitCmd)
+	return offlineCmd
 }
 
 // ── generate ────────────────────────────────────────────────────────────────
@@ -276,25 +293,3 @@ func isSpace(c byte) bool {
 }
 
 // ── init ────────────────────────────────────────────────────────────────────
-
-func init() {
-	// generate flags
-	offlineGenerateCmd.Flags().StringVarP(&offlineNetworkFlag, "network", "n", string(rpc.Mainnet), "Target Stellar network (testnet, mainnet, futurenet)")
-	offlineGenerateCmd.Flags().StringVarP(&offlineOutputFlag, "output", "o", "", "Output file path (default: unsigned.erst.json)")
-	offlineGenerateCmd.Flags().StringVar(&offlineDescFlag, "desc", "", "Human-readable description to embed in the file")
-	offlineGenerateCmd.Flags().StringVar(&offlineSourceFlag, "source", "", "Source account address to embed in metadata")
-
-	// sign flags
-	offlineSignCmd.Flags().StringVar(&offlineKeyFlag, "key", "", "Hex-encoded ed25519 private key (32-byte seed or 64-byte full key)")
-
-	// submit flags
-	offlineSubmitCmd.Flags().StringVar(&offlineRPCURLFlag, "rpc-url", "", "Custom Soroban RPC URL (overrides network default)")
-
-	// wire tree
-	offlineCmd.AddCommand(offlineGenerateCmd)
-	offlineCmd.AddCommand(offlineSignCmd)
-	offlineCmd.AddCommand(offlineVerifyCmd)
-	offlineCmd.AddCommand(offlineSubmitCmd)
-
-	rootCmd.AddCommand(offlineCmd)
-}

@@ -29,7 +29,8 @@ var (
 )
 
 // rootCmd represents the base command when called without any subcommands
-var rootCmd = &cobra.Command{
+func NewRootCmd() *cobra.Command {
+	rootCmd := &cobra.Command{
 	Use:   "erst",
 	Short: "Soroban smart contract debugger and transaction analyzer",
 	Long: `Erst is a specialized developer tool for the Stellar network that helps you
@@ -73,6 +74,99 @@ Get started with 'erst debug --help' or visit the documentation.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	Version:       Version,
+	}
+
+	// Root command initialization
+	rootCmd.PersistentFlags().Int64Var(
+		&TimestampFlag,
+		"timestamp",
+		0,
+		"Override the ledger header timestamp (Unix epoch)",
+	)
+
+	rootCmd.PersistentFlags().Int64Var(
+		&WindowFlag,
+		"window",
+		0,
+		"Run range simulation across a time window (seconds)",
+	)
+
+	rootCmd.PersistentFlags().BoolVar(
+		&ProfileFlag,
+		"profile",
+		false,
+		"Enable CPU/Memory profiling and generate a flamegraph",
+	)
+
+	rootCmd.PersistentFlags().StringVar(
+		&ProfileFormatFlag,
+		"profile-format",
+		"html",
+		"Flamegraph export format: 'html' (interactive) or 'svg' (raw)",
+	)
+
+	rootCmd.PersistentFlags().StringVar(
+		&DeepLinkFlag,
+		"deep-link",
+		"",
+		"Handle an erst:// deep link URL (used internally by the doctor probe)",
+	)
+	// Hide from normal help output; it is an internal dispatch mechanism.
+	_ = rootCmd.PersistentFlags().MarkHidden("deep-link")
+
+	// Define command groups for better organization
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "core",
+		Title: "Core Debugging Commands:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "testing",
+		Title: "Testing & Validation Commands:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "management",
+		Title: "Session & Cache Management:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "development",
+		Title: "Development Tools:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "utility",
+		Title: "Utility Commands:",
+	})
+	rootCmd.AddCommand(NewAbiCmd())
+	rootCmd.AddCommand(NewAuthDebugCmd())
+	rootCmd.AddCommand(NewCacheCmd())
+	rootCmd.AddCommand(NewCompareCmd())
+	rootCmd.AddCommand(NewCompletionCmd())
+	rootCmd.AddCommand(NewDaemonCmd())
+	rootCmd.AddCommand(NewDceCmd())
+	rootCmd.AddCommand(NewDebugCmd())
+	rootCmd.AddCommand(NewDoctorCmd())
+	rootCmd.AddCommand(NewDryRunCmd())
+	rootCmd.AddCommand(NewExplainCmd())
+	rootCmd.AddCommand(NewExportCmd())
+	rootCmd.AddCommand(NewFuzzCmd())
+	rootCmd.AddCommand(NewInitCmd())
+	rootCmd.AddCommand(NewOfflineCmd())
+	rootCmd.AddCommand(NewProfileCmd())
+	rootCmd.AddCommand(NewReportCmd())
+	rootCmd.AddCommand(NewRpcCmd())
+	rootCmd.AddCommand(NewSandboxCmd())
+	rootCmd.AddCommand(NewSearchCmd())
+	rootCmd.AddCommand(NewSessionCmd())
+	rootCmd.AddCommand(NewShellCmd())
+	rootCmd.AddCommand(NewSnapshotMemoryCmd())
+	rootCmd.AddCommand(NewStatsCmd())
+	rootCmd.AddCommand(NewStatusCmd())
+	rootCmd.AddCommand(NewTraceCmd())
+	rootCmd.AddCommand(NewUpgradeCmd())
+	rootCmd.AddCommand(NewVersionCmd())
+	rootCmd.AddCommand(NewWizardCmd())
+	rootCmd.AddCommand(NewXdrCmd())
+
+	return rootCmd
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -90,7 +184,7 @@ func Execute() error {
 	defer clearShutdownCoordinator()
 
 	return executeWithSignals(ctx, stop, sigCh, coordinator, func(execCtx context.Context) error {
-		return rootCmd.ExecuteContext(execCtx)
+		return NewRootCmd().ExecuteContext(execCtx)
 	})
 }
 
@@ -175,67 +269,3 @@ func handleDeepLinkProbe(rawURL string) error {
 	return nil
 }
 
-func init() {
-	// Root command initialization
-	rootCmd.PersistentFlags().Int64Var(
-		&TimestampFlag,
-		"timestamp",
-		0,
-		"Override the ledger header timestamp (Unix epoch)",
-	)
-
-	rootCmd.PersistentFlags().Int64Var(
-		&WindowFlag,
-		"window",
-		0,
-		"Run range simulation across a time window (seconds)",
-	)
-
-	rootCmd.PersistentFlags().BoolVar(
-		&ProfileFlag,
-		"profile",
-		false,
-		"Enable CPU/Memory profiling and generate a flamegraph",
-	)
-
-	rootCmd.PersistentFlags().StringVar(
-		&ProfileFormatFlag,
-		"profile-format",
-		"html",
-		"Flamegraph export format: 'html' (interactive) or 'svg' (raw)",
-	)
-
-	rootCmd.PersistentFlags().StringVar(
-		&DeepLinkFlag,
-		"deep-link",
-		"",
-		"Handle an erst:// deep link URL (used internally by the doctor probe)",
-	)
-	// Hide from normal help output; it is an internal dispatch mechanism.
-	_ = rootCmd.PersistentFlags().MarkHidden("deep-link")
-
-	// Define command groups for better organization
-	rootCmd.AddGroup(&cobra.Group{
-		ID:    "core",
-		Title: "Core Debugging Commands:",
-	})
-	rootCmd.AddGroup(&cobra.Group{
-		ID:    "testing",
-		Title: "Testing & Validation Commands:",
-	})
-	rootCmd.AddGroup(&cobra.Group{
-		ID:    "management",
-		Title: "Session & Cache Management:",
-	})
-	rootCmd.AddGroup(&cobra.Group{
-		ID:    "development",
-		Title: "Development Tools:",
-	})
-	rootCmd.AddGroup(&cobra.Group{
-		ID:    "utility",
-		Title: "Utility Commands:",
-	})
-
-	// Register commands
-	rootCmd.AddCommand(statsCmd)
-}

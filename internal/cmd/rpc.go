@@ -17,10 +17,19 @@ var (
 	rpcHealthURLFlag string
 )
 
-var rpcCmd = &cobra.Command{
-	Use:     "rpc",
-	GroupID: "utility",
-	Short:   "Manage and monitor RPC endpoints",
+func NewRpcCmd() *cobra.Command {
+	rpcCmd := &cobra.Command{
+		Use:     "rpc",
+		GroupID: "utility",
+		Short:   "Manage and monitor RPC endpoints",
+	}
+	rpcHealthCmd.Flags().StringVar(&rpcHealthURLFlag, "rpc", "", "RPC URLs to check (comma-separated)")
+	rpcCmd.AddCommand(rpcHealthCmd)
+	// Add the rpc:health as a top-level command for compatibility
+	rpcHealthAliasCmd := *rpcHealthCmd
+	rpcHealthAliasCmd.Use = "rpc:health"
+	rpcHealthAliasCmd.Hidden = true
+	return rpcCmd
 }
 
 var rpcHealthCmd = &cobra.Command{
@@ -95,17 +104,4 @@ var rpcHealthCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	rpcHealthCmd.Flags().StringVar(&rpcHealthURLFlag, "rpc", "", "RPC URLs to check (comma-separated)")
-	rpcCmd.AddCommand(rpcHealthCmd)
-
-	// Add the rpc:health as a top-level command for compatibility
-	rpcHealthAliasCmd := *rpcHealthCmd
-	rpcHealthAliasCmd.Use = "rpc:health"
-	rpcHealthAliasCmd.Hidden = true
-	rootCmd.AddCommand(&rpcHealthAliasCmd)
-
-	rootCmd.AddCommand(rpcCmd)
 }

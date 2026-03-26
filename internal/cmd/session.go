@@ -31,11 +31,12 @@ func GetCurrentSession() *session.SessionData {
 	return currentSessionData
 }
 
-var sessionCmd = &cobra.Command{
-	Use:     "session",
-	GroupID: "management",
-	Short:   "Manage debugging sessions",
-	Long: `Save, resume, and manage debugging sessions to preserve state across CLI invocations.
+func NewSessionCmd() *cobra.Command {
+	sessionCmd := &cobra.Command{
+		Use:     "session",
+		GroupID: "management",
+		Short:   "Manage debugging sessions",
+		Long: `Save, resume, and manage debugging sessions to preserve state across CLI invocations.
 
 Sessions store complete transaction data, simulation results, and analysis context,
 allowing you to:
@@ -49,7 +50,7 @@ Available subcommands:
   resume  - Restore a saved session
   list    - View all saved sessions
   delete  - Remove a saved session`,
-	Example: `  # Save current debug session
+		Example: `  # Save current debug session
   erst session save
 
   # List all sessions
@@ -60,6 +61,13 @@ Available subcommands:
 
   # Delete a session
   erst session delete <session-id>`,
+	}
+	sessionSaveCmd.Flags().StringVar(&sessionIDFlag, "id", "", "Custom session ID (default: auto-generated)")
+	sessionCmd.AddCommand(sessionSaveCmd)
+	sessionCmd.AddCommand(sessionResumeCmd)
+	sessionCmd.AddCommand(sessionListCmd)
+	sessionCmd.AddCommand(sessionDeleteCmd)
+	return sessionCmd
 }
 
 var sessionSaveCmd = &cobra.Command{
@@ -300,15 +308,4 @@ Use 'erst session list' to see available sessions.`,
 		fmt.Printf("Session deleted: %s\n", resolved.ID)
 		return nil
 	},
-}
-
-func init() {
-	sessionSaveCmd.Flags().StringVar(&sessionIDFlag, "id", "", "Custom session ID (default: auto-generated)")
-
-	sessionCmd.AddCommand(sessionSaveCmd)
-	sessionCmd.AddCommand(sessionResumeCmd)
-	sessionCmd.AddCommand(sessionListCmd)
-	sessionCmd.AddCommand(sessionDeleteCmd)
-
-	rootCmd.AddCommand(sessionCmd)
 }

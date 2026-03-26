@@ -31,11 +31,12 @@ func getCacheDir() string {
 	return filepath.Join(homeDir, ".erst", "cache")
 }
 
-var cacheCmd = &cobra.Command{
-	Use:     "cache",
-	GroupID: "management",
-	Short:   "Manage transaction and simulation cache",
-	Long: `Manage the local cache that stores transaction data and simulation results.
+func NewCacheCmd() *cobra.Command {
+	cacheCmd := &cobra.Command{
+		Use:     "cache",
+		GroupID: "management",
+		Short:   "Manage transaction and simulation cache",
+		Long: `Manage the local cache that stores transaction data and simulation results.
 Caching improves performance and enables offline analysis.
 
 Cache location: ~/.erst/cache (configurable via ERST_CACHE_DIR)
@@ -44,7 +45,7 @@ Available subcommands:
   status  - View cache size and usage statistics
   clean   - Remove old files using LRU strategy
   clear   - Delete all cached data`,
-	Example: `  # Check cache status
+		Example: `  # Check cache status
   erst cache status
 
   # Clean old cache entries
@@ -55,10 +56,24 @@ Available subcommands:
 
   # Clear all cache
   erst cache clear --force`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return cmd.Help()
-	},
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	// Add subcommands to cache command
+	cacheCmd.AddCommand(cacheStatusCmd)
+	cacheCmd.AddCommand(cacheCleanCmd)
+	cacheCmd.AddCommand(cacheClearCmd)
+	cacheCmd.AddCommand(cacheCleanRPCCmd)
+	// Add flags
+	cacheCleanCmd.Flags().BoolVarP(&cacheForceFlag, "force", "f", false, "Skip confirmation prompt")
+	cacheClearCmd.Flags().BoolVarP(&cacheForceFlag, "force", "f", false, "Skip confirmation prompt")
+	cacheCleanRPCCmd.Flags().IntVar(&cleanOlderThanFlag, "older-than", 0, "Remove entries older than N days")
+	cacheCleanRPCCmd.Flags().StringVar(&cleanNetworkFlag, "network", "", "Remove entries for a specific network")
+	cacheCleanRPCCmd.Flags().BoolVar(&cleanAllFlag, "all", false, "Remove all RPC cache entries")
+	// Add cache command to root
+	return cacheCmd
 }
 
 var cacheStatusCmd = &cobra.Command{
@@ -231,22 +246,4 @@ At least one filter must be specified. Filters can be combined.`,
 		fmt.Printf("%d RPC cache entries removed.\n", removed)
 		return nil
 	},
-}
-
-func init() {
-	// Add subcommands to cache command
-	cacheCmd.AddCommand(cacheStatusCmd)
-	cacheCmd.AddCommand(cacheCleanCmd)
-	cacheCmd.AddCommand(cacheClearCmd)
-	cacheCmd.AddCommand(cacheCleanRPCCmd)
-
-	// Add flags
-	cacheCleanCmd.Flags().BoolVarP(&cacheForceFlag, "force", "f", false, "Skip confirmation prompt")
-	cacheClearCmd.Flags().BoolVarP(&cacheForceFlag, "force", "f", false, "Skip confirmation prompt")
-	cacheCleanRPCCmd.Flags().IntVar(&cleanOlderThanFlag, "older-than", 0, "Remove entries older than N days")
-	cacheCleanRPCCmd.Flags().StringVar(&cleanNetworkFlag, "network", "", "Remove entries for a specific network")
-	cacheCleanRPCCmd.Flags().BoolVar(&cleanAllFlag, "all", false, "Remove all RPC cache entries")
-
-	// Add cache command to root
-	rootCmd.AddCommand(cacheCmd)
 }

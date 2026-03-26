@@ -14,11 +14,12 @@ import (
 
 var abiFormat string
 
-var abiCmd = &cobra.Command{
-	Use:     "abi <wasm-file>",
-	GroupID: "utility",
-	Short:   "Decompile and display a Soroban contract ABI",
-	Long: `Parse a compiled Soroban WASM file and pretty-print the contract specification
+func NewAbiCmd() *cobra.Command {
+	abiCmd := &cobra.Command{
+		Use:     "abi <wasm-file>",
+		GroupID: "utility",
+		Short:   "Decompile and display a Soroban contract ABI",
+		Long: `Parse a compiled Soroban WASM file and pretty-print the contract specification
 (functions, structs, enums, unions, error enums, and events).
 
 The contract spec is read from the "contractspecv0" WASM custom section, which
@@ -27,8 +28,11 @@ Soroban compilers embed automatically.
 Examples:
   erst abi ./target/wasm32-unknown-unknown/release/contract.wasm
   erst abi --format json ./contract.wasm`,
-	Args: cobra.ExactArgs(1),
-	RunE: abiExec,
+		Args: cobra.ExactArgs(1),
+		RunE: abiExec,
+	}
+	abiCmd.Flags().StringVar(&abiFormat, "format", "text", "Output format: text or json")
+	return abiCmd
 }
 
 func abiExec(cmd *cobra.Command, args []string) error {
@@ -64,9 +68,4 @@ func abiExec(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-func init() {
-	abiCmd.Flags().StringVar(&abiFormat, "format", "text", "Output format: text or json")
-	rootCmd.AddCommand(abiCmd)
 }

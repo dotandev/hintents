@@ -13,10 +13,11 @@ import (
 
 var dceOutput string
 
-var dceCmd = &cobra.Command{
-	Use:   "dce <wasm-file>",
-	Short: "Eliminate dead code from a WASM binary",
-	Long: `Analyze a compiled WASM binary, build a call graph from exported functions,
+func NewDceCmd() *cobra.Command {
+	dceCmd := &cobra.Command{
+		Use:   "dce <wasm-file>",
+		Short: "Eliminate dead code from a WASM binary",
+		Long: `Analyze a compiled WASM binary, build a call graph from exported functions,
 and strip unreachable functions to reduce contract size.
 
 Without -o, performs a dry run and prints statistics only.
@@ -24,8 +25,11 @@ Without -o, performs a dry run and prints statistics only.
 Examples:
   erst dce ./contract.wasm -o ./contract-optimized.wasm
   erst dce ./contract.wasm`,
-	Args: cobra.ExactArgs(1),
-	RunE: dceExec,
+		Args: cobra.ExactArgs(1),
+		RunE: dceExec,
+	}
+	dceCmd.Flags().StringVarP(&dceOutput, "output", "o", "", "Output file path (omit for dry run)")
+	return dceCmd
 }
 
 func dceExec(cmd *cobra.Command, args []string) error {
@@ -60,9 +64,4 @@ func dceExec(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Written to:         %s\n", dceOutput)
 
 	return nil
-}
-
-func init() {
-	dceCmd.Flags().StringVarP(&dceOutput, "output", "o", "", "Output file path (omit for dry run)")
-	rootCmd.AddCommand(dceCmd)
 }

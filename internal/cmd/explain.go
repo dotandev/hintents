@@ -21,11 +21,12 @@ var (
 	explainRPCToken    string
 )
 
-var explainCmd = &cobra.Command{
-	Use:     "explain [transaction-hash]",
-	GroupID: "core",
-	Short:   "Summarize why a transaction failed in plain English",
-	Long: `Apply heuristic analysis to a transaction and output a single-paragraph
+func NewExplainCmd() *cobra.Command {
+	explainCmd := &cobra.Command{
+		Use:     "explain [transaction-hash]",
+		GroupID: "core",
+		Short:   "Summarize why a transaction failed in plain English",
+		Long: `Apply heuristic analysis to a transaction and output a single-paragraph
 explanation of the root cause of the failure.
 
 If a transaction hash is provided the command fetches and simulates it.
@@ -35,27 +36,33 @@ Examples:
   erst explain 5c0a1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab
   erst explain --network testnet <tx-hash>
   erst debug <tx-hash> && erst explain`,
-	Args: cobra.MaximumNArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
+		Args: cobra.MaximumNArgs(1),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return nil
+			}
+			if err := rpc.ValidateTransactionHash(args[0]); err != nil {
+				return fmt.Errorf("invalid transaction hash: %w", err)
+			}
+			switch rpc.Network(explainNetworkFlag) {
+			case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
+			default:
+				return fmt.Errorf("invalid network: %s; must be testnet, mainnet, or futurenet", explainNetworkFlag)
+			}
 			return nil
-		}
-		if err := rpc.ValidateTransactionHash(args[0]); err != nil {
-			return fmt.Errorf("invalid transaction hash: %w", err)
-		}
-		switch rpc.Network(explainNetworkFlag) {
-		case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
-		default:
-			return fmt.Errorf("invalid network: %s; must be testnet, mainnet, or futurenet", explainNetworkFlag)
-		}
-		return nil
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return explainFromSession()
-		}
-		return explainFromNetwork(cmd, args[0])
-	},
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return explainFromSession()
+			}
+			return explainFromNetwork(cmd, args[0])
+		},
+	}
+	explainCmd.Flags().StringVarP(&explainNetworkFlag, "network", "n", "mainnet", "Stellar network (testnet, mainnet, futurenet)")
+	explainCmd.Flags().StringVar(&explainRPCURLFlag, "rpc-url", "", "Custom RPC URL")
+	explainCmd.Flags().StringVar(&explainRPCToken, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
+	_ = explainCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
+	return explainCmd
 }
 
 func explainFromSession() error {
@@ -153,14 +160,4 @@ func explainFromNetwork(cmd *cobra.Command, txHash string) error {
 	}
 	fmt.Println(heuristic.Summarize(in))
 	return nil
-}
-
-func init() {
-	explainCmd.Flags().StringVarP(&explainNetworkFlag, "network", "n", "mainnet", "Stellar network (testnet, mainnet, futurenet)")
-	explainCmd.Flags().StringVar(&explainRPCURLFlag, "rpc-url", "", "Custom RPC URL")
-	explainCmd.Flags().StringVar(&explainRPCToken, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
-
-	_ = explainCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
-
-	rootCmd.AddCommand(explainCmd)
 }

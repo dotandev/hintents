@@ -27,11 +27,12 @@ var (
 // NOTE: High-precision fee estimation ultimately depends on network fee configuration. This command
 // provides a deterministic estimate based on the simulator's reported resource usage, intended as a
 // safe lower bound / guidance for setting fee/budget.
-var dryRunCmd = &cobra.Command{
-	Use:     "dry-run <tx.xdr>",
-	GroupID: "testing",
-	Short:   "Pre-submission dry run to estimate Soroban transaction cost",
-	Long: `Replay a local transaction envelope (not yet on chain) against current network state.
+func NewDryRunCmd() *cobra.Command {
+	dryRunCmd := &cobra.Command{
+		Use:     "dry-run <tx.xdr>",
+		GroupID: "testing",
+		Short:   "Pre-submission dry run to estimate Soroban transaction cost",
+		Long: `Replay a local transaction envelope (not yet on chain) against current network state.
 
 This command:
   1) Loads a base64-encoded TransactionEnvelope XDR from a local file
@@ -41,25 +42,21 @@ This command:
 
 Example:
   erst dry-run ./tx.xdr --network testnet`,
-	Args: cobra.ExactArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		// Validate network flag
-		switch rpc.Network(dryRunNetworkFlag) {
-		default:
-			return errors.WrapInvalidNetwork(dryRunNetworkFlag)
-		}
-	},
-	RunE: runDryRun,
-}
-
-func init() {
+		Args: cobra.ExactArgs(1),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			// Validate network flag
+			switch rpc.Network(dryRunNetworkFlag) {
+			default:
+				return errors.WrapInvalidNetwork(dryRunNetworkFlag)
+			}
+		},
+		RunE: runDryRun,
+	}
 	dryRunCmd.Flags().StringVarP(&dryRunNetworkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
 	dryRunCmd.Flags().StringVar(&dryRunRPCURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
 	dryRunCmd.Flags().StringVar(&dryRunRPCTokenFlag, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
-
 	_ = dryRunCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
-
-	rootCmd.AddCommand(dryRunCmd)
+	return dryRunCmd
 }
 
 func runDryRun(cmd *cobra.Command, args []string) error {
