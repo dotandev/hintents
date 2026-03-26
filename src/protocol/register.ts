@@ -4,10 +4,18 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { constants as fsConstants } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+
+export interface ProtocolDiagnostics {
+    registered: boolean;
+    cliPath: string | null;
+    pathExists: boolean;
+    isExecutable: boolean;
+}
 
 /**
  * ProtocolRegistrar handles the registration and unregistration of the
@@ -198,5 +206,77 @@ Terminal=false`;
         } catch {
             return false;
         }
+    }
+
+    async getRegisteredPath(): Promise<string | null> {
+        const platform = os.platform();
+
+        try {
+            switch (platform) {
+                case 'win32': {
+                    const { stdout } = await execAsync(
+                        `reg query "HKEY_CURRENT_USER\\Software\\Classes\\${this.protocol}\\shell\\open\\command" /ve`
+                    );
+                    const match = stdout.match(/"([^"]+)"\s+protocol-handler/);
+                    return match ? match[1] : null;
+                }
+                case 'darwin': {
+                    const plistPath = path.join(
+                        os.homedir(), 'Library', 'LaunchAgents', 'com.erst.protocol.plist'
+                    );
+                    const content = await fs.readFile(plistPath, 'utf8');
+                    const match = content.match(/<key>ProgramArguments<\/key>\s*<array>\s*<string>([^<]+)<\/string>/);
+                    return match ? match[1] : null;
+                }
+                case 'linux': {
+                    const desktopPath = path.join(
+                        os.homedir(), '.local', 'share', 'applications', 'erst-protocol.desktop'
+                    );
+                    const content = await fs.readFile(desktopPath, 'utf8');
+                    const match = content.match(/^Exec=(.+)\s+protocol-handler/m);
+                    return match ? match[1] : null;
+                }
+                default:
+                    return null;
+            }
+        } catch {
+            return null;
+        }
+    }
+
+    async diagnose(): Promise<ProtocolDiagnostics> {
+        const registered = await this.isRegistered();
+        if (!registered) {
+            return { registered: false, cliPath: null, pathExists: false, isExecutable: false };
+        }
+
+        const cliPath = await this.getRegisteredPath();
+        if (!cliPath) {
+            return { registered: true, cliPath: null, pathExists: false, isExecutable: false };
+        }
+
+        let pathExists = false;
+        let isExecutable = false;
+
+        try {
+            await fs.access(cliPath);
+            pathExists = true;
+        } catch {
+            return { registered: true, cliPath, pathExists: false, isExecutable: false };
+        }
+
+        try {
+            if (os.platform() === 'win32') {
+                const ext = path.extname(cliPath).toLowerCase();
+                isExecutable = ['.exe', '.cmd', '.bat', '.com'].includes(ext);
+            } else {
+                await fs.access(cliPath, fsConstants.X_OK);
+                isExecutable = true;
+            }
+        } catch {
+            // File exists but is not executable
+        }
+
+        return { registered: true, cliPath, pathExists, isExecutable };
     }
 }

@@ -189,3 +189,49 @@ func TestDoctorCommand(t *testing.T) {
 		t.Error("doctor command should have --verbose flag")
 	}
 }
+
+// TestCheckDeepLink_Name verifies the check returns the correct display name.
+func TestCheckDeepLink_Name(t *testing.T) {
+	dep := checkDeepLink(false)
+	if dep.Name != "Deep link (erst:// scheme)" {
+		t.Errorf("checkDeepLink() name = %q, want %q", dep.Name, "Deep link (erst:// scheme)")
+	}
+}
+
+// TestCheckDeepLink_FailHasHint verifies that when the scheme is not registered
+// a non-empty FixHint is provided.
+func TestCheckDeepLink_FailHasHint(t *testing.T) {
+	dep := checkDeepLink(false)
+	// On CI the scheme is almost certainly not registered, so we only assert
+	// that a hint is present when the check fails.
+	if !dep.Installed && dep.FixHint == "" {
+		t.Error("checkDeepLink() should provide FixHint when scheme is not registered")
+	}
+}
+
+// TestCheckDeepLink_VerbosePath verifies that verbose mode populates Path when
+// the check succeeds.
+func TestCheckDeepLink_VerbosePath(t *testing.T) {
+	dep := checkDeepLink(true)
+	if dep.Installed && dep.Path == "" {
+		t.Error("checkDeepLink(verbose=true) should set Path when installed")
+	}
+}
+
+// TestBuildDeepLinkFixHint_Empty verifies the fallback message when no steps
+// are provided.
+func TestBuildDeepLinkFixHint_Empty(t *testing.T) {
+	hint := buildDeepLinkFixHint(nil)
+	if hint == "" {
+		t.Error("buildDeepLinkFixHint(nil) must return a non-empty fallback hint")
+	}
+}
+
+// TestBuildDeepLinkFixHint_UsesFirstStep verifies that the first step is used.
+func TestBuildDeepLinkFixHint_UsesFirstStep(t *testing.T) {
+	steps := []string{"step one", "step two"}
+	hint := buildDeepLinkFixHint(steps)
+	if hint != "step one" {
+		t.Errorf("buildDeepLinkFixHint() = %q, want %q", hint, "step one")
+	}
+}

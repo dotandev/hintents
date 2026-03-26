@@ -230,6 +230,59 @@ func (c *Client) markSuccess(url string) {
 	c.failures[url] = 0
 }
 
+// markHorizonFailure atomically reads HorizonURL and records a failure.
+// This prevents a data race between the bare field read and rotateURL's write.
+func (c *Client) markHorizonFailure() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	url := c.HorizonURL
+	if c.failures == nil {
+		c.failures = make(map[string]int)
+	}
+	if c.lastFailure == nil {
+		c.lastFailure = make(map[string]time.Time)
+	}
+	c.failures[url]++
+	c.lastFailure[url] = time.Now()
+}
+
+// markHorizonSuccess atomically reads HorizonURL and resets its failure count.
+func (c *Client) markHorizonSuccess() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	url := c.HorizonURL
+	if c.failures == nil {
+		c.failures = make(map[string]int)
+	}
+	c.failures[url] = 0
+}
+
+// markSorobanFailure atomically reads SorobanURL and records a failure.
+func (c *Client) markSorobanFailure() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	url := c.SorobanURL
+	if c.failures == nil {
+		c.failures = make(map[string]int)
+	}
+	if c.lastFailure == nil {
+		c.lastFailure = make(map[string]time.Time)
+	}
+	c.failures[url]++
+	c.lastFailure[url] = time.Now()
+}
+
+// markSorobanSuccess atomically reads SorobanURL and resets its failure count.
+func (c *Client) markSorobanSuccess() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	url := c.SorobanURL
+	if c.failures == nil {
+		c.failures = make(map[string]int)
+	}
+	c.failures[url] = 0
+}
+
 // NewClientDefault creates a new RPC client with sensible defaults
 // Uses the Mainnet by default and accepts optional environment token
 // Deprecated: Use NewClient with functional options instead
@@ -439,11 +492,11 @@ func (c *Client) GetTransaction(ctx context.Context, hash string) (*TransactionR
 	for attempt := 0; attempt < attempts; attempt++ {
 		resp, err := c.getTransactionAttempt(ctx, hash)
 		if err == nil {
-			c.markSuccess(c.HorizonURL)
+			c.markHorizonSuccess()
 			return resp, nil
 		}
 
-		c.markFailure(c.HorizonURL)
+		c.markHorizonFailure()
 
 		failures = append(failures, NodeFailure{URL: c.HorizonURL, Reason: err})
 
@@ -588,11 +641,11 @@ func (c *Client) GetLedgerHeader(ctx context.Context, sequence uint32) (*LedgerH
 	for attempt := 0; attempt < attempts; attempt++ {
 		resp, err := c.getLedgerHeaderAttempt(ctx, sequence)
 		if err == nil {
-			c.markSuccess(c.HorizonURL)
+			c.markHorizonSuccess()
 			return resp, nil
 		}
 
-		c.markFailure(c.HorizonURL)
+		c.markHorizonFailure()
 
 		failures = append(failures, NodeFailure{URL: c.HorizonURL, Reason: err})
 
@@ -810,7 +863,7 @@ func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[strin
 			return entries, nil
 		}
 
-		c.markFailure(c.SorobanURL)
+		c.markSorobanFailure()
 
 		if attempt < attempts-1 && len(c.AltURLs) > 1 {
 			logger.Logger.Warn("Retrying with fallback Soroban RPC...", "error", err)
@@ -1224,11 +1277,11 @@ func (c *Client) SimulateTransaction(ctx context.Context, envelopeXdr string) (*
 	for attempt := 0; attempt < attempts; attempt++ {
 		resp, err := c.simulateTransactionAttempt(ctx, envelopeXdr)
 		if err == nil {
-			c.markSuccess(c.SorobanURL)
+			c.markSorobanSuccess()
 			return resp, nil
 		}
 
-		c.markFailure(c.SorobanURL)
+		c.markSorobanFailure()
 
 		failures = append(failures, NodeFailure{URL: c.SorobanURL, Reason: err})
 
@@ -1336,11 +1389,11 @@ func (c *Client) GetHealth(ctx context.Context) (*GetHealthResponse, error) {
 	for attempt := 0; attempt < attempts; attempt++ {
 		resp, err := c.getHealthAttempt(ctx)
 		if err == nil {
-			c.markSuccess(c.SorobanURL)
+			c.markSorobanSuccess()
 			return resp, nil
 		}
 
-		c.markFailure(c.SorobanURL)
+		c.markSorobanFailure()
 		failures = append(failures, NodeFailure{URL: c.SorobanURL, Reason: err})
 
 		if attempt < attempts-1 && len(c.AltURLs) > 1 {

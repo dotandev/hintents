@@ -96,21 +96,46 @@ pub struct SourceMapCacheEntry {
 /// Source map cache manager
 pub struct SourceMapCache {
     cache_dir: PathBuf,
+    max_cache_size: Option<u64>,
 }
 
 impl SourceMapCache {
     /// Creates a new SourceMapCache with the default cache directory
     pub fn new() -> Result<Self, String> {
         let cache_dir = Self::get_default_cache_dir()?;
-        Ok(Self { cache_dir })
+        Ok(Self {
+            cache_dir,
+            max_cache_size: None,
+        })
     }
 
     /// Creates a new SourceMapCache with a custom cache directory
     pub fn with_cache_dir(cache_dir: PathBuf) -> Result<Self, String> {
-        // Ensure the cache directory exists
         fs::create_dir_all(&cache_dir)
             .map_err(|e| format!("Failed to create cache directory: {}", e))?;
-        Ok(Self { cache_dir })
+        Ok(Self {
+            cache_dir,
+            max_cache_size: None,
+        })
+    }
+
+    /// Creates a new SourceMapCache with a custom cache directory and max cache size
+    pub fn with_cache_dir_and_max_size(
+        cache_dir: PathBuf,
+        max_cache_size: u64,
+    ) -> Result<Self, String> {
+        fs::create_dir_all(&cache_dir)
+            .map_err(|e| format!("Failed to create cache directory: {}", e))?;
+        Ok(Self {
+            cache_dir,
+            max_cache_size: Some(max_cache_size),
+        })
+    }
+
+    /// Sets the max cache size for this cache instance
+    pub fn with_max_cache_size(mut self, max_size: u64) -> Self {
+        self.max_cache_size = Some(max_size);
+        self
     }
 
     /// Gets the default cache directory (~/.erst/cache/sourcemaps)
@@ -262,6 +287,56 @@ impl SourceMapCache {
         write_result?;
 
         println!("Cached source map for WASM: {}", &entry.wasm_hash[..8]);
+
+        if let Some(max_size) = self.max_cache_size {
+            self.evict_if_needed(max_size)?;
+        }
+
+        Ok(())
+    }
+
+    /// Evicts oldest cache entries if current size exceeds max_size
+    fn evict_if_needed(&self, max_size: u64) -> Result<(), String> {
+        let current_size = self.get_cache_size()?;
+        if current_size <= max_size {
+            return Ok(());
+        }
+
+        let entries = self.list_cached()?;
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        let mut sorted_entries = entries;
+        sorted_entries.sort_by_key(|e| e.created_at);
+
+        let mut freed_space = 0u64;
+        let target_free = current_size - max_size + (max_size / 4);
+
+        for entry in sorted_entries {
+            if freed_space >= target_free {
+                break;
+            }
+
+            let cache_path = self.cache_dir.join(format!("{}.bin", entry.wasm_hash));
+            let lock_path = SourceMapCache::get_lock_path(&cache_path);
+
+            if cache_path.exists() {
+                if let Ok(metadata) = fs::metadata(&cache_path) {
+                    freed_space += metadata.len();
+                }
+                if let Err(e) = fs::remove_file(&cache_path) {
+                    eprintln!("Failed to remove cache file {:?}: {}", cache_path, e);
+                } else {
+                    println!("Evicted cache entry: {}", &entry.wasm_hash[..8]);
+                }
+            }
+
+            if lock_path.exists() {
+                let _ = fs::remove_file(&lock_path);
+            }
+        }
+
         Ok(())
     }
 
@@ -548,5 +623,184 @@ mod tests {
         let list = cache.list_cached().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].wasm_hash, wasm_hash);
+    }
+
+    #[test]
+    fn test_eviction_triggers_correctly() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache =
+            SourceMapCache::with_cache_dir_and_max_size(temp_dir.path().to_path_buf(), 5000)
+                .unwrap();
+
+        let wasm_bytes1 = vec![0x00, 0x61, 0x73, 0x6d, 0x01];
+        let wasm_hash1 = SourceMapCache::compute_wasm_hash(&wasm_bytes1);
+
+        let mut mappings1 = HashMap::new();
+        mappings1.insert(
+            0x1234,
+            SourceLocation {
+                file: "test1.rs".to_string(),
+                line: 1,
+                column: Some(1),
+                column_end: None,
+                github_link: None,
+            },
+        );
+
+        let entry1 = SourceMapCacheEntry {
+            wasm_hash: wasm_hash1.clone(),
+            has_symbols: true,
+            mappings: mappings1,
+            created_at: 1000,
+        };
+
+        cache.store(entry1).unwrap();
+
+        let size1 = cache.get_cache_size().unwrap();
+        assert!(size1 > 0, "Cache should have some size");
+
+        let wasm_bytes2 = vec![0x00, 0x61, 0x73, 0x6d, 0x02];
+        let wasm_hash2 = SourceMapCache::compute_wasm_hash(&wasm_bytes2);
+
+        let mut mappings2 = HashMap::new();
+        for i in 0..50u64 {
+            mappings2.insert(
+                i,
+                SourceLocation {
+                    file: "test2.rs".to_string(),
+                    line: i as u32,
+                    column: Some(i as u32),
+                    column_end: None,
+                    github_link: None,
+                },
+            );
+        }
+
+        let entry2 = SourceMapCacheEntry {
+            wasm_hash: wasm_hash2.clone(),
+            has_symbols: true,
+            mappings: mappings2,
+            created_at: 2000,
+        };
+
+        cache.store(entry2).unwrap();
+
+        let list = cache.list_cached().unwrap();
+        assert!(
+            list.len() <= 2,
+            "Should have at most 2 entries after eviction"
+        );
+
+        if list.len() == 1 {
+            assert_eq!(list[0].wasm_hash, wasm_hash2);
+        }
+    }
+
+    #[test]
+    fn test_eviction_removes_oldest_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache = SourceMapCache::with_cache_dir_and_max_size(temp_dir.path().to_path_buf(), 200)
+            .unwrap();
+
+        for i in 0..5u64 {
+            let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d, i as u8];
+            let wasm_hash = SourceMapCache::compute_wasm_hash(&wasm_bytes);
+
+            let mut mappings = HashMap::new();
+            for j in 0..10u64 {
+                mappings.insert(
+                    j,
+                    SourceLocation {
+                        file: format!("test{}.rs", i),
+                        line: j as u32,
+                        column: Some(j as u32),
+                        column_end: None,
+                        github_link: None,
+                    },
+                );
+            }
+
+            let entry = SourceMapCacheEntry {
+                wasm_hash,
+                has_symbols: true,
+                mappings,
+                created_at: 1000 + i,
+            };
+
+            cache.store(entry).unwrap();
+        }
+
+        let list = cache.list_cached().unwrap();
+        assert!(list.len() < 5, "Should have evicted some entries");
+
+        if !list.is_empty() {
+            let min_created_at = list.iter().map(|e| e.created_at).min().unwrap();
+            assert!(
+                min_created_at > 1000,
+                "Oldest entries should have been evicted"
+            );
+        }
+    }
+
+    #[test]
+    fn test_with_max_cache_size_builder() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache = SourceMapCache::with_cache_dir(temp_dir.path().to_path_buf())
+            .unwrap()
+            .with_max_cache_size(500);
+
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        let wasm_hash = SourceMapCache::compute_wasm_hash(&wasm_bytes);
+
+        let entry = SourceMapCacheEntry {
+            wasm_hash,
+            has_symbols: true,
+            mappings: HashMap::new(),
+            created_at: 1234567890,
+        };
+
+        cache.store(entry).unwrap();
+
+        let list = cache.list_cached().unwrap();
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn test_no_eviction_when_max_size_not_set() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache = SourceMapCache::with_cache_dir(temp_dir.path().to_path_buf()).unwrap();
+
+        for i in 0..3u64 {
+            let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d, i as u8];
+            let wasm_hash = SourceMapCache::compute_wasm_hash(&wasm_bytes);
+
+            let mut mappings = HashMap::new();
+            mappings.insert(
+                0,
+                SourceLocation {
+                    file: "test.rs".to_string(),
+                    line: 1,
+                    column: Some(1),
+                    column_end: None,
+                    github_link: None,
+                },
+            );
+
+            let entry = SourceMapCacheEntry {
+                wasm_hash,
+                has_symbols: true,
+                mappings,
+                created_at: 1000 + i,
+            };
+
+            cache.store(entry).unwrap();
+        }
+
+        let list = cache.list_cached().unwrap();
+        assert_eq!(
+            list.len(),
+            3,
+            "No eviction should occur without max_size set"
+        );
     }
 }

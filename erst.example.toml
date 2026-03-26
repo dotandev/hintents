@@ -22,6 +22,11 @@ log_level = "info"
 # Cache directory for storing traces and snapshots
 # cache_path = "~/.erst/cache"
 
+# Maximum source map cache size (e.g., 500MB, 1GB)
+# When exceeded, oldest entries are automatically evicted
+# Examples: "500MB", "1GB", 524288000 (bytes)
+# max_cache_size = "500MB"
+
 # Opt-in anonymous crash reporting.
 # When enabled, fatal panics and unhandled errors send a minimal report
 # (error message, stack trace, OS/arch, version) to the maintainer.

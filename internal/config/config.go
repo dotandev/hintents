@@ -56,6 +56,10 @@ type Config struct {
 	LogLevel          string   `json:"log_level,omitempty"`
 	CachePath         string   `json:"cache_path,omitempty"`
 	RPCToken          string   `json:"rpc_token,omitempty"`
+	// MaxCacheSize is the maximum size of the source map cache in bytes.
+	// Set via max_cache_size in config (e.g., "500MB" or bytes).
+	// Defaults to no limit (cache grows indefinitely).
+	MaxCacheSize int64 `json:"max_cache_size,omitempty"`
 	// CrashReporting enables opt-in anonymous crash reporting.
 	// Set via crash_reporting = true in config or ERST_CRASH_REPORTING=true.
 	CrashReporting bool `json:"crash_reporting,omitempty"`
@@ -92,6 +96,7 @@ var defaultConfig = &Config{
 	LogLevel:       "info",
 	CachePath:      filepath.Join(os.ExpandEnv("$HOME"), ".erst", "cache"),
 	RequestTimeout: defaultRequestTimeout,
+	MaxCacheSize:   0,
 }
 
 // -- Core Functions --
@@ -122,6 +127,7 @@ func DefaultConfig() *Config {
 		LogLevel:       defaultConfig.LogLevel,
 		CachePath:      defaultConfig.CachePath,
 		RequestTimeout: defaultConfig.RequestTimeout,
+		MaxCacheSize:   defaultConfig.MaxCacheSize,
 	}
 }
 
@@ -133,6 +139,7 @@ func NewConfig(rpcUrl string, network Network) *Config {
 		LogLevel:       defaultConfig.LogLevel,
 		CachePath:      defaultConfig.CachePath,
 		RequestTimeout: defaultConfig.RequestTimeout,
+		MaxCacheSize:   defaultConfig.MaxCacheSize,
 	}
 }
 
@@ -282,6 +289,12 @@ func (envParser) Parse(cfg *Config) error {
 	}
 	if v := os.Getenv("ERST_RPC_TOKEN"); v != "" {
 		cfg.RPCToken = v
+	}
+	if v := os.Getenv("ERST_MAX_CACHE_SIZE"); v != "" {
+		n, err := parseSize(v)
+		if err == nil && n > 0 {
+			cfg.MaxCacheSize = n
+		}
 	}
 	if v := os.Getenv("ERST_CRASH_ENDPOINT"); v != "" {
 		cfg.CrashEndpoint = v
