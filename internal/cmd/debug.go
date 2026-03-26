@@ -4,10 +4,12 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -55,6 +57,8 @@ var (
 	demoMode            bool
 	watchFlag           bool
 	watchTimeoutFlag    int
+	hotReloadFlag       bool
+	hotReloadInterval   time.Duration
 	protocolVersionFlag uint32
 	auditKeyFlag        string
 	publishIPFSFlag     bool
@@ -199,6 +203,10 @@ Local WASM Replay Mode:
   erst debug --demo`,
 	Args: cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if hotReloadFlag && wasmPath == "" {
+			return errors.WrapValidationError("--hot-reload requires --wasm")
+		}
+
 		// Demo mode or local WASM replay don't need transaction hash
 		if demoMode || wasmPath != "" {
 			return nil
@@ -786,20 +794,34 @@ func runLocalWasmReplay() error {
 	if err != nil {
 		return errors.WrapSimulatorNotFound(err.Error())
 	}
+	defer runner.Close()
 
-	// Create simulation request with local WASM
+	ctx := context.Background()
+	if hotReloadFlag {
+		return runLocalWasmReplaySession(ctx, runner, os.Stdin, os.Stdout)
+	}
+	return runLocalWasmReplayOnce(ctx, runner, false)
+}
+
+func newLocalWasmSimulationRequest(forceNoCache bool) *simulator.SimulationRequest {
 	req := &simulator.SimulationRequest{
 		EnvelopeXdr:   "",  // Empty for local replay
 		ResultMetaXdr: "",  // Empty for local replay
 		LedgerEntries: nil, // Mock state will be generated
 		WasmPath:      &wasmPath,
+		NoCache:       noCacheFlag || forceNoCache,
 		MockArgs:      &args,
 	}
 	applySimulationFeeMocks(req)
+	return req
+}
+
+func runLocalWasmReplayOnce(ctx context.Context, runner simulator.RunnerInterface, forceNoCache bool) error {
+	req := newLocalWasmSimulationRequest(forceNoCache)
 
 	// Run simulation
 	fmt.Printf("%s Executing contract locally...\n", visualizer.Symbol("play"))
-	resp, err := runner.Run(context.Background(), req)
+	resp, err := runner.Run(ctx, req)
 	if err != nil {
 		fmt.Printf("%s Technical failure: %v\n", visualizer.Error(), err)
 		return err
@@ -854,6 +876,117 @@ func runLocalWasmReplay() error {
 	}
 
 	return nil
+}
+
+func runLocalWasmReplaySession(ctx context.Context, runner simulator.RunnerInterface, in io.Reader, out io.Writer) error {
+	fmt.Println("[watcher] Hot reload enabled")
+	if err := runLocalWasmReplayOnce(ctx, runner, false); err != nil {
+		return err
+	}
+
+	initialFP, err := watch.ComputeWasmFingerprint(wasmPath, 5, 50*time.Millisecond)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("failed to fingerprint initial wasm: %v", err))
+	}
+	lastAppliedHash := initialFP.Hash
+
+	cfg := watch.DefaultWasmReloaderConfig(wasmPath, hotReloadInterval)
+	reloadEvents, reloadErrors, err := watch.StartWasmReloader(ctx, cfg)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("failed to start wasm watcher: %v", err))
+	}
+	fmt.Println("[watcher] Watching for WASM changes")
+
+	reader := bufio.NewReader(in)
+	var pending *watch.ReloadEvent
+
+	for {
+		if pending != nil {
+			choice, promptErr := promptHotReloadChoice(reader, out)
+			if promptErr != nil {
+				return promptErr
+			}
+
+			switch choice {
+			case 'r':
+				fmt.Println("[watcher] Re-running simulation with updated WASM")
+				if err := runLocalWasmReplayOnce(ctx, runner, true); err != nil {
+					fmt.Printf("[watcher] Re-run failed: %v\n", err)
+				} else {
+					lastAppliedHash = pending.Hash
+				}
+			case 's':
+				fmt.Println("[watcher] Reload skipped")
+			case 'q':
+				fmt.Println("[watcher] Exiting hot reload session")
+				return nil
+			}
+			pending = drainLatestReloadEvent(reloadEvents, lastAppliedHash)
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case watchErr, ok := <-reloadErrors:
+			if !ok {
+				reloadErrors = nil
+				continue
+			}
+			fmt.Printf("[watcher] Warning: %v\n", watchErr)
+		case event, ok := <-reloadEvents:
+			if !ok {
+				return nil
+			}
+			if event.Hash == lastAppliedHash {
+				continue
+			}
+			fmt.Println("[watcher] WASM updated (hash changed)")
+			fmt.Println("[watcher] Reload available")
+			pending = &event
+		}
+	}
+}
+
+func promptHotReloadChoice(reader *bufio.Reader, out io.Writer) (byte, error) {
+	for {
+		fmt.Fprint(out, "Re-run simulation? (r = reload, s = skip, q = quit): ")
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF && strings.TrimSpace(line) != "" {
+				// Accept final line without trailing newline.
+			} else {
+				return 0, err
+			}
+		}
+
+		choice := strings.ToLower(strings.TrimSpace(line))
+		switch choice {
+		case "r", "s", "q":
+			return choice[0], nil
+		default:
+			fmt.Fprintln(out, "Invalid choice. Please enter r, s, or q.")
+		}
+	}
+}
+
+func drainLatestReloadEvent(events <-chan watch.ReloadEvent, lastAppliedHash string) *watch.ReloadEvent {
+	var latest *watch.ReloadEvent
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				return latest
+			}
+			if event.Hash == lastAppliedHash {
+				continue
+			}
+			ev := event
+			latest = &ev
+		default:
+			return latest
+		}
+	}
 }
 
 func extractLedgerKeys(metaXdr string) ([]string, error) {
@@ -1139,6 +1272,8 @@ func init() {
 	debugCmd.Flags().BoolVar(&demoMode, "demo", false, "Print sample output (no network) - for testing color detection")
 	debugCmd.Flags().BoolVar(&watchFlag, "watch", false, "Poll for transaction on-chain before debugging")
 	debugCmd.Flags().IntVar(&watchTimeoutFlag, "watch-timeout", 30, "Timeout in seconds for watch mode")
+	debugCmd.Flags().BoolVar(&hotReloadFlag, "hot-reload", false, "Hot reload local WASM changes during debug session (requires --wasm)")
+	debugCmd.Flags().DurationVar(&hotReloadInterval, "hot-reload-interval", 500*time.Millisecond, "Polling interval fallback for hot reload (e.g. 500ms)")
 	debugCmd.Flags().Uint32Var(&mockBaseFeeFlag, "mock-base-fee", 0, "Override base fee (stroops) for local fee sufficiency checks")
 	debugCmd.Flags().Uint64Var(&mockGasPriceFlag, "mock-gas-price", 0, "Override gas price multiplier for local fee sufficiency checks")
 	debugCmd.Flags().StringVar(&themeFlag, "theme", "", "Color theme override (dark, light, none)")
