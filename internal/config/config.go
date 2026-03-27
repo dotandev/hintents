@@ -66,6 +66,14 @@ type Config struct {
 	RequestTimeout int `json:"request_timeout,omitempty"`
 	// MaxTraceDepth is the maximum depth of the call tree before it is truncated.
 	MaxTraceDepth int `json:"max_trace_depth,omitempty"`
+	// CircuitBreakerThreshold is the number of consecutive failures before opening the circuit breaker.
+	// Set via circuit_breaker_threshold in config or ERST_CIRCUIT_BREAKER_THRESHOLD.
+	// Defaults to 5 failures.
+	CircuitBreakerThreshold int `json:"circuit_breaker_threshold,omitempty"`
+	// CircuitBreakerTimeout is the duration in seconds the circuit breaker remains open before resetting.
+	// Set via circuit_breaker_timeout in config or ERST_CIRCUIT_BREAKER_TIMEOUT.
+	// Defaults to 60 seconds.
+	CircuitBreakerTimeout int `json:"circuit_breaker_timeout,omitempty"`
 }
 
 // -- Constants & Defaults --

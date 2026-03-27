@@ -329,6 +329,14 @@ Local WASM Replay Mode:
 			rpc.WithToken(token),
 		}
 
+		// Load circuit breaker configuration from config file
+		cfg, err := config.Load()
+		if err == nil {
+			if cfg.CircuitBreakerThreshold > 0 && cfg.CircuitBreakerTimeout > 0 {
+				opts = append(opts, rpc.WithCircuitBreaker(cfg.CircuitBreakerThreshold, time.Duration(cfg.CircuitBreakerTimeout)*time.Second))
+			}
+		}
+
 		if rpcURLFlag != "" {
 			urls := strings.Split(rpcURLFlag, ",")
 			for i := range urls {
