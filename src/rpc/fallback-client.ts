@@ -6,6 +6,7 @@ import { open, type FileHandle } from 'fs/promises';
 import { RPCConfig } from '../config/rpc-config';
 import { getLogger, LogCategory } from '../utils/logger';
 import { SDKContext, SDKResponse, SDKMiddleware, NextFn, composeMiddleware } from '../xdr/types';
+import type { SendTransactionOptions } from './types-v2';
 
 interface RPCEndpoint {
     url: string;
@@ -83,15 +84,19 @@ export class FallbackRPCClient {
     /**
      * Make RPC request with automatic fallback, executing middleware chain.
      */
-    async request<T = any>(path: string, options: { method?: 'GET' | 'POST', data?: any } = {}): Promise<T> {
+    async request<T = any>(path: string, options: { method?: 'GET' | 'POST', data?: any, headers?: Record<string, string> } = {}): Promise<T> {
         const method = options.method || 'POST';
         const data = options.data;
+        const headers = {
+            ...(this.config.headers || {}),
+            ...(options.headers || {}),
+        };
 
         const ctx: SDKContext = {
             path,
             method,
             data,
-            headers: this.config.headers,
+            headers,
             metadata: {},
         };
 
@@ -136,7 +141,7 @@ export class FallbackRPCClient {
                 logger.verboseIndent(LogCategory.RPC, `${ctx.method} request to ${ctx.path}`);
                 logger.verboseIndent(LogCategory.RPC, `Request size: ${logger.formatBytes(requestSize)}`);
 
-                const response = await this.executeWithRetry(client, ctx.method as 'GET' | 'POST', ctx.path, ctx.data);
+                const response = await this.executeWithRetry(client, ctx.method as 'GET' | 'POST', ctx.path, ctx.data, ctx.headers);
 
                 const duration = Date.now() - requestStartTime;
                 this.updateMetrics(endpoint, duration, true);
@@ -309,16 +314,22 @@ export class FallbackRPCClient {
     /**
      * Execute request with local retries and exponential backoff
      */
-    private async executeWithRetry(client: AxiosInstance, method: 'GET' | 'POST', path: string, data: any): Promise<any> {
+    private async executeWithRetry(
+        client: AxiosInstance,
+        method: 'GET' | 'POST',
+        path: string,
+        data: any,
+        headers?: Record<string, string>,
+    ): Promise<any> {
         const logger = getLogger();
         let lastError: any;
 
         for (let attempt = 0; attempt < this.config.retries; attempt++) {
             try {
                 if (method === 'GET') {
-                    return await client.get(path);
+                    return await client.get(path, { headers });
                 }
-                return await client.post(path, data);
+                return await client.post(path, data, { headers });
             } catch (error) {
                 lastError = error;
 
@@ -612,9 +623,14 @@ export class FallbackRPCClient {
     /**
      * Send a transaction (Protocol V2)
      */
-    async sendTransaction(transactionXdr: string): Promise<any> {
+    async sendTransaction(transactionXdr: string, options: SendTransactionOptions = {}): Promise<any> {
+        const headers = options.idempotencyKey
+            ? { 'Idempotency-Key': options.idempotencyKey }
+            : undefined;
+
         return this.request('/', {
             method: 'POST',
+            headers,
             data: { jsonrpc: '2.0', id: 1, method: 'sendTransaction', params: { transaction: transactionXdr } }
         });
     }
