@@ -41,8 +41,12 @@ log_level = "info"
 
 # Circuit Breaker Configuration
 # Controls automatic failover behavior when using multiple RPC endpoints
-# circuit_breaker_threshold = 5        # Number of consecutive failures before opening circuit
-# circuit_breaker_timeout = 60         # Seconds to wait before attempting reset
+circuit_breaker_threshold = 5        # Number of consecutive failures before opening circuit
+circuit_breaker_timeout = 60         # Seconds to wait before attempting reset
+
+# Environment variable overrides:
+# ERST_CIRCUIT_BREAKER_THRESHOLD=5
+# ERST_CIRCUIT_BREAKER_TIMEOUT=60
 
 # Audit HSM Configuration
 # ERST_PKCS11_MODULE = "/usr/lib/softhsm/libsofthsm2.so"

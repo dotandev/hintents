@@ -46,6 +46,22 @@ func loadFromEnv(cfg *Config) error {
 		cfg.RequestTimeout = n
 	}
 
+	if v := os.Getenv("ERST_CIRCUIT_BREAKER_THRESHOLD"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return errors.WrapValidationError("ERST_CIRCUIT_BREAKER_THRESHOLD must be an integer")
+		}
+		cfg.CircuitBreakerThreshold = n
+	}
+
+	if v := os.Getenv("ERST_CIRCUIT_BREAKER_TIMEOUT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return errors.WrapValidationError("ERST_CIRCUIT_BREAKER_TIMEOUT must be an integer")
+		}
+		cfg.CircuitBreakerTimeout = n
+	}
+
 	switch strings.ToLower(os.Getenv("ERST_CRASH_REPORTING")) {
 	case "":
 	case "1", "true", "yes":
