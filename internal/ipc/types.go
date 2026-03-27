@@ -11,6 +11,17 @@ import (
 	"github.com/dotandev/hintents/internal/errors"
 )
 
+const (
+	ChunkFrameStart = "chunk_start"
+	ChunkFrameData  = "chunk_data"
+	ChunkFrameEnd   = "chunk_end"
+
+	DefaultChunkBytes       = 1024 * 1024
+	DefaultChunkTimeoutMs   = 5000
+	DefaultChunkRetryLimit  = 2
+	DefaultChunkMaxLineSize = 2 * 1024 * 1024
+)
+
 // ToErstError converts an IPC Error from the Rust simulator into the unified ErstError type.
 // The original Code and Message strings are preserved in OrigErr.
 // Note: the Rust simulator currently emits plain message strings without structured codes,
@@ -104,6 +115,22 @@ type SimulationResponseSchema struct {
 	Result    *Result `json:"result,omitempty"`
 	Success   bool    `json:"success"`
 	Version   string  `json:"version"`
+}
+
+type SimulationStreamFrame struct {
+	Kind       string `json:"kind"`
+	StreamID   string `json:"stream_id,omitempty"`
+	Index      int    `json:"index,omitempty"`
+	Total      int    `json:"total,omitempty"`
+	ChunkBytes int    `json:"chunk_bytes,omitempty"`
+	TimeoutMs  int    `json:"timeout_ms,omitempty"`
+	RetryLimit int    `json:"retry_limit,omitempty"`
+	DataBase64 string `json:"data_b64,omitempty"`
+	TotalBytes int64  `json:"total_bytes,omitempty"`
+}
+
+func (f SimulationStreamFrame) IsChunkFrame() bool {
+	return f.Kind == ChunkFrameStart || f.Kind == ChunkFrameData || f.Kind == ChunkFrameEnd
 }
 
 type Error struct {

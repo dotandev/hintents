@@ -60,7 +60,10 @@ impl SimulationContext {
         Ok(())
     }
 
-    pub fn capture_snapshot(&mut self, snapshot_id: impl Into<String>) -> Result<(), SimulationContextError> {
+    pub fn capture_snapshot(
+        &mut self,
+        snapshot_id: impl Into<String>,
+    ) -> Result<(), SimulationContextError> {
         self.sync_events()?;
         let snapshot = self.host.capture_snapshot()?;
         self.snapshots.insert(
@@ -98,11 +101,8 @@ impl SimulationContext {
         let host_events = self.host.event_log()?;
         if self.synced_host_event_count < host_events.len() {
             let host_event_count = host_events.len();
-            self.committed_events.extend(
-                host_events
-                    .into_iter()
-                    .skip(self.synced_host_event_count),
-            );
+            self.committed_events
+                .extend(host_events.into_iter().skip(self.synced_host_event_count));
             self.synced_host_event_count = host_event_count;
         }
         Ok(())
@@ -112,11 +112,11 @@ impl SimulationContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_env_host::EnvBase;
     use soroban_env_host::xdr::{
         ContractDataDurability, ContractDataEntry, ContractId, Hash, LedgerEntry, LedgerEntryData,
         LedgerEntryExt, LedgerKey, LedgerKeyContractData, Limits, ScAddress, ScVal, WriteXdr,
     };
+    use soroban_env_host::EnvBase;
     use std::rc::Rc;
 
     fn contract_data_key(id: u8, key: u32) -> Rc<LedgerKey> {
@@ -183,16 +183,12 @@ mod tests {
             .capture_snapshot()
             .expect("restored snapshot should be readable");
         assert_eq!(restored_snapshot.len(), 1);
-        assert!(
-            restored_snapshot
-                .get(&first_key.to_xdr(Limits::none()).unwrap())
-                .is_some()
-        );
-        assert!(
-            restored_snapshot
-                .get(&second_key.to_xdr(Limits::none()).unwrap())
-                .is_none()
-        );
+        assert!(restored_snapshot
+            .get(&first_key.to_xdr(Limits::none()).unwrap())
+            .is_some());
+        assert!(restored_snapshot
+            .get(&second_key.to_xdr(Limits::none()).unwrap())
+            .is_none());
 
         let after_rollback_events = context.events().expect("events should load");
         assert_eq!(after_rollback_events.len(), 1);
@@ -205,10 +201,8 @@ mod tests {
             .capture_snapshot()
             .expect("replayed snapshot should be readable");
         assert_eq!(replayed_snapshot.len(), 2);
-        assert!(
-            replayed_snapshot
-                .get(&second_key.to_xdr(Limits::none()).unwrap())
-                .is_some()
-        );
+        assert!(replayed_snapshot
+            .get(&second_key.to_xdr(Limits::none()).unwrap())
+            .is_some());
     }
 }

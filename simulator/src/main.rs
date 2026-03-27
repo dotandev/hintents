@@ -8,6 +8,7 @@ mod debug_host_fn;
 mod gas_optimizer;
 mod git_detector;
 mod runner;
+mod snapshot;
 mod source_map_cache;
 mod source_mapper;
 mod stack_trace;
@@ -20,6 +21,7 @@ use crate::source_mapper::SourceMapper;
 use crate::stack_trace::WasmStackTrace;
 use crate::types::*;
 use base64::Engine as _;
+use serde::Serialize;
 use soroban_env_host::xdr::{ReadXdr, WriteXdr};
 use soroban_env_host::{
     xdr::{Operation, OperationBody},
@@ -29,11 +31,41 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, Read};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing_subscriber::{fmt, EnvFilter};
 
 // Use types::SimulationRequest directly
 
 const ERR_MEMORY_LIMIT_EXCEEDED: &str = "ERR_MEMORY_LIMIT_EXCEEDED";
+const IPC_CHUNK_BYTES: usize = 1024 * 1024;
+const IPC_CHUNK_TIMEOUT_MS: u64 = 5000;
+const IPC_CHUNK_RETRY_LIMIT: u32 = 2;
+
+#[derive(Serialize)]
+struct StreamStartFrame<'a> {
+    kind: &'a str,
+    stream_id: &'a str,
+    total: usize,
+    chunk_bytes: usize,
+    timeout_ms: u64,
+    retry_limit: u32,
+}
+
+#[derive(Serialize)]
+struct StreamDataFrame<'a> {
+    kind: &'a str,
+    stream_id: &'a str,
+    index: usize,
+    data_b64: String,
+}
+
+#[derive(Serialize)]
+struct StreamEndFrame<'a> {
+    kind: &'a str,
+    stream_id: &'a str,
+    total: usize,
+    total_bytes: usize,
+}
 
 fn init_logger() {
     let use_json = env::var("ERST_LOG_FORMAT")
@@ -73,13 +105,66 @@ fn send_error(msg: String) {
         wasm_offset: None,
         linear_memory_dump: None,
     };
-    if let Ok(json) = serde_json::to_string(&res) {
-        println!("{}", json);
-    } else {
+    if emit_response(&res).is_err() {
         eprintln!("Failed to serialize error response");
         println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+    } else {
+        std::process::exit(1);
     }
     std::process::exit(1);
+}
+
+fn emit_response<T: Serialize>(response: &T) -> Result<(), serde_json::Error> {
+    let json = serde_json::to_vec(response)?;
+    if json.len() <= IPC_CHUNK_BYTES {
+        println!("{}", String::from_utf8_lossy(&json));
+        return Ok(());
+    }
+
+    let stream_id = format!(
+        "sim-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let total_chunks = json.len().div_ceil(IPC_CHUNK_BYTES);
+
+    println!(
+        "{}",
+        serde_json::to_string(&StreamStartFrame {
+            kind: "chunk_start",
+            stream_id: &stream_id,
+            total: total_chunks,
+            chunk_bytes: IPC_CHUNK_BYTES,
+            timeout_ms: IPC_CHUNK_TIMEOUT_MS,
+            retry_limit: IPC_CHUNK_RETRY_LIMIT,
+        })?
+    );
+
+    for (index, chunk) in json.chunks(IPC_CHUNK_BYTES).enumerate() {
+        println!(
+            "{}",
+            serde_json::to_string(&StreamDataFrame {
+                kind: "chunk_data",
+                stream_id: &stream_id,
+                index,
+                data_b64: base64::engine::general_purpose::STANDARD.encode(chunk),
+            })?
+        );
+    }
+
+    println!(
+        "{}",
+        serde_json::to_string(&StreamEndFrame {
+            kind: "chunk_end",
+            stream_id: &stream_id,
+            total: total_chunks,
+            total_bytes: json.len(),
+        })?
+    );
+
+    Ok(())
 }
 
 #[derive(Default)]
@@ -737,9 +822,7 @@ fn main() {
                         linear_memory_dump: None,
                     };
 
-                    if let Ok(json) = serde_json::to_string(&response) {
-                        println!("{}", json);
-                    } else {
+                    if emit_response(&response).is_err() {
                         eprintln!("Failed to serialize simulation response");
                         println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
                     }
@@ -770,9 +853,7 @@ fn main() {
                 linear_memory_dump: None,
             };
 
-            if let Ok(json) = serde_json::to_string(&response) {
-                println!("{}", json);
-            } else {
+            if emit_response(&response).is_err() {
                 eprintln!("Failed to serialize simulation response");
                 println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
             }
@@ -901,9 +982,7 @@ fn main() {
                 wasm_offset,
                 linear_memory_dump: None,
             };
-            if let Ok(json) = serde_json::to_string(&response) {
-                println!("{}", json);
-            } else {
+            if emit_response(&response).is_err() {
                 eprintln!("Failed to serialize host error response");
                 println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
             }
@@ -946,9 +1025,7 @@ fn main() {
                 wasm_offset: None,
                 linear_memory_dump: None,
             };
-            if let Ok(json) = serde_json::to_string(&response) {
-                println!("{}", json);
-            } else {
+            if emit_response(&response).is_err() {
                 eprintln!("Failed to serialize panic response");
                 println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
             }

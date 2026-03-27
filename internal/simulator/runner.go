@@ -243,6 +243,49 @@ func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationRe
 		req.Timestamp = r.MockTime
 	}
 
+	const maxChunkReadRetries = ipc.DefaultChunkRetryLimit
+
+	var (
+		resp *SimulationResponse
+		err  error
+	)
+	for attempt := 0; attempt <= maxChunkReadRetries; attempt++ {
+		resp, err = r.runAttempt(ctx, req)
+		if err == nil {
+			break
+		}
+
+		chunkErr, ok := err.(*chunkStreamError)
+		if !ok || attempt >= chunkErr.retryLimit {
+			return nil, err
+		}
+
+		logger.Logger.Warn(
+			"Retrying simulator after chunk delivery failure",
+			"attempt", attempt+1,
+			"retry_limit", chunkErr.retryLimit,
+			"error", chunkErr.Error(),
+		)
+	}
+
+	// If the simulator returned a logical error inside the response payload,
+	// classify it into a unified ErstError before returning to the caller.
+	if resp.Error != "" {
+		classified := (&ipc.Error{Code: resp.ErrorCode, Message: resp.Error}).ToErstError()
+		logger.Logger.Error("Simulator returned error",
+			"code", classified.Code,
+			"original", classified.OrigErr,
+		)
+		return nil, classified
+	}
+
+	resp.ProtocolVersion = &proto.Version
+	success = true
+
+	return resp, nil
+}
+
+func (r *Runner) runAttempt(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
 	inputBytes, err := json.Marshal(req)
 	if err != nil {
 		logger.Logger.Error("Failed to marshal simulation request", "error", err)
@@ -254,11 +297,12 @@ func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationRe
 	cmd.Stdin = bytes.NewReader(inputBytes)
 	cmd.Env = simulatorEnv()
 
-	// Use limited-size buffers to prevent memory growth in daemon mode
-	// Set reasonable limits (10MB stdout, 1MB stderr) for typical simulation responses
-	stdout := limitedBuffer{Buffer: bytes.Buffer{}, limit: 10 * 1024 * 1024}
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, errors.WrapSimCrash(err, "failed to open simulator stdout")
+	}
+
 	stderr := limitedBuffer{Buffer: bytes.Buffer{}, limit: 1 * 1024 * 1024}
-	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
@@ -277,6 +321,19 @@ func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationRe
 		waitCh <- cmd.Wait()
 	}()
 
+	resp, readErr := decodeSimulationResponseStream(ctx, stdoutPipe)
+	if readErr != nil {
+		_ = r.terminateProcessGroup(cmd, 1500*time.Millisecond)
+		<-waitCh
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if chunkErr, ok := readErr.(*chunkStreamError); ok {
+			return nil, chunkErr
+		}
+		return nil, errors.WrapUnmarshalFailed(readErr, stderr.String())
+	}
+
 	select {
 	case err := <-waitCh:
 		if err != nil {
@@ -292,27 +349,7 @@ func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationRe
 		return nil, ctx.Err()
 	}
 
-	var resp SimulationResponse
-	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
-		logger.Logger.Error("Failed to unmarshal response", "error", err)
-		return nil, errors.WrapUnmarshalFailed(err, stdout.String())
-	}
-
-	// If the simulator returned a logical error inside the response payload,
-	// classify it into a unified ErstError before returning to the caller.
-	if resp.Error != "" {
-		classified := (&ipc.Error{Code: resp.ErrorCode, Message: resp.Error}).ToErstError()
-		logger.Logger.Error("Simulator returned error",
-			"code", classified.Code,
-			"original", classified.OrigErr,
-		)
-		return nil, classified
-	}
-
-	resp.ProtocolVersion = &proto.Version
-	success = true
-
-	return &resp, nil
+	return resp, nil
 }
 
 // limitedBuffer wraps bytes.Buffer with a size limit to prevent memory leaks
