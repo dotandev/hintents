@@ -5,11 +5,14 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 
+	"github.com/dotandev/hintents/internal/deeplink"
 	"github.com/dotandev/hintents/internal/localization"
 	"github.com/dotandev/hintents/internal/shutdown"
 	"github.com/dotandev/hintents/internal/updater"
@@ -22,6 +25,7 @@ var (
 	WindowFlag        int64
 	ProfileFlag       bool
 	ProfileFormatFlag string
+	DeepLinkFlag      string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -48,6 +52,12 @@ Examples:
 
 Get started with 'erst debug --help' or visit the documentation.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Handle deep link probe invocation before anything else.
+		// The doctor command triggers this to verify OS dispatch works.
+		if DeepLinkFlag != "" {
+			return handleDeepLinkProbe(DeepLinkFlag)
+		}
+
 		// Load localizations
 		if err := localization.LoadTranslations(); err != nil {
 			return err
@@ -144,6 +154,27 @@ func checkForUpdatesAsync() {
 	}()
 }
 
+// handleDeepLinkProbe processes an erst:// URL dispatched by the OS or by the
+// doctor probe.  For the well-known probe URL it exits 0 immediately so the
+// doctor check can confirm the binary is reachable.
+func handleDeepLinkProbe(rawURL string) error {
+	if !strings.HasPrefix(rawURL, deeplink.Scheme+"://") {
+		return fmt.Errorf("unrecognised deep link scheme: %s", rawURL)
+	}
+
+	path := strings.TrimPrefix(rawURL, deeplink.Scheme+"://")
+
+	switch path {
+	case "doctor-probe":
+		// Intentional no-op: the doctor check just needs exit code 0.
+		os.Exit(0)
+	default:
+		return fmt.Errorf("unhandled deep link path: %s", path)
+	}
+
+	return nil
+}
+
 func init() {
 	// Root command initialization
 	rootCmd.PersistentFlags().Int64Var(
@@ -173,6 +204,15 @@ func init() {
 		"html",
 		"Flamegraph export format: 'html' (interactive) or 'svg' (raw)",
 	)
+
+	rootCmd.PersistentFlags().StringVar(
+		&DeepLinkFlag,
+		"deep-link",
+		"",
+		"Handle an erst:// deep link URL (used internally by the doctor probe)",
+	)
+	// Hide from normal help output; it is an internal dispatch mechanism.
+	_ = rootCmd.PersistentFlags().MarkHidden("deep-link")
 
 	// Define command groups for better organization
 	rootCmd.AddGroup(&cobra.Group{

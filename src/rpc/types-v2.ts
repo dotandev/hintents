@@ -28,6 +28,10 @@ export interface RPCMethodParams {
     getVersionInfo?: Record<string, unknown>;
 }
 
+export interface SendTransactionOptions {
+    idempotencyKey?: string;
+}
+
 export interface GetEventsParams {
     startLedger: number;
     endLedger?: number;
