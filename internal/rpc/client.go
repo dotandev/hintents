@@ -394,34 +394,35 @@ func (c *Client) startMethodTimer(ctx context.Context, method string, attributes
 }
 
 // createHTTPClient creates an HTTP client with optional authentication, a configurable timeout, and custom middlewares.
+//
+// The transport chain is constructed innermost-first:
+//
+//	[user middlewares (outermost)] → RetryTransport → authTransport → http.DefaultTransport
+//
+// User middlewares therefore observe one call per logical request (inclusive of all
+// retry attempts), which is suitable for per-request logging and header injection.
 func createHTTPClient(token string, timeout time.Duration, middlewares ...Middleware) *http.Client {
 	cfg := DefaultRetryConfig()
 
-	var baseTransport http.RoundTripper = http.DefaultTransport
+	// Innermost: base network transport.
+	var transport http.RoundTripper = http.DefaultTransport
 
-	var transport http.RoundTripper = baseTransport
+	// Auth sits just above the base so it runs on every retry attempt.
 	if token != "" {
 		transport = &authTransport{
 			token:     token,
-			transport: baseTransport,
+			transport: transport,
 		}
 	}
 
-	// Apply custom middlewares before the retry transport if you want retries to apply to them,
-	// or after if you want them to wrap the retries.
-	// Usually middlewares wrap the transport.
-	for _, mw := range middlewares {
-		if mw != nil {
-			transport = mw(transport)
-		}
-	}
-
+	// Retry wraps auth so that transient errors trigger a new authenticated attempt.
 	transport = NewRetryTransport(cfg, transport)
 
-	// Apply custom middlewares
-	for _, mw := range middlewares {
-		if mw != nil {
-			transport = mw(transport)
+	// Apply middlewares in reverse so that middlewares[0] becomes the outermost
+	// wrapper and therefore the first to intercept an outbound request.
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		if middlewares[i] != nil {
+			transport = middlewares[i](transport)
 		}
 	}
 
@@ -1063,7 +1064,7 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 	if rpcResp.Error != nil {
 		// Record failed remote node response
 		metrics.RecordRemoteNodeResponse(targetURL, string(c.Network), false, duration)
-		return nil, errors.WrapRPCError(targetURL, rpcResp.Error.Message, rpcResp.Error.Code)
+		return nil, errors.WrapSorobanError(targetURL, rpcResp.Error.Message, rpcResp.Error.Code)
 	}
 
 	// Record successful remote node response
@@ -1376,7 +1377,7 @@ func (c *Client) simulateTransactionAttempt(ctx context.Context, envelopeXdr str
 	}
 
 	if rpcResp.Error != nil {
-		return nil, errors.WrapRPCError(targetURL, rpcResp.Error.Message, rpcResp.Error.Code)
+		return nil, errors.WrapSorobanError(targetURL, rpcResp.Error.Message, rpcResp.Error.Code)
 	}
 
 	return &rpcResp, nil

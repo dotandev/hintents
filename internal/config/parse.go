@@ -53,6 +53,14 @@ func loadFromEnv(cfg *Config) error {
 		cfg.RequestTimeout = n
 	}
 
+	if v := os.Getenv("ERST_MAX_TRACE_DEPTH"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return errors.WrapValidationError("ERST_MAX_TRACE_DEPTH must be an integer")
+		}
+		cfg.MaxTraceDepth = n
+	}
+
 	switch strings.ToLower(os.Getenv("ERST_CRASH_REPORTING")) {
 	case "":
 	case "1", "true", "yes":
@@ -175,6 +183,12 @@ func (c *Config) parseTOML(content string) error {
 				return errors.WrapValidationError("request_timeout must be an integer")
 			}
 			c.RequestTimeout = n
+		case "max_trace_depth":
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				return errors.WrapValidationError("max_trace_depth must be an integer")
+			}
+			c.MaxTraceDepth = n
 		case "max_cache_size":
 			n, err := parseSize(value)
 			if err != nil {

@@ -23,39 +23,36 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 mod flock {
     use std::fs::File;
+    use std::io;
     use std::os::unix::io::AsRawFd;
 
-    extern "C" {
-        fn flock(fd: libc::c_int, operation: libc::c_int) -> libc::c_int;
-    }
-
     /// Acquires a shared (read) lock on `file`, blocking until it succeeds.
-    pub fn lock_shared(file: &File) -> Result<(), String> {
-        let rc = unsafe { flock(file.as_raw_fd(), libc::LOCK_SH) };
+    pub fn lock_shared(file: &File) -> io::Result<()> {
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) };
         if rc == 0 {
             Ok(())
         } else {
-            Err(format!("flock(LOCK_SH) failed: errno {}", rc))
+            Err(io::Error::last_os_error())
         }
     }
 
     /// Acquires an exclusive (write) lock on `file`, blocking until it succeeds.
-    pub fn lock_exclusive(file: &File) -> Result<(), String> {
-        let rc = unsafe { flock(file.as_raw_fd(), libc::LOCK_EX) };
+    pub fn lock_exclusive(file: &File) -> io::Result<()> {
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
         if rc == 0 {
             Ok(())
         } else {
-            Err(format!("flock(LOCK_EX) failed: errno {}", rc))
+            Err(io::Error::last_os_error())
         }
     }
 
     /// Releases any lock held on `file`.
-    pub fn unlock(file: &File) -> Result<(), String> {
-        let rc = unsafe { flock(file.as_raw_fd(), libc::LOCK_UN) };
+    pub fn unlock(file: &File) -> io::Result<()> {
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
         if rc == 0 {
             Ok(())
         } else {
-            Err(format!("flock(LOCK_UN) failed: errno {}", rc))
+            Err(io::Error::last_os_error())
         }
     }
 }
@@ -63,16 +60,15 @@ mod flock {
 #[cfg(not(unix))]
 mod flock {
     use std::fs::File;
-    // On non-Unix platforms we fall back to no-op locks. The race risk on
-    // Windows test environments is accepted until a platform-specific
-    // implementation is added.
-    pub fn lock_shared(_: &File) -> Result<(), String> {
+    use std::io;
+    // On non-Unix platforms we fall back to no-op locks.
+    pub fn lock_shared(_: &File) -> io::Result<()> {
         Ok(())
     }
-    pub fn lock_exclusive(_: &File) -> Result<(), String> {
+    pub fn lock_exclusive(_: &File) -> io::Result<()> {
         Ok(())
     }
-    pub fn unlock(_: &File) -> Result<(), String> {
+    pub fn unlock(_: &File) -> io::Result<()> {
         Ok(())
     }
 }
@@ -175,9 +171,8 @@ impl SourceMapCache {
         let lock_path = Self::get_lock_path(cache_path);
         File::options()
             .create(true)
-            .truncate(true)
+            .append(true) // Use append instead of truncate to avoid racing with other openers
             .read(true)
-            .write(true)
             .open(&lock_path)
             .map_err(|e| format!("Failed to open lock file {:?}: {}", lock_path, e))
     }
@@ -207,7 +202,7 @@ impl SourceMapCache {
             }
         };
         if let Err(e) = flock::lock_shared(&lock_file) {
-            eprintln!("Failed to acquire shared lock: {}", e);
+            eprintln!("Failed to acquire shared lock on {:?}: {}", cache_path, e);
             return None;
         }
 
@@ -257,8 +252,14 @@ impl SourceMapCache {
         let cache_path = self.get_cache_path(&entry.wasm_hash);
 
         // Acquire an exclusive OS-level lock before writing.
-        let lock_file = Self::open_lock_file(&cache_path)?;
-        flock::lock_exclusive(&lock_file)?;
+        let lock_file = Self::open_lock_file(&cache_path)
+            .map_err(|e| format!("Failed to open lock file {:?}: {}", cache_path, e))?;
+        flock::lock_exclusive(&lock_file).map_err(|e| {
+            format!(
+                "Failed to acquire exclusive lock on {:?}: {}",
+                cache_path, e
+            )
+        })?;
 
         // Serialize the entry
         let bytes = bincode::serialize(&entry)
@@ -269,15 +270,17 @@ impl SourceMapCache {
         let tmp_path = self.cache_dir.join(format!("{}.tmp", entry.wasm_hash));
         let write_result = (|| {
             let mut file = File::create(&tmp_path)
-                .map_err(|e| format!("Failed to create temp cache file: {}", e))?;
+                .map_err(|e| format!("Failed to create temp cache file {:?}: {}", tmp_path, e))?;
             file.write_all(&bytes)
-                .map_err(|e| format!("Failed to write temp cache file: {}", e))?;
-            fs::rename(&tmp_path, &cache_path)
-                .map_err(|e| format!("Failed to rename temp cache file: {}", e))?;
+                .map_err(|e| format!("Failed to write temp cache file {:?}: {}", tmp_path, e))?;
+            fs::rename(&tmp_path, &cache_path).map_err(|e| {
+                format!(
+                    "Failed to rename temp cache file {:?} to {:?}: {}",
+                    tmp_path, cache_path, e
+                )
+            })?;
             Ok::<(), String>(())
         })();
-
-        let _ = flock::unlock(&lock_file);
 
         // Clean up tmp file on failure.
         if write_result.is_err() {

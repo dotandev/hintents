@@ -157,6 +157,7 @@ Get started with 'erst debug --help' or visit the documentation.`,
 	rootCmd.AddCommand(NewSearchCmd())
 	rootCmd.AddCommand(NewSessionCmd())
 	rootCmd.AddCommand(NewShellCmd())
+	rootCmd.AddCommand(NewSnapshotDiffCmd())
 	rootCmd.AddCommand(NewSnapshotMemoryCmd())
 	rootCmd.AddCommand(NewStatsCmd())
 	rootCmd.AddCommand(NewStatusCmd())

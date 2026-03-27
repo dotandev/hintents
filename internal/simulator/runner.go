@@ -205,6 +205,8 @@ func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationRe
 	if req.MemoryLimit == nil {
 		req.MemoryLimit = getSimulatorMemoryLimit(req)
 	}
+	// Apply lazy paged memory allocation instead of eagerly zeroing full 64 MiB.
+	applyPagedMemoryLimit(DefaultPagedMemoryConfig(), req)
 	if req.CoverageLCOVPath == nil {
 		req.CoverageLCOVPath = getSimulatorCoverageLCOVPath(req)
 	}

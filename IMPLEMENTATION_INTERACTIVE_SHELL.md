@@ -141,7 +141,7 @@ Initial State
 - Comprehensive test suite
 - Full documentation
 
-### Pending ⏳
+### Pending [TIME-TRAVEL]
 
 - **XDR Envelope Building**: Requires stellar-sdk integration to build proper transaction envelopes for contract invocations
 - **State Extraction**: Automatic extraction of ledger state changes from ResultMetaXDR
