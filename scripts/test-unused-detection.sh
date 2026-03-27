@@ -1,26 +1,9 @@
-# Copyright (c) Hintents Authors.
-# SPDX-License-Identifier: Apache-2.0
-
-
 #!/bin/bash
 # Copyright 2026 Erst Users
 # SPDX-License-Identifier: Apache-2.0
 
-#!/bin/bash
-# Copyright (c) Hintents Authors.
-# SPDX-License-Identifier: Apache-2.0
-
-#!/bin/bash
-
-# Copyright (c) 2026 dotandev
-# SPDX-License-Identifier: MIT OR Apache-2.0
-
->>>>>>> Stashed changes
-
 # Test script to verify unused code detection setup
-# This creates a temporary file with unused code to test the linter
-
-set -e
+set -euo pipefail
 
 echo "Testing unused code detection setup..."
 
@@ -30,15 +13,15 @@ package main
 
 import "fmt"
 
-# This variable should be detected as unused
+// This variable should be detected as unused
 var unusedVariable = "test"
 
-# This function should be detected as unused
+// This function should be detected as unused
 func unusedFunction() {
     fmt.Println("This function is not used")
 }
 
-# This constant should be detected as unused
+// This constant should be detected as unused
 const unusedConstant = 42
 
 func main() {
@@ -51,6 +34,7 @@ echo "Created test file with unused code..."
 # Try to run golangci-lint on the test file
 if command -v golangci-lint &> /dev/null; then
     echo "Running golangci-lint on test file..."
+    # We expect this to fail (non-zero exit code) if it detects the unused code
     if golangci-lint run --enable unused --disable-all test_unused.go; then
         echo "WARNING: No unused code detected in test file (this might indicate linter issues)"
     else

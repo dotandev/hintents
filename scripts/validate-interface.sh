@@ -1,21 +1,6 @@
-# Copyright (c) Hintents Authors.
-# SPDX-License-Identifier: Apache-2.0
-
-
 #!/bin/bash
 # Copyright 2026 Erst Users
 # SPDX-License-Identifier: Apache-2.0
-
-#!/bin/bash
-# Copyright (c) Hintents Authors.
-# SPDX-License-Identifier: Apache-2.0
-
-#!/bin/bash
-
-# Copyright (c) 2026 dotandev
-# SPDX-License-Identifier: MIT OR Apache-2.0
-
->>>>>>> Stashed changes
 
 # Validate simulator interface implementation
 set -euo pipefail
@@ -75,10 +60,3 @@ else
 fi
 
 echo "All validation checks passed!"
-echo "Implementation meets all requirements:"
-echo "   - Interface defined with correct signature"
-echo "   - Commands accept interface for dependency injection"
-echo "   - Mock runner available for testing"
-echo "   - Zero performance overhead"
-echo "   - Backward compatibility maintained"
-echo "   - Compile-time safety enforced"

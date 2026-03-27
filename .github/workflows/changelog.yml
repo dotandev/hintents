@@ -54,3 +54,24 @@ jobs:
         with:
           body: ${{steps.changelog.outputs.changelog}}
           generate_release_notes: false
+
+      - name: Update CHANGELOG.md
+        run: |
+          VERSION="${{ github.ref_name }}"
+          DATE=$(date +%Y-%m-%d)
+          CONTENT="${{ steps.changelog.outputs.changelog }}"
+          
+          # Prepare the new entry
+          NEW_ENTRY="## [$VERSION] - $DATE\n\n$CONTENT\n\n---"
+          
+          # Insert after the [Unreleased] section
+          sed -i "/## \[Unreleased\]/a \ \n$NEW_ENTRY" CHANGELOG.md
+          sed -i "/# Project Changelog/a \ \n$NEW_ENTRY" docs/changelog.md
+          
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md docs/changelog.md
+          git commit -m "docs: update changelog for $VERSION [skip ci]"
+          git push
