@@ -4,16 +4,36 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/dotandev/hintents/internal/logger"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type headerMiddleware struct {
 	next http.RoundTripper
+}
+
+type trackingReadCloser struct {
+	closed bool
+}
+
+func (t *trackingReadCloser) Read(_ []byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (t *trackingReadCloser) Close() error {
+	t.closed = true
+	return nil
 }
 
 func (m *headerMiddleware) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -68,4 +88,208 @@ func BenchmarkMiddleware(b *testing.B) {
 		// Just creating the client or doing something light
 		_ = client.getHTTPClient()
 	}
+}
+
+// captureHandler returns an httptest server and a channel that receives every request.
+func captureServer(t *testing.T, statusCode int, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(statusCode)
+		_, _ = w.Write([]byte(body))
+	}))
+}
+
+// redirectLogger swaps the package-level logger so log output can be inspected in tests.
+// It returns a restore function that must be called when the test is done.
+func redirectLogger(buf *bytes.Buffer) func() {
+	orig := logger.Logger
+	logger.Logger = slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	return func() { logger.Logger = orig }
+}
+
+// TestLoggingMiddleware_SuccessfulRequest verifies that a successful request
+// produces an INFO log entry with method, url, status, and latency fields.
+func TestLoggingMiddleware_SuccessfulRequest(t *testing.T) {
+	healthBody := `{"jsonrpc":"2.0","result":{"status":"healthy"},"id":1}`
+	server := captureServer(t, http.StatusOK, healthBody)
+	defer server.Close()
+
+	var buf bytes.Buffer
+	restore := redirectLogger(&buf)
+	defer restore()
+
+	client, err := NewClient(
+		WithHorizonURL(server.URL),
+		WithSorobanURL(server.URL),
+		WithLoggingEnabled(true),
+	)
+	require.NoError(t, err)
+
+	_, _ = client.GetHealth(context.Background())
+
+	require.NotEmpty(t, buf.String(), "expected at least one log line")
+
+	// Find the "http request completed" log entry.
+	found := false
+	for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
+		var entry map[string]any
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		if entry["msg"] == "http request completed" {
+			found = true
+			assert.Equal(t, "INFO", entry["level"])
+			assert.NotEmpty(t, entry["url"])
+			assert.NotNil(t, entry["status"])
+			assert.NotNil(t, entry["latency_ms"])
+			break
+		}
+	}
+	assert.True(t, found, "expected 'http request completed' log entry")
+}
+
+// TestLoggingMiddleware_FailedRequest verifies that a transport-level error
+// produces an ERROR log entry with an error field.
+func TestLoggingMiddleware_FailedRequest(t *testing.T) {
+	var buf bytes.Buffer
+	restore := redirectLogger(&buf)
+	defer restore()
+
+	// errorTransport always returns an error to simulate a network failure.
+	errTransport := RoundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+		return nil, errors.New("simulated network failure")
+	})
+
+	lmw := NewLoggingMiddleware()
+	transport := lmw(errTransport)
+
+	req, _ := http.NewRequest(http.MethodGet, "http://example.invalid/rpc", nil)
+	resp, err := transport.RoundTrip(req)
+
+	assert.Nil(t, resp)
+	assert.Error(t, err)
+
+	require.NotEmpty(t, buf.String(), "expected at least one log line")
+
+	found := false
+	for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
+		var entry map[string]any
+		if jsonErr := json.Unmarshal(line, &entry); jsonErr != nil {
+			continue
+		}
+		if entry["msg"] == "http request failed" {
+			found = true
+			assert.Equal(t, "ERROR", entry["level"])
+			assert.NotEmpty(t, entry["error"])
+			break
+		}
+	}
+	assert.True(t, found, "expected 'http request failed' log entry")
+}
+
+// TestLoggingMiddleware_FailedRequestWithResponse ensures we preserve the
+// transport response while closing its body when an error is returned.
+func TestLoggingMiddleware_FailedRequestWithResponse(t *testing.T) {
+	var buf bytes.Buffer
+	restore := redirectLogger(&buf)
+	defer restore()
+
+	body := &trackingReadCloser{}
+	errTransport := RoundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Body:       body,
+		}, errors.New("upstream failure")
+	})
+
+	lmw := NewLoggingMiddleware()
+	transport := lmw(errTransport)
+
+	req, _ := http.NewRequest(http.MethodGet, "http://example.invalid/rpc", nil)
+	resp, err := transport.RoundTrip(req)
+
+	assert.Error(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	assert.True(t, body.closed, "expected response body to be closed on error")
+
+	require.NotEmpty(t, buf.String(), "expected at least one log line")
+
+	found := false
+	for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
+		var entry map[string]any
+		if jsonErr := json.Unmarshal(line, &entry); jsonErr != nil {
+			continue
+		}
+		if entry["msg"] == "http request failed" {
+			found = true
+			assert.Equal(t, float64(http.StatusBadGateway), entry["status"])
+			break
+		}
+	}
+	assert.True(t, found, "expected 'http request failed' log entry")
+}
+
+// TestWithLoggingEnabled_DisabledByDefault checks that no logging middleware is
+// active unless explicitly opted in, so users are not surprised by log output.
+func TestWithLoggingEnabled_DisabledByDefault(t *testing.T) {
+	var buf bytes.Buffer
+	restore := redirectLogger(&buf)
+	defer restore()
+
+	server := captureServer(t, http.StatusOK, `{"jsonrpc":"2.0","result":{"status":"healthy"},"id":1}`)
+	defer server.Close()
+
+	client, err := NewClient(
+		WithHorizonURL(server.URL),
+		WithSorobanURL(server.URL),
+		// No WithLoggingEnabled(true)
+	)
+	require.NoError(t, err)
+
+	_, _ = client.GetHealth(context.Background())
+
+	for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
+		var entry map[string]any
+		if json.Unmarshal(line, &entry) == nil {
+			assert.NotEqual(t, "http request completed", entry["msg"],
+				"logging middleware should not be active by default")
+		}
+	}
+}
+
+// TestMiddlewareChainOrdering ensures that when multiple middlewares are stacked
+// they execute in the expected outermost-first order.
+func TestMiddlewareChainOrdering(t *testing.T) {
+	var order []string
+
+	makeTracer := func(name string) Middleware {
+		return func(next http.RoundTripper) http.RoundTripper {
+			return RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				order = append(order, name+":before")
+				resp, err := next.RoundTrip(req)
+				order = append(order, name+":after")
+				return resp, err
+			})
+		}
+	}
+
+	server := captureServer(t, http.StatusOK, `{"jsonrpc":"2.0","result":{"status":"healthy"},"id":1}`)
+	defer server.Close()
+
+	client, err := NewClient(
+		WithHorizonURL(server.URL),
+		WithSorobanURL(server.URL),
+		WithMiddleware(makeTracer("outer"), makeTracer("inner")),
+	)
+	require.NoError(t, err)
+
+	_, _ = client.GetHealth(context.Background())
+
+	// "outer" should be applied last and therefore appear first in the call sequence.
+	require.GreaterOrEqual(t, len(order), 4, "expected at least 4 trace entries")
+	assert.Equal(t, "outer:before", order[0])
+	assert.Equal(t, "inner:before", order[1])
+	assert.Equal(t, "inner:after", order[len(order)-2])
+	assert.Equal(t, "outer:after", order[len(order)-1])
 }

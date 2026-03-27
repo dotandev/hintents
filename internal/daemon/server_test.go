@@ -129,14 +129,14 @@ func TestServer_Authentication(t *testing.T) {
 		t.Error("Expected authentication to succeed with correct Bearer token")
 	}
 
-	// Test with correct direct token
+	// Test with direct token (must be rejected — Bearer prefix required)
 	req.Header.Set("Authorization", "secret123")
-	if !server.authenticate(req) {
-		t.Error("Expected authentication to succeed with correct direct token")
+	if server.authenticate(req) {
+		t.Error("Expected authentication to fail without Bearer prefix")
 	}
 
 	// Test with wrong token
-	req.Header.Set("Authorization", "wrong-token")
+	req.Header.Set("Authorization", "Bearer wrong-token")
 	if server.authenticate(req) {
 		t.Error("Expected authentication to fail with wrong token")
 	}
