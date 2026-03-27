@@ -101,6 +101,60 @@ describe('FallbackRPCClient', () => {
         });
     });
 
+    describe('sendTransaction idempotency support', () => {
+        it('should send the idempotency key as a request header without changing JSON-RPC params', async () => {
+            mock.onPost('https://rpc1.test.com/').reply(200, { status: 'PENDING' });
+
+            await client.sendTransaction('AAAA-test-xdr', { idempotencyKey: 'idem-123' });
+
+            expect(mock.history.post.length).toBe(1);
+
+            const request = mock.history.post[0];
+            expect(request.headers?.['Idempotency-Key']).toBe('idem-123');
+
+            const body = JSON.parse(request.data);
+            expect(body).toEqual({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'sendTransaction',
+                params: { transaction: 'AAAA-test-xdr' },
+            });
+        });
+
+        it('should preserve the idempotency key across retries', async () => {
+            let attempts = 0;
+            mock.onPost('https://rpc1.test.com/').reply(config => {
+                attempts++;
+
+                if (attempts === 1) {
+                    return [500, { error: 'temporary failure' }];
+                }
+
+                return [200, { status: 'PENDING' }];
+            });
+
+            await client.sendTransaction('AAAA-retry-xdr', { idempotencyKey: 'idem-retry' });
+
+            expect(attempts).toBe(2);
+            expect(mock.history.post).toHaveLength(2);
+            expect(mock.history.post[0].headers?.['Idempotency-Key']).toBe('idem-retry');
+            expect(mock.history.post[1].headers?.['Idempotency-Key']).toBe('idem-retry');
+        });
+
+        it('should not retry when the server reports an idempotency conflict', async () => {
+            mock.onPost('https://rpc1.test.com/').reply(409, {
+                error: 'idempotency conflict',
+            });
+
+            await expect(
+                client.sendTransaction('AAAA-conflict-xdr', { idempotencyKey: 'idem-conflict' }),
+            ).rejects.toThrow();
+
+            expect(mock.history.post).toHaveLength(1);
+            expect(mock.history.post[0].headers?.['Idempotency-Key']).toBe('idem-conflict');
+        });
+    });
+
     describe('circuit breaker', () => {
         it('should open circuit after threshold failures', async () => {
             mock.onPost('https://rpc1.test.com/test').networkError();

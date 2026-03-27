@@ -91,7 +91,7 @@ func explainFromNetwork(cmd *cobra.Command, txHash string) error {
 		token = os.Getenv("ERST_RPC_TOKEN")
 	}
 	if token == "" {
-		if cfg, err := config.LoadConfig(); err == nil && cfg.RPCToken != "" {
+		if cfg, err := config.Load(); err == nil && cfg.RPCToken != "" {
 			token = cfg.RPCToken
 		}
 	}

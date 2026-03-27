@@ -105,11 +105,7 @@ Get execution traces for a transaction.
 When `--auth-token` is provided, all RPC requests must include authentication:
 
 ```bash
-# Bearer token format
 curl -H "Authorization: Bearer secret123" ...
-
-# Direct token format  
-curl -H "Authorization: secret123" ...
 ```
 
 ## Error Responses
