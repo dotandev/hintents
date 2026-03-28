@@ -1336,6 +1336,18 @@ func init() {
 	debugCmd.Flags().Uint32Var(&protocolVersionFlag, "protocol-version", 0, "Override protocol version for simulation")
 
 	rootCmd.AddCommand(debugCmd)
+		// Register temp snapshot cleanup hook
+		registerShutdownHook("cleanup-temp-snapshots", func(ctx context.Context) error {
+			count, err := session.CleanupTempArtifacts()
+			if verbose {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[cleanup] Error cleaning temp snapshots: %v\n", err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[cleanup] Removed %d temp snapshot files\n", count)
+				}
+			}
+			return err
+		})
 }
 
 // checkLTOWarning searches the directory tree around a WASM file for
