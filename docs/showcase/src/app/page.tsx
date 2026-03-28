@@ -4,8 +4,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, ChevronDown, ChevronRight, Hash, Clock, Box, Play, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Search, ChevronDown, ChevronRight, Hash, Clock, Box, Play, AlertCircle, CheckCircle2, GitCompare } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import Link from 'next/link'
 
 // Sample data embedded for the showcase
 const SAMPLE_TRACE = {
@@ -116,13 +117,41 @@ export default function ShowcasePage() {
                     ERST Trace Explorer
                 </motion.h1>
                 <motion.p
-                    className="text-xl text-slate-400 mb-12"
+                    className="text-xl text-slate-400 mb-8"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.2 }}
                 >
                     Inspect transaction execution traces with pin-point accuracy.
                 </motion.p>
+
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.3 }}
+                    style={{ marginBottom: '2rem' }}
+                >
+                    <Link
+                        href="/diff"
+                        style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.6rem 1.2rem',
+                            background: 'rgba(59,130,246,0.1)',
+                            border: '1px solid rgba(59,130,246,0.25)',
+                            borderRadius: '10px',
+                            color: '#93c5fd',
+                            fontSize: '0.9rem',
+                            fontWeight: 600,
+                            textDecoration: 'none',
+                            transition: 'background 0.15s, border-color 0.15s',
+                        }}
+                    >
+                        <GitCompare size={16} />
+                        Contract Diff Viewer
+                    </Link>
+                </motion.div>
 
                 {/* Search Bar */}
                 <form onSubmit={handleSearch} className="relative max-w-2xl mx-auto">

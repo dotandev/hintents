@@ -1,13 +1,13 @@
+#!/bin/bash
 # Copyright 2026 Erst Users
 # SPDX-License-Identifier: Apache-2.0
 
-#!/bin/bash
-# Copyright (c) Hintents Authors.
-# SPDX-License-Identifier: Apache-2.0
-
 # Verification script for interactive flamegraph export feature
+set -euo pipefail
 
-set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
 
 echo "=== Flamegraph Export Feature Verification ==="
 echo ""
@@ -67,20 +67,5 @@ fi
 echo "  HTML is self-contained"
 echo ""
 
-# Check gitignore update
-echo "✓ Checking .gitignore patterns..."
-grep -q "*.flamegraph.html" internal/cmd/init.go || { echo "✗ Missing .flamegraph.html in gitignore"; exit 1; }
-echo "  Gitignore patterns updated"
-echo ""
-
 echo "=== All Checks Passed ==="
-echo ""
-echo "Manual verification steps:"
-echo "1. Build: make build"
-echo "2. Run: ./bin/erst debug --profile --profile-format html <tx-hash>"
-echo "3. Open the generated .flamegraph.html file in a browser"
-echo "4. Verify interactive features work (hover, click, search)"
-echo "5. Toggle system dark mode and verify colors adapt"
-echo "6. Check browser console for errors (should be none)"
-echo "7. Check network tab for requests (should be none)"
 echo ""

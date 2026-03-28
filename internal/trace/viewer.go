@@ -5,6 +5,7 @@ package trace
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -156,7 +157,7 @@ func (v *InteractiveViewer) handleCommand(command string) bool {
 	switch cmd {
 	case "n", "next", "forward":
 		v.stepForward()
-	case "p", "prev", "back", "backward":
+	case "b", "p", "prev", "back", "backward":
 		v.stepBackward()
 	case "f", "filter":
 		v.cycleEventFilter()
@@ -351,6 +352,93 @@ func (v *InteractiveViewer) displayCurrentState() {
 	if len(state.Memory) > 0 {
 		fmt.Printf("Memory: %d entries\n", len(state.Memory))
 	}
+
+	fmt.Println(separator(termW))
+	fmt.Println(v.statusBarLine(state))
+}
+
+func (v *InteractiveViewer) statusBarLine(state *ExecutionState) string {
+	if state == nil || len(v.trace.States) == 0 {
+		return "Step 0/0 | Payload: 0.0kb | Memory: 0.00mb | Snapshot ID: none"
+	}
+
+	payloadKB := bytesToKB(statePayloadSizeBytes(state))
+	memoryMB := bytesToMB(stateMemorySizeBytes(state))
+	snapshotID := v.snapshotIDForStep(state.Step)
+
+	return fmt.Sprintf(
+		"Step %d/%d | Payload: %.1fkb | Memory: %.2fmb | Snapshot ID: %s",
+		state.Step+1,
+		len(v.trace.States),
+		payloadKB,
+		memoryMB,
+		snapshotID,
+	)
+}
+
+func (v *InteractiveViewer) snapshotIDForStep(step int) string {
+	bestIdx := -1
+	bestStep := -1
+	for i := range v.trace.Snapshots {
+		s := v.trace.Snapshots[i]
+		if s.Step <= step && s.Step >= bestStep {
+			bestIdx = i
+			bestStep = s.Step
+		}
+	}
+	if bestIdx < 0 {
+		return "none"
+	}
+	return fmt.Sprintf("snap-%03d@%d", bestIdx, bestStep)
+}
+
+func statePayloadSizeBytes(state *ExecutionState) int {
+	if state == nil {
+		return 0
+	}
+	payload := struct {
+		Arguments      []interface{} `json:"arguments,omitempty"`
+		RawArguments   []string      `json:"raw_arguments,omitempty"`
+		ReturnValue    interface{}   `json:"return_value,omitempty"`
+		RawReturnValue string        `json:"raw_return_value,omitempty"`
+		HostState      interface{}   `json:"host_state,omitempty"`
+	}{
+		Arguments:      state.Arguments,
+		RawArguments:   state.RawArguments,
+		ReturnValue:    state.ReturnValue,
+		RawReturnValue: state.RawReturnValue,
+		HostState:      state.HostState,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return 0
+	}
+	return len(b)
+}
+
+func stateMemorySizeBytes(state *ExecutionState) int {
+	if state == nil || len(state.Memory) == 0 {
+		return 0
+	}
+	b, err := json.Marshal(state.Memory)
+	if err != nil {
+		return 0
+	}
+	return len(b)
+}
+
+func bytesToKB(n int) float64 {
+	if n <= 0 {
+		return 0
+	}
+	return float64(n) / 1024.0
+}
+
+func bytesToMB(n int) float64 {
+	if n <= 0 {
+		return 0
+	}
+	return float64(n) / (1024.0 * 1024.0)
 }
 
 // reconstructCurrentState reconstructs and displays the current state
@@ -560,7 +648,7 @@ func (v *InteractiveViewer) showHelp() {
 	fmt.Println(separator(termW))
 	fmt.Println("Navigation:")
 	fmt.Println("  n, next, forward        - Step forward")
-	fmt.Println("  p, prev, back           - Step backward")
+	fmt.Println("  b, p, prev, back        - Step backward")
 	fmt.Println("  j, jump <step>          - Jump to specific step")
 	fmt.Println()
 	fmt.Println("Display:")

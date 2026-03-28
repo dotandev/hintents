@@ -11,3 +11,6 @@ pub mod source_mapper;
 pub mod stack_trace;
 pub mod types;
 pub mod wasm_types;
+
+#[cfg(test)]
+mod tests;

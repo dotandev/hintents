@@ -109,6 +109,57 @@ impl Default for LedgerSnapshot {
     }
 }
 
+/// Represents the computed difference between two ledger snapshots.
+#[derive(Debug, Clone)]
+pub struct StateDiff {
+    /// Keys present in `after` but absent from `before` (newly inserted entries).
+    pub inserted: Vec<Vec<u8>>,
+    /// Keys present in both snapshots but whose serialized entries differ.
+    pub modified: Vec<Vec<u8>>,
+    /// Keys present in `before` but absent from `after` (deleted entries).
+    pub deleted: Vec<Vec<u8>>,
+}
+
+/// Computes the diff between two ledger snapshots.
+///
+/// Detects insertions, modifications, and deletions by comparing the XDR bytes
+/// of each entry. The key vectors in the returned [`StateDiff`] are sorted so
+/// callers receive deterministic output regardless of HashMap iteration order.
+pub fn diff_snapshots(before: &LedgerSnapshot, after: &LedgerSnapshot) -> StateDiff {
+    let mut inserted = Vec::new();
+    let mut modified = Vec::new();
+    let mut deleted = Vec::new();
+
+    for (key, after_entry) in &after.entries {
+        match before.entries.get(key) {
+            None => inserted.push(key.clone()),
+            Some(before_entry) => {
+                let before_bytes = before_entry.to_xdr(Limits::none()).ok();
+                let after_bytes = after_entry.to_xdr(Limits::none()).ok();
+                if before_bytes != after_bytes {
+                    modified.push(key.clone());
+                }
+            }
+        }
+    }
+
+    for key in before.entries.keys() {
+        if !after.entries.contains_key(key) {
+            deleted.push(key.clone());
+        }
+    }
+
+    inserted.sort_unstable();
+    modified.sort_unstable();
+    deleted.sort_unstable();
+
+    StateDiff {
+        inserted,
+        modified,
+        deleted,
+    }
+}
+
 /// Errors that can occur during snapshot operations.
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
