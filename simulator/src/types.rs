@@ -77,6 +77,21 @@ pub struct SimulationResponse {
     pub wasm_offset: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linear_memory_dump: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshots: Option<Vec<StateSnapshot>>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize)]
+pub struct WasmLocation {
+    pub function: String,
+    pub offset: u64,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize)]
+pub struct StateSnapshot {
+    pub step: usize,
+    pub timestamp: i64,
+    pub location: Option<WasmLocation>,
 }
 
 #[derive(Debug, Serialize)]
@@ -88,6 +103,8 @@ pub struct DiagnosticEvent {
     pub in_successful_contract_call: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wasm_instruction: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wasm_location: Option<WasmLocation>,
 }
 
 #[derive(Debug, Serialize)]

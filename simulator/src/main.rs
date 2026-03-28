@@ -72,6 +72,7 @@ fn send_error(msg: String) {
         stack_trace: Some(trace),
         wasm_offset: None,
         linear_memory_dump: None,
+        snapshots: None,
     };
     if let Ok(json) = serde_json::to_string(&res) {
         println!("{}", json);
@@ -272,7 +273,10 @@ fn check_signature_verification_mocks(
     }
 }
 
-fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<CategorizedEvent> {
+fn categorize_events(
+    events: &soroban_env_host::events::Events,
+    wasm_module: Option<&vm::WasmModule>,
+) -> Vec<CategorizedEvent> {
     events
         .0
         .iter()
@@ -298,6 +302,10 @@ fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<Categoriz
             };
 
             let wasm_instruction = extract_wasm_instruction(&topics, &data);
+            let wasm_location = wasm_instruction.as_ref().and_then(|_instr| {
+                let offset = extract_wasm_offset(&data);
+                offset.and_then(|off| wasm_module.and_then(|m| m.resolve_location(off)))
+            });
             CategorizedEvent {
                 category,
                 event: DiagnosticEvent {
@@ -314,6 +322,7 @@ fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<Categoriz
                     topics,
                     data,
                     wasm_instruction,
+                    wasm_location,
                     in_successful_contract_call: !e.failed_call,
                 },
             }
@@ -357,6 +366,7 @@ fn main() {
             stack_trace: None,
             wasm_offset: None,
             linear_memory_dump: None,
+            snapshots: None,
         };
         if let Ok(json) = serde_json::to_string(&res) {
             println!("{}", json);
@@ -388,6 +398,7 @@ fn main() {
                 stack_trace: None,
                 wasm_offset: None,
                 linear_memory_dump: None,
+                snapshots: None,
             };
             println!(
                 "{}",
@@ -447,29 +458,29 @@ fn main() {
         }
     };
 
-    // Initialize source mapper if WASM is provided
-    let source_mapper = if let Some(wasm_base64) = &request.contract_wasm {
+    // Initialize source mapper and WASM module inspector if WASM is provided
+    let (source_mapper, wasm_module) = if let Some(wasm_base64) = &request.contract_wasm {
         match base64::engine::general_purpose::STANDARD.decode(wasm_base64) {
             Ok(wasm_bytes) => {
                 if let Err(e) = vm::enforce_soroban_compatibility(&wasm_bytes) {
                     return send_error(format!("Strict VM enforcement failed: {}", e));
                 }
-                let mapper = SourceMapper::new_with_options(wasm_bytes, request.no_cache);
+                let mapper = SourceMapper::new_with_options(wasm_bytes.clone(), request.no_cache);
+                let module = vm::WasmModule::new(wasm_bytes);
                 if mapper.has_debug_symbols() {
                     eprintln!("Debug symbols found in WASM");
-                    Some(mapper)
                 } else {
                     eprintln!("No debug symbols found in WASM");
-                    None
                 }
+                (Some(mapper), Some(module))
             }
             Err(e) => {
                 eprintln!("Failed to decode WASM base64: {e}");
-                None
+                (None, None)
             }
         }
     } else {
-        None
+        (None, None)
     };
 
     // Initialize Host
@@ -667,8 +678,9 @@ fn main() {
                                 contract_id,
                                 topics,
                                 data,
-                                in_successful_contract_call: !event.failed_call,
                                 wasm_instruction,
+                                wasm_location: None,
+                                in_successful_contract_call: !event.failed_call,
                             }
                         })
                         .collect();
@@ -681,9 +693,23 @@ fn main() {
             };
 
             categorized_events = match host.get_events() {
-                Ok(evs) => categorize_events(&evs),
+                Ok(evs) => categorize_events(&evs, wasm_module.as_ref()),
                 Err(_) => vec![],
             };
+
+            let snapshots: Vec<StateSnapshot> = categorized_events
+                .iter()
+                .filter(|e| e.event.wasm_location.is_some())
+                .enumerate()
+                .map(|(i, e)| StateSnapshot {
+                    step: i,
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as i64,
+                    location: e.event.wasm_location.clone(),
+                })
+                .collect();
 
             let mut final_logs = vec![
                 format!("Host Initialized with Budget: {:?}", budget),
@@ -731,10 +757,15 @@ fn main() {
                         flamegraph: flamegraph_svg,
                         optimization_report,
                         budget_usage: Some(budget_usage),
-                        source_location: None,
                         stack_trace: None,
                         wasm_offset: None,
                         linear_memory_dump: None,
+                        snapshots: if snapshots.is_empty() {
+                            None
+                        } else {
+                            Some(snapshots.clone())
+                        },
+                        source_location: None,
                     };
 
                     if let Ok(json) = serde_json::to_string(&response) {
@@ -768,6 +799,11 @@ fn main() {
                     .as_ref()
                     .and_then(|m| m.map_wasm_offset_to_source(0)),
                 linear_memory_dump: None,
+                snapshots: if snapshots.is_empty() {
+                    None
+                } else {
+                    Some(snapshots)
+                },
             };
 
             if let Ok(json) = serde_json::to_string(&response) {
@@ -809,7 +845,7 @@ fn main() {
             ];
 
             let _categorized_events = match host.get_events() {
-                Ok(evs) => categorize_events(&evs),
+                Ok(evs) => categorize_events(&evs, wasm_module.as_ref()),
                 Err(_) => vec![],
             };
 
@@ -900,6 +936,7 @@ fn main() {
                 stack_trace: Some(wasm_trace),
                 wasm_offset,
                 linear_memory_dump: None,
+                snapshots: None,
             };
             if let Ok(json) = serde_json::to_string(&response) {
                 println!("{}", json);
@@ -945,6 +982,7 @@ fn main() {
                 stack_trace: Some(wasm_trace),
                 wasm_offset: None,
                 linear_memory_dump: None,
+                snapshots: None,
             };
             if let Ok(json) = serde_json::to_string(&response) {
                 println!("{}", json);
@@ -1217,7 +1255,7 @@ mod tests {
 
         // failed_call = true  →  in_successful_contract_call must be false
         let evs_failed = Events(vec![make_event(true)]);
-        let categorized = categorize_events(&evs_failed);
+        let categorized = categorize_events(&evs_failed, None);
         assert_eq!(categorized.len(), 1);
         assert!(
             !categorized[0].event.in_successful_contract_call,
@@ -1226,7 +1264,7 @@ mod tests {
 
         // failed_call = false  →  in_successful_contract_call must be true
         let evs_ok = Events(vec![make_event(false)]);
-        let categorized = categorize_events(&evs_ok);
+        let categorized = categorize_events(&evs_ok, None);
         assert_eq!(categorized.len(), 1);
         assert!(
             categorized[0].event.in_successful_contract_call,
@@ -1263,7 +1301,7 @@ mod tests {
             make_typed_event(ContractEventType::Diagnostic),
         ]);
 
-        let cats = categorize_events(&evs);
+        let cats = categorize_events(&evs, None);
         assert_eq!(cats[0].category, "Contract");
         assert_eq!(cats[1].category, "System");
         assert_eq!(cats[2].category, "Diagnostic");
