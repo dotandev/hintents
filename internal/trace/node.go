@@ -1,7 +1,9 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package trace
+
+import "fmt"
 
 // TraceNode represents a single node in the execution trace tree
 type TraceNode struct {
@@ -84,7 +86,6 @@ func (n *TraceNode) ApplyHeuristics() {
 	newChildren := make([]*TraceNode, 0)
 	i := 0
 	for i < len(n.Children) {
-		start := i
 		similarityKey := n.Children[i].similarityKey()
 
 		// Count consecutive similar siblings

@@ -1,75 +1,182 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package visualizer
 
 import (
-	"github.com/dotandev/hintents/internal/terminal"
+	"os"
+
+	"github.com/mattn/go-isatty"
 )
 
-var defaultRenderer terminal.Renderer = terminal.NewANSIRenderer()
+// ANSI SGR (Select Graphic Rendition) escape codes for terminal colors.
+// Redundant constants removed as they are defined in ansi.go
 
 // ColorEnabled reports whether ANSI color output should be used.
 func ColorEnabled() bool {
-	return defaultRenderer.IsTTY()
+	// NO_COLOR must always take precedence.
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		return false
+	}
+	if os.Getenv("FORCE_COLOR") != "" {
+		return true
+	}
+	if os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	return isatty.IsTerminal(os.Stdout.Fd())
+}
+
+// colorMap maps color names to ANSI SGR codes.
+var colorMap = map[string]string{
+	"red":     sgrRed,
+	"green":   sgrGreen,
+	"yellow":  sgrYellow,
+	"blue":    sgrBlue,
+	"magenta": sgrMagenta,
+	"cyan":    sgrCyan,
+	"bold":    sgrBold,
+	"dim":     sgrDim,
 }
 
 // Colorize returns text with ANSI color if enabled, otherwise plain text.
 func Colorize(text string, color string) string {
-	return defaultRenderer.Colorize(text, color)
+	if !ColorEnabled() {
+		return text
+	}
+
+	var code string
+	switch color {
+	case "red":
+		code = sgrRed
+	case "green":
+		code = sgrGreen
+	case "yellow":
+		code = sgrYellow
+	case "blue":
+		code = sgrBlue
+	case "magenta":
+		code = sgrMagenta
+	case "cyan":
+		code = sgrCyan
+	case "dim":
+		code = sgrDim
+	case "bold":
+		code = sgrBold
+	default:
+		return text
+	}
+
+	return code + text + sgrReset
+}
+
+// ContractBoundary returns a visual separator for cross-contract call transitions.
+func ContractBoundary(fromContract, toContract string) string {
+
+	line := "--- contract boundary: " + fromContract + " -> " + toContract + " ---"
+	if !ColorEnabled() {
+		return line
+	}
+	return sgrMagenta + sgrBold + line + sgrReset
 }
 
 // Success returns a success indicator.
 func Success() string {
-	return defaultRenderer.Success()
-// ContractBoundary returns a visual separator for cross-contract call transitions.
-func ContractBoundary(fromContract, toContract string) string {
-	if ColorEnabled() {
-		return sgrMagenta + sgrBold + "--- contract boundary: " + fromContract + " -> " + toContract + " ---" + sgrReset
-	}
-	return "--- contract boundary: " + fromContract + " -> " + toContract + " ---"
-}
-
-// Success returns a success indicator: colored checkmark if enabled, "[OK]" otherwise.
-func Success() string {
-	if ColorEnabled() {
-		return themeColors("success") + "[OK]" + sgrReset
-	}
-	return "[OK]"
+	return Colorize("[OK]", "green")
 }
 
 // Warning returns a warning indicator.
 func Warning() string {
-	return defaultRenderer.Warning()
-	if ColorEnabled() {
-		return themeColors("warning") + "[!]" + sgrReset
-	}
-	return "[!]"
+	return Colorize("[!]", "yellow")
 }
 
 // Error returns an error indicator.
 func Error() string {
-	return defaultRenderer.Error()
+	return Colorize("[FAIL]", "red")
 }
 
-// Symbol returns a symbol that may be styled.
-	if ColorEnabled() {
-		return themeColors("error") + "[X]" + sgrReset
-	}
-	return "[X]"
-}
-
-// Info returns an info indicator with theme-aware coloring.
+// Info returns an info indicator.
 func Info() string {
-	if ColorEnabled() {
-		return themeColors("info") + "[i]" + sgrReset
-	}
-	return "[i]"
+	return Colorize("[i]", "cyan")
 }
 
-// Symbol returns a symbol that may be styled; when colors disabled, returns plain ASCII equivalent.
+// Symbol returns a symbol name rendered as ASCII markers.
 //
 //nolint:gocyclo
 func Symbol(name string) string {
-	return defaultRenderer.Symbol(name)
+	if ColorEnabled() {
+		switch name {
+		case "check":
+			return "[OK]"
+		case "cross":
+			return "[FAIL]"
+		case "warn":
+			return "[!]"
+		case "arrow_r":
+			return "->"
+		case "arrow_l":
+			return "<-"
+		case "target":
+			return "[TARGET]"
+		case "pin":
+			return "*"
+		case "wrench":
+			return "[TOOL]"
+		case "chart":
+			return "[STATS]"
+		case "list":
+			return "[LIST]"
+		case "play":
+			return "[PLAY]"
+		case "book":
+			return "[DOC]"
+		case "wave":
+			return "[HELLO]"
+		case "magnify":
+			return "[SEARCH]"
+		case "logs":
+			return "[LOGS]"
+		case "events":
+			return "[NET]"
+		default:
+			return name
+		}
+	}
+
+	switch name {
+	case "check":
+		return "[OK]"
+	case "cross":
+		return "[X]"
+	case "warn":
+		return "[!]"
+	case "arrow_r":
+		return "->"
+	case "arrow_l":
+		return "<-"
+	case "target":
+		return ">>"
+	case "pin":
+		return "*"
+	case "wrench":
+		return "[*]"
+	case "chart":
+		return "[#]"
+	case "list":
+		return "[.]"
+	case "play":
+		return ">"
+	case "book":
+		return "[?]"
+	case "wave":
+		return ""
+	case "magnify":
+		return "[?]"
+	case "logs":
+		return "[Logs]"
+	case "events":
+		return "[Events]"
+	default:
+		return name
+	}
 }

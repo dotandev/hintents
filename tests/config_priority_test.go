@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package tests
@@ -22,24 +22,21 @@ func TestConfigPriority(t *testing.T) {
 	// Setup generic temporary home directory for config
 	tmpDir := t.TempDir()
 
-	// Mock HOME to point to tmpDir so config.LoadConfig uses it
+	// Mock home directory to point to tmpDir so config.LoadConfig uses it
+	// On Unix, os.UserHomeDir() uses HOME; on Windows, it uses USERPROFILE
 	originalHome := os.Getenv("HOME")
-	originalUP := os.Getenv("USERPROFILE")
-	os.Setenv("HOME", tmpDir)
-	os.Setenv("USERPROFILE", tmpDir)
+	originalUserProfile := os.Getenv("USERPROFILE")
 	defer func() {
 		os.Setenv("HOME", originalHome)
-		os.Setenv("USERPROFILE", originalUP)
+		os.Setenv("USERPROFILE", originalUserProfile)
 	}()
+	os.Setenv("HOME", tmpDir)
+	os.Setenv("USERPROFILE", tmpDir)
 
-	// Create a dummy config file
-	configDir := filepath.Join(tmpDir, ".erst")
-	err := os.MkdirAll(configDir, 0700)
-	require.NoError(t, err)
-
-	configFile := filepath.Join(configDir, "config.json")
-	configData := []byte(`{"rpc_token": "CONFIG_TOKEN"}`)
-	err = os.WriteFile(configFile, configData, 0600)
+	// Create a dummy TOML config file
+	configFile := filepath.Join(tmpDir, ".erst.toml")
+	configData := []byte(`rpc_token = "CONFIG_TOKEN"`)
+	err := os.WriteFile(configFile, configData, 0600)
 	require.NoError(t, err)
 
 	// Helper to resolve token with same logic as debug.go
@@ -49,7 +46,7 @@ func TestConfigPriority(t *testing.T) {
 			token = os.Getenv("ERST_RPC_TOKEN")
 		}
 		if token == "" {
-			cfg, err := config.LoadConfig()
+			cfg, err := config.Load()
 			if err == nil && cfg.RPCToken != "" {
 				token = cfg.RPCToken
 			}

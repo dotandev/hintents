@@ -1,16 +1,9 @@
-# Copyright (c) Hintents Authors.
+#!/bin/bash
+# Copyright 2026 Erst Users
 # SPDX-License-Identifier: Apache-2.0
 
-#!/bin/bash
-
-// Copyright (c) 2026 dotandev
-// SPDX-License-Identifier: MIT OR Apache-2.0
-
-
 # Test script to verify unused code detection setup
-# This creates a temporary file with unused code to test the linter
-
-set -e
+set -euo pipefail
 
 echo "Testing unused code detection setup..."
 
@@ -41,6 +34,7 @@ echo "Created test file with unused code..."
 # Try to run golangci-lint on the test file
 if command -v golangci-lint &> /dev/null; then
     echo "Running golangci-lint on test file..."
+    # We expect this to fail (non-zero exit code) if it detects the unused code
     if golangci-lint run --enable unused --disable-all test_unused.go; then
         echo "WARNING: No unused code detected in test file (this might indicate linter issues)"
     else

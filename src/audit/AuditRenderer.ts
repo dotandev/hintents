@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { writeFileSync } from 'fs';
-import type { ExecutionTrace, SignedAuditLog } from './AuditLogger';
+import type { ExecutionTrace, SignedAuditLog, MultiSignedAuditLog } from './AuditLogger';
 
-export type AuditPayload = ExecutionTrace | SignedAuditLog;
+export type AuditPayload = ExecutionTrace | SignedAuditLog | MultiSignedAuditLog;
 
 function isSigned(payload: AuditPayload): payload is SignedAuditLog {
   return 'trace' in payload && 'hash' in payload;
+}
+
+function isMultiSigned(payload: SignedAuditLog | MultiSignedAuditLog): payload is MultiSignedAuditLog {
+  return 'signatures' in payload;
 }
 
 function escapeHtml(value: string): string {
@@ -41,18 +45,63 @@ function renderEventsList(events: any[]): string {
   return `<ol class="events-list">${items}</ol>`;
 }
 
-function renderSignatureSection(log: SignedAuditLog): string {
+function renderSingleSignature(log: SignedAuditLog): string {
   const truncatedKey = log.publicKey.length > 80
     ? log.publicKey.slice(0, 40) + '...' + log.publicKey.slice(-40)
     : log.publicKey;
+  const label = log.signer.label ? ` (${log.signer.label})` : '';
   return `
     <table>
       <tr><th>Algorithm</th><td><code>${escapeHtml(log.algorithm)}</code></td></tr>
       <tr><th>Hash (SHA-256)</th><td><code>${escapeHtml(log.hash)}</code></td></tr>
       <tr><th>Signature</th><td><code>${escapeHtml(log.signature.slice(0, 32))}...</code></td></tr>
       <tr><th>Public Key</th><td><code>${escapeHtml(truncatedKey)}</code></td></tr>
-      <tr><th>Signer Provider</th><td>${escapeHtml(log.signer.provider)}</td></tr>
+      <tr><th>Signer Provider</th><td>${escapeHtml(log.signer.provider + label)}</td></tr>
     </table>`;
+}
+
+function renderMultiSignatures(log: MultiSignedAuditLog): string {
+  const rows = log.signatures
+    .map((sig, idx) => {
+      const truncatedKey = sig.publicKey.length > 80
+        ? sig.publicKey.slice(0, 40) + '...' + sig.publicKey.slice(-40)
+        : sig.publicKey;
+      const label = sig.signer.label ? ` (${sig.signer.label})` : '';
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${escapeHtml(sig.signer.provider + label)}</td>
+          <td><code>${escapeHtml(sig.signature.slice(0, 32))}...</code></td>
+          <td><code>${escapeHtml(truncatedKey)}</code></td>
+        </tr>`;
+    })
+    .join('\n');
+
+  return `
+    <table>
+      <tr><th>Algorithm</th><td><code>${escapeHtml(log.algorithm)}</code></td></tr>
+      <tr><th>Hash (SHA-256)</th><td><code>${escapeHtml(log.hash)}</code></td></tr>
+    </table>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Signer</th>
+          <th>Signature</th>
+          <th>Public Key</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table>`;
+}
+
+function renderSignatureSection(log: SignedAuditLog | MultiSignedAuditLog): string {
+  if (isMultiSigned(log)) {
+    return renderMultiSignatures(log);
+  }
+  return renderSingleSignature(log);
 }
 
 /**
@@ -77,7 +126,7 @@ export function renderAuditHTML(payload: AuditPayload, title?: string): string {
   const eventsSection = renderEventsList(trace.events);
 
   const signatureBlock = signed
-    ? `<section id="signature"><h2>Signature &amp; Integrity</h2>${renderSignatureSection(payload as SignedAuditLog)}</section>`
+    ? `<section id="signature"><h2>Signature &amp; Integrity</h2>${renderSignatureSection(payload as SignedAuditLog | MultiSignedAuditLog)}</section>`
     : '';
 
   const tocSignature = signed

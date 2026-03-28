@@ -1,0 +1,77 @@
+name: Generate Changelog
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger on tags matching v*, i.e. v1.0, v20.15.10
+
+jobs:
+  changelog:
+    name: Generate release changelog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Important for tag and commit history
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Generate Changelog
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          configurationJson: |
+            {
+              "template": "#{{CHANGELOG}}\n\n",
+              "pr_template": "- #{{TITLE}} (#{{NUMBER}})",
+              "categories": [
+                {
+                  "title": "## Features",
+                  "labels": ["feat", "feature"],
+                  "commits": ["feat"]
+                },
+                {
+                  "title": "## Bug Fixes",
+                  "labels": ["fix", "bug"],
+                  "commits": ["fix"]
+                },
+                {
+                  "title": "## Chores & Maintenance",
+                  "labels": ["chore", "maintenance"],
+                  "commits": ["chore"]
+                }
+              ]
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{steps.changelog.outputs.changelog}}
+          generate_release_notes: false
+
+      - name: Update CHANGELOG.md
+        run: |
+          VERSION="${{ github.ref_name }}"
+          DATE=$(date +%Y-%m-%d)
+          CONTENT="${{ steps.changelog.outputs.changelog }}"
+          
+          # Prepare the new entry
+          NEW_ENTRY="## [$VERSION] - $DATE\n\n$CONTENT\n\n---"
+          
+          # Insert after the [Unreleased] section
+          sed -i "/## \[Unreleased\]/a \ \n$NEW_ENTRY" CHANGELOG.md
+          sed -i "/# Project Changelog/a \ \n$NEW_ENTRY" docs/changelog.md
+          
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md docs/changelog.md
+          git commit -m "docs: update changelog for $VERSION [skip ci]"
+          git push

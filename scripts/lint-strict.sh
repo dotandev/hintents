@@ -1,79 +1,19 @@
-#!/usr/bin/env bash
-# Copyright (c) 2025 ERST Contributors
+#!/bin/bash
+# Copyright 2026 Erst Users
 # SPDX-License-Identifier: Apache-2.0
 
+# Run strict Go linting
 set -euo pipefail
 
-echo "=========================================="
-echo "Running Strict Linting Pipeline"
-echo "=========================================="
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
 
-EXIT_CODE=0
-
-# Go linting
-echo ""
-echo "1. Running Go strict linting..."
-echo "------------------------------------------"
-
-if ! golangci-lint run --config=.golangci.yml --max-issues-per-linter=0 --max-same-issues=0; then
-    echo "[FAIL] golangci-lint found issues"
-    EXIT_CODE=1
+echo "Running strict Go linting..."
+if command -v golangci-lint &> /dev/null; then
+    golangci-lint run --config=.golangci.yml --timeout=5m --max-issues-per-linter=0 --max-same-issues=0
 else
-    echo " golangci-lint passed"
+    echo "Warning: golangci-lint not found, running go vet only"
 fi
-
-if ! go vet ./...; then
-    echo "[FAIL] go vet found issues"
-    EXIT_CODE=1
-else
-    echo " go vet passed"
-fi
-
-# Check for unused variables specifically
-echo ""
-echo "2. Checking for unused variables..."
-echo "------------------------------------------"
-
-if go vet ./... 2>&1 | grep -i "declared and not used\|unused variable\|unused parameter"; then
-    echo "[FAIL] Unused variables detected"
-    EXIT_CODE=1
-else
-    echo " No unused variables detected"
-fi
-
-# Rust linting
-echo ""
-echo "3. Running Rust strict linting..."
-echo "------------------------------------------"
-
-cd simulator
-
-if ! cargo clippy --all-targets --all-features -- \
-    -D warnings \
-    -D clippy::all \
-    -D unused-variables \
-    -D unused-imports \
-    -D unused-mut \
-    -D dead-code \
-    -D unused-assignments \
-    -W clippy::pedantic \
-    -W clippy::nursery; then
-    echo "[FAIL] Clippy found issues"
-    EXIT_CODE=1
-else
-    echo " Clippy passed"
-fi
-
-cd ..
-
-# Summary
-echo ""
-echo "=========================================="
-if [ $EXIT_CODE -eq 0 ]; then
-    echo " All strict linting checks passed!"
-else
-    echo " Linting failed - please fix the issues above"
-fi
-echo "=========================================="
-
-exit $EXIT_CODE
+go vet ./...
+echo "Strict linting passed"

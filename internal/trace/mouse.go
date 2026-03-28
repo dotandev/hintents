@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package trace
@@ -46,9 +46,9 @@ func (mt *MouseTracker) Enable() error {
 
 	// Enable mouse tracking: report button presses and release
 	// SGR1006 mode for better compatibility
-	fmt.Fprint(os.Stdout, "\x1b[?1000h") // Enable basic mouse reporting
-	fmt.Fprint(os.Stdout, "\x1b[?1006h") // Enable SGR mode (extended coordinates)
-	fmt.Fprint(os.Stdout, "\x1b[?1015h") // Enable URXVT mode
+	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1000h") // Enable basic mouse reporting
+	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1006h") // Enable SGR mode (extended coordinates)
+	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1015h") // Enable URXVT mode
 
 	mt.enabled = true
 	return nil
@@ -61,9 +61,9 @@ func (mt *MouseTracker) Disable() error {
 	}
 
 	// Disable all mouse tracking modes
-	fmt.Fprint(os.Stdout, "\x1b[?1000l") // Disable basic mouse reporting
-	fmt.Fprint(os.Stdout, "\x1b[?1006l") // Disable SGR mode
-	fmt.Fprint(os.Stdout, "\x1b[?1015l") // Disable URXVT mode
+	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1000l") // Disable basic mouse reporting
+	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1006l") // Disable SGR mode
+	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1015l") // Disable URXVT mode
 
 	mt.enabled = false
 	return nil
@@ -96,7 +96,7 @@ func parseSGRMouseEvent(sequence string) (*MouseEvent, error) {
 		if c == ';' {
 			if current != "" {
 				var num int
-				fmt.Sscanf(current, "%d", &num)
+				_, _ = fmt.Sscanf(current, "%d", &num)
 				parts = append(parts, num)
 				current = ""
 			}
@@ -107,7 +107,7 @@ func parseSGRMouseEvent(sequence string) (*MouseEvent, error) {
 
 	if current != "" {
 		var num int
-		fmt.Sscanf(current, "%d", &num)
+		_, _ = fmt.Sscanf(current, "%d", &num)
 		parts = append(parts, num)
 	}
 

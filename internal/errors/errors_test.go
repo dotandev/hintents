@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package errors
@@ -96,4 +96,67 @@ func TestWrapRPCResponseTooLarge(t *testing.T) {
 	var rte *ResponseTooLargeError
 	assert.True(t, errors.As(err, &rte))
 	assert.Equal(t, url, rte.URL)
+}
+
+func TestErstError_Is_MatchesSentinel(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     ErstErrorCode
+		sentinel error
+	}{
+		{"RPC connection failed", CodeRPCConnectionFailed, ErrRPCConnectionFailed},
+		{"RPC timeout", CodeRPCTimeout, ErrRPCTimeout},
+		{"All RPC failed", CodeRPCAllFailed, ErrAllRPCFailed},
+		{"RPC error", CodeRPCError, ErrRPCError},
+		{"RPC response too large", CodeRPCResponseTooLarge, ErrRPCResponseTooLarge},
+		{"RPC request too large", CodeRPCRequestTooLarge, ErrRPCRequestTooLarge},
+		{"Rate limit exceeded", CodeRPCRateLimitExceeded, ErrRateLimitExceeded},
+		{"Marshal failed", CodeRPCMarshalFailed, ErrMarshalFailed},
+		{"Unmarshal failed", CodeRPCUnmarshalFailed, ErrUnmarshalFailed},
+		{"Transaction not found", CodeTransactionNotFound, ErrTransactionNotFound},
+		{"Ledger not found", CodeLedgerNotFound, ErrLedgerNotFound},
+		{"Ledger archived", CodeLedgerArchived, ErrLedgerArchived},
+		{"Sim not found", CodeSimNotFound, ErrSimulatorNotFound},
+		{"Sim crash", CodeSimCrash, ErrSimCrash},
+		{"Sim exec failed", CodeSimExecFailed, ErrSimulationFailed},
+		{"Sim memory limit", CodeSimMemoryLimitExceeded, ErrSimulationFailed},
+		{"Sim logic error", CodeSimLogicError, ErrSimulationLogicError},
+		{"Sim proto unsupported", CodeSimProtoUnsup, ErrProtocolUnsupported},
+		{"Validation failed", CodeValidationFailed, ErrValidationFailed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			erstErr := NewSimError(tt.code, fmt.Errorf("original error"))
+			assert.True(t, errors.Is(erstErr, tt.sentinel),
+				"errors.Is(%v, %v) should be true", tt.code, tt.sentinel)
+		})
+	}
+}
+
+func TestErstError_Is_DoesNotMatchWrongSentinel(t *testing.T) {
+	erstErr := NewSimError(CodeSimCrash, fmt.Errorf("crash"))
+
+	assert.False(t, errors.Is(erstErr, ErrRPCConnectionFailed))
+	assert.False(t, errors.Is(erstErr, ErrRateLimitExceeded))
+	assert.False(t, errors.Is(erstErr, ErrTransactionNotFound))
+}
+
+func TestErstError_Is_UnknownCodeMatchesNothing(t *testing.T) {
+	erstErr := NewSimError(CodeUnknown, fmt.Errorf("unknown"))
+
+	assert.False(t, errors.Is(erstErr, ErrSimCrash))
+	assert.False(t, errors.Is(erstErr, ErrRPCConnectionFailed))
+	assert.False(t, errors.Is(erstErr, ErrSimulationFailed))
+}
+
+func TestErstError_Unwrap_ReturnsOrigErr(t *testing.T) {
+	origErr := fmt.Errorf("crash")
+	erstErr := NewSimError(CodeSimCrash, origErr)
+	assert.Equal(t, origErr, erstErr.Unwrap(), "Unwrap should return the original error")
+}
+
+func TestShellExitSentinel(t *testing.T) {
+	assert.True(t, errors.Is(ErrShellExit, ErrShellExit))
+	assert.False(t, errors.Is(ErrShellExit, ErrRPCConnectionFailed))
 }

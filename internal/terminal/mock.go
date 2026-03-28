@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package terminal
@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 )
+
+var _ Renderer = (*MockRenderer)(nil)
 
 type MockRenderer struct {
 	Output []string

@@ -1,10 +1,8 @@
 name: Release
-
 on:
   push:
     tags:
       - 'v*'
-
 jobs:
   publish-crates-io:
     name: Publish to crates.io
@@ -15,7 +13,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Publish to crates.io
         run: cd simulator && cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
-
   build-go-cli:
     name: Build Go CLI
     strategy:
@@ -24,6 +21,9 @@ jobs:
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
           - os: macos-latest
             goos: darwin
             goarch: amd64
@@ -33,13 +33,19 @@ jobs:
           - os: windows-latest
             goos: windows
             goarch: amd64
+          - os: macos-latest
+            goos: windows
+            goarch: amd64
+          - os: macos-latest
+            goos: windows
+            goarch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.0'
+          go-version: '1.25.0'
       - name: Build Binary
         run: |
           mkdir -p bin
@@ -59,9 +65,8 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: erst-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: erst-${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.os }}
           path: bin/*
-
   create-github-release:
     name: Create GitHub Release
     needs: [build-go-cli, publish-crates-io]
@@ -70,6 +75,41 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build Changelog
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          configurationJson: |
+            {
+              "template": "# {{TAG}}\n\n{{CATEGORIES}}",
+              "categories": [
+                {
+                  "title": "## [DEPLOY] Features",
+                  "filter": {
+                    "pattern": "feat.*",
+                    "target": "commit"
+                  }
+                },
+                {
+                  "title": "## [BUG] Fixes",
+                  "filter": {
+                    "pattern": "fix.*",
+                    "target": "commit"
+                  }
+                },
+                {
+                  "title": "## [FIX] Chores",
+                  "filter": {
+                    "pattern": "chore.*",
+                    "target": "commit"
+                  }
+                }
+              ]
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
@@ -77,7 +117,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          body: ${{steps.build_changelog.outputs.changelog}}
           files: artifacts/**/*
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ github.token }}

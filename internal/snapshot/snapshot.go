@@ -1,9 +1,10 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package snapshot
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,13 +19,22 @@ type LedgerEntryTuple []string
 // strict schema compatibility: "ledgerEntries" key containing list of tuples.
 type Snapshot struct {
 	LedgerEntries []LedgerEntryTuple `json:"ledgerEntries"`
+	LinearMemory  string             `json:"linearMemory,omitempty"`
+}
+
+type BuildOptions struct {
+	LinearMemory []byte
 }
 
 // FromMap converts the internal map representation to a Snapshot.
 // Enforces deterministic ordering by sorting keys.
 func FromMap(m map[string]string) *Snapshot {
+	return FromMapWithOptions(m, BuildOptions{})
+}
+
+func FromMapWithOptions(m map[string]string, opts BuildOptions) *Snapshot {
 	if m == nil {
-		return &Snapshot{LedgerEntries: make([]LedgerEntryTuple, 0)}
+		return &Snapshot{LedgerEntries: make([]LedgerEntryTuple, 0), LinearMemory: encodeMemory(opts.LinearMemory)}
 	}
 
 	entries := make([]LedgerEntryTuple, 0, len(m))
@@ -37,7 +47,7 @@ func FromMap(m map[string]string) *Snapshot {
 		return entries[i][0] < entries[j][0]
 	})
 
-	return &Snapshot{LedgerEntries: entries}
+	return &Snapshot{LedgerEntries: entries, LinearMemory: encodeMemory(opts.LinearMemory)}
 }
 
 // ToMap converts the Snapshot back to the internal map representation.
@@ -52,6 +62,18 @@ func (s *Snapshot) ToMap() map[string]string {
 		}
 	}
 	return m
+}
+
+func (s *Snapshot) DecodeLinearMemory() ([]byte, error) {
+	if s == nil || s.LinearMemory == "" {
+		return nil, nil
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(s.LinearMemory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode linear memory: %w", err)
+	}
+	return decoded, nil
 }
 
 // Load reads a snapshot from a JSON file.
@@ -71,7 +93,9 @@ func Load(path string) (*Snapshot, error) {
 
 // Save writes a snapshot to a JSON file with indentation for readability.
 func Save(path string, snap *Snapshot) error {
-	data, err := json.MarshalIndent(snap, "", "  ")
+	stable := normalizedForSave(snap)
+
+	data, err := json.MarshalIndent(stable, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal snapshot: %w", err)
 	}
@@ -81,4 +105,37 @@ func Save(path string, snap *Snapshot) error {
 	}
 
 	return nil
+}
+
+func normalizedForSave(snap *Snapshot) *Snapshot {
+	if snap == nil {
+		return &Snapshot{LedgerEntries: make([]LedgerEntryTuple, 0)}
+	}
+
+	entries := make([]LedgerEntryTuple, 0, len(snap.LedgerEntries))
+	for _, entry := range snap.LedgerEntries {
+		copied := append(LedgerEntryTuple(nil), entry...)
+		entries = append(entries, copied)
+	}
+
+	sort.SliceStable(entries, func(i, j int) bool {
+		left := ""
+		right := ""
+		if len(entries[i]) > 0 {
+			left = entries[i][0]
+		}
+		if len(entries[j]) > 0 {
+			right = entries[j][0]
+		}
+		return left < right
+	})
+
+	return &Snapshot{LedgerEntries: entries, LinearMemory: snap.LinearMemory}
+}
+
+func encodeMemory(memory []byte) string {
+	if len(memory) == 0 {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(memory)
 }

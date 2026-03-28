@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -29,6 +29,7 @@ var (
 	cmpRPCURLFlag    string
 	cmpRPCTokenFlag  string
 	cmpLocalWasmFlag string
+	cmpOptimizeFlag  bool
 	cmpArgsFlag      []string
 	cmpVerboseFlag   bool
 	cmpSimPathFlag   string
@@ -38,8 +39,9 @@ var (
 
 // compareCmd implements `erst compare`.
 var compareCmd = &cobra.Command{
-	Use:   "compare <transaction-hash>",
-	Short: "Compare replay: local WASM vs on-chain WASM side-by-side",
+	Use:     "compare <transaction-hash>",
+	GroupID: "testing",
+	Short:   "Compare replay: local WASM vs on-chain WASM side-by-side",
 	Long: `Simultaneously replay a transaction against a local WASM file and the on-chain
 contract, then display a side-by-side diff of events, diagnostic output, budget
 usage, and divergent call paths.
@@ -67,11 +69,11 @@ Examples:
 		if cmpLocalWasmFlag == "" {
 			return errors.WrapValidationError("--wasm flag is required for compare mode")
 		}
-		if _, err := os.Stat(cmpLocalWasmFlag); os.IsNotExist(err) {
+		if _, statErr := os.Stat(cmpLocalWasmFlag); os.IsNotExist(statErr) {
 			return errors.WrapValidationError(fmt.Sprintf("WASM file not found: %s", cmpLocalWasmFlag))
 		}
-		if err := rpc.ValidateTransactionHash(args[0]); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("invalid transaction hash: %v", err))
+		if validateErr := rpc.ValidateTransactionHash(args[0]); validateErr != nil {
+			return errors.WrapValidationError(fmt.Sprintf("invalid transaction hash: %v", validateErr))
 		}
 		switch rpc.Network(cmpNetworkFlag) {
 		case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
@@ -93,6 +95,8 @@ func init() {
 		"RPC authentication token (or ERST_RPC_TOKEN env var)")
 	compareCmd.Flags().StringVar(&cmpLocalWasmFlag, "wasm", "",
 		"Path to local WASM file (required)")
+	compareCmd.Flags().BoolVar(&cmpOptimizeFlag, "optimize", false,
+		"Run dead-code elimination on local WASM before simulation")
 	compareCmd.Flags().StringSliceVar(&cmpArgsFlag, "args", []string{},
 		"Mock arguments to pass to the local WASM execution")
 	compareCmd.Flags().BoolVarP(&cmpVerboseFlag, "verbose", "v", false,
@@ -103,7 +107,8 @@ func init() {
 		"Colour theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
 	compareCmd.Flags().Uint32Var(&cmpProtoFlag, "protocol-version", 0,
 		"Override protocol version for both simulation passes (20, 21, 22, …)")
-
+	_ = compareCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
+	_ = compareCmd.RegisterFlagCompletionFunc("theme", completeThemeFlag)
 	rootCmd.AddCommand(compareCmd)
 }
 
@@ -112,6 +117,14 @@ func init() {
 func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 	ctx := cmd.Context()
 	txHash := cmdArgs[0]
+	localWasmPath := cmpLocalWasmFlag
+
+	optimizedPath, report, cleanup, err := optimizeWasmFileIfRequested(localWasmPath, cmpOptimizeFlag)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("failed to optimize local WASM: %v", err))
+	}
+	defer cleanup()
+	localWasmPath = optimizedPath
 
 	// Logging level
 	if cmpVerboseFlag {
@@ -131,6 +144,9 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 	fmt.Printf("Transaction : %s\n", txHash)
 	fmt.Printf("Network     : %s\n", cmpNetworkFlag)
 	fmt.Printf("Local WASM  : %s\n", cmpLocalWasmFlag)
+	if cmpOptimizeFlag {
+		printOptimizationReport(report)
+	}
 	fmt.Println()
 
 	// ── Build RPC client ────────────────────────────────────────────────────
@@ -139,7 +155,7 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 		token = os.Getenv("ERST_RPC_TOKEN")
 	}
 	if token == "" {
-		if cfg, err := config.Load(); err == nil && cfg.RPCToken != "" {
+		if cfg, cfgErr := config.Load(); cfgErr == nil && cfg.RPCToken != "" {
 			token = cfg.RPCToken
 		}
 	}
@@ -152,7 +168,7 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 		urls := splitTrimmed(cmpRPCURLFlag)
 		clientOpts = append(clientOpts, rpc.WithAltURLs(urls))
 	} else {
-		if cfg, err := config.Load(); err == nil {
+		if cfg, cfgErr := config.Load(); cfgErr == nil {
 			if len(cfg.RpcUrls) > 0 {
 				clientOpts = append(clientOpts, rpc.WithAltURLs(cfg.RpcUrls))
 			} else if cfg.RpcUrl != "" {
@@ -197,10 +213,10 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 
 	// ── Run two simulation passes in parallel ────────────────────────────────
 	fmt.Printf("%s Running two simulation passes in parallel...\n", visualizer.Symbol("play"))
-	fmt.Printf("   Pass A – local WASM  : %s\n", cmpLocalWasmFlag)
+	fmt.Printf("   Pass A – local WASM  : %s\n", localWasmPath)
 	fmt.Printf("   Pass B – on-chain WASM: (using network ledger state)\n\n")
 
-	localResult, onChainResult, runErr := runBothPasses(ctx, runner, txResp, ledgerEntries)
+	localResult, onChainResult, runErr := runBothPasses(ctx, runner, txResp, ledgerEntries, localWasmPath)
 	if runErr != nil {
 		return runErr
 	}
@@ -223,6 +239,7 @@ func runBothPasses(
 	runner *simulator.Runner,
 	txResp *rpc.TransactionResponse,
 	ledgerEntries map[string]string,
+	localWasmPath string,
 ) (localResult, onChainResult *simulator.SimulationResponse, err error) {
 	var wg sync.WaitGroup
 	var localErr, onChainErr error
@@ -232,15 +249,15 @@ func runBothPasses(
 	// Pass A – local WASM
 	go func() {
 		defer wg.Done()
-		req := buildSimRequest(txResp, ledgerEntries, &cmpLocalWasmFlag, cmpArgsFlag)
-		localResult, localErr = runner.Run(req)
+		req := buildSimRequest(txResp, ledgerEntries, &localWasmPath, cmpArgsFlag)
+		localResult, localErr = runner.Run(ctx, req)
 	}()
 
 	// Pass B – on-chain (no --wasm flag, uses whatever is in the ledger)
 	go func() {
 		defer wg.Done()
 		req := buildSimRequest(txResp, ledgerEntries, nil, nil)
-		onChainResult, onChainErr = runner.Run(req)
+		onChainResult, onChainErr = runner.Run(ctx, req)
 	}()
 
 	wg.Wait()
@@ -273,7 +290,7 @@ func buildSimRequest(
 		req.MockArgs = &mockArgs
 	}
 	if cmpProtoFlag > 0 {
-		if err := simulator.Validate(cmpProtoFlag); err == nil {
+		if validateErr := simulator.Validate(cmpProtoFlag); validateErr == nil {
 			req.ProtocolVersion = &cmpProtoFlag
 		}
 	}

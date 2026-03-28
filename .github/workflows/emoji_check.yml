@@ -25,9 +25,9 @@ jobs:
       - name: Run Emoji/Slop Check
         run: |
           if [ "${{ github.event_name }}" == "pull_request" ]; then
-            python emojis.py --check
+            python3 emojis.py --check
           else
-            python emojis.py --fix
+            python3 emojis.py --fix
           fi
 
       - name: Check for modified files

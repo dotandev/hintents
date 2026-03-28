@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package rpc
@@ -21,11 +21,14 @@ func TestClient_Rotation(t *testing.T) {
 	assert.True(t, rotated)
 	assert.Equal(t, "http://success2.com", client.HorizonURL)
 	assert.Equal(t, 1, client.currIndex)
+	// counter should have incremented
+	assert.Equal(t, 1, client.RotateCount())
 
 	rotated = client.rotateURL()
 	assert.True(t, rotated)
 	assert.Equal(t, "http://fail1.com", client.HorizonURL) // Wraps around
 	assert.Equal(t, 0, client.currIndex)
+	assert.Equal(t, 2, client.RotateCount(), "rotate count should reflect two switches")
 }
 
 func TestClient_GetTransaction_Failover_Logic(t *testing.T) {
