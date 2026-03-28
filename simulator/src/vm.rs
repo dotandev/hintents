@@ -30,7 +30,7 @@ pub fn enforce_soroban_compatibility(wasm: &[u8]) -> Result<(), String> {
 
 /// Prepares a host for VM execution.
 ///
-/// Registers state capture hooks or other VM-level interceptions 
+/// Registers state capture hooks or other VM-level interceptions
 /// required for simulation.
 pub fn prepare_host(host: &soroban_env_host::Host) {
     crate::host::register_hook(host);

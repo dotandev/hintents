@@ -1,13 +1,13 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::host;
 use soroban_env_host::{
     budget::Budget,
     storage::Storage,
     xdr::{Hash, ScErrorCode, ScErrorType},
     DiagnosticLevel, Error as EnvError, Host, HostError, TryIntoVal, Val,
 };
-use crate::host;
 
 /// Wrapper around the Soroban Host to manage initialization and execution context.
 pub struct SimHost {

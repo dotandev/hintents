@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::types::StateSnapshot;
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use soroban_env_host::xdr::{LedgerEntry, LedgerKey, Limits, WriteXdr};
 use soroban_env_host::{Host, HostError};
 use std::collections::HashMap;
@@ -59,7 +61,7 @@ pub fn take_snapshot(host: &Host) -> Result<StateSnapshot, HostError> {
 /// Dispatches a host function call and triggers state capture.
 pub fn dispatch_host_call(host: &Host) -> Result<(), HostError> {
     let snapshot = take_snapshot(host)?;
-    
+
     tracing::info!(
         event = "host_function_capture",
         instruction = snapshot.instruction_index,
