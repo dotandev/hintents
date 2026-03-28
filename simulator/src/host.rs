@@ -5,9 +5,8 @@ use crate::types::StateSnapshot;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use soroban_env_host::xdr::{LedgerEntry, LedgerKey, Limits, ScErrorCode, ScErrorType, WriteXdr};
-use soroban_env_host::{Env, Host, HostError};
+use soroban_env_host::{Env, Host, HostError, TryFromVal};
 use std::collections::HashMap;
-use std::rc::Rc;
 
 /// Trait alias or definition for the Host hook if not directly available from the crate.
 /// In recent soroban-env-host versions, this is part of the public API.
@@ -32,24 +31,23 @@ pub fn take_snapshot(host: &Host) -> Result<StateSnapshot, HostError> {
     let budget = host.budget_cloned();
     let instruction_index = budget.get_cpu_insns_consumed().unwrap_or(0) as u32;
 
-    host.with_storage(|storage| {
-        for (key, entry) in &storage.map {
-            let key_xdr = key
-                .to_xdr(Limits::none())
-                .map_err(|_| HostError::from((ScErrorType::Storage, ScErrorCode::InternalError)))?;
-            let entry_xdr = entry
-                .to_xdr(Limits::none())
-                .map_err(|_| HostError::from((ScErrorType::Storage, ScErrorCode::InternalError)))?;
+    let storage = host.borrow_storage()?;
+    for (key, entry) in &storage.map {
+        let key_xdr = key
+            .to_xdr(Limits::none())
+            .map_err(|_| HostError::from((ScErrorType::Storage, ScErrorCode::InternalError)))?;
+        let entry_xdr = entry
+            .to_xdr(Limits::none())
+            .map_err(|_| HostError::from((ScErrorType::Storage, ScErrorCode::InternalError)))?;
 
-            let key_b64 = base64::engine::general_purpose::STANDARD.encode(key_xdr);
-            let entry_b64 = base64::engine::general_purpose::STANDARD.encode(entry_xdr);
+        let key_b64 = base64::engine::general_purpose::STANDARD.encode(key_xdr);
+        let entry_b64 = base64::engine::general_purpose::STANDARD.encode(entry_xdr);
 
-            ledger_entries.insert(key_b64, entry_b64);
-        }
-        Ok(())
-    })?;
+        ledger_entries.insert(key_b64, entry_b64);
+    }
 
-    let timestamp = host.get_ledger_timestamp()?.into();
+    let timestamp = u64::try_from_val(host, &host.get_ledger_timestamp()?)
+        .map_err(|_| HostError::from((ScErrorType::Context, ScErrorCode::InternalError)))?;
 
     Ok(StateSnapshot {
         ledger_entries,
