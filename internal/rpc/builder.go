@@ -27,6 +27,7 @@ type clientBuilder struct {
 	httpClient      *http.Client
 	requestTimeout  time.Duration
 	middlewares     []Middleware
+	loggingEnabled  bool
 }
 
 const defaultHTTPTimeout = 15 * time.Second
@@ -153,6 +154,17 @@ func WithMiddleware(middlewares ...Middleware) ClientOption {
 	}
 }
 
+// WithLoggingEnabled enables or disables the built-in LoggingMiddleware.
+// When enabled, every outbound HTTP request is logged at INFO level with its
+// method, URL, response status, and round-trip latency. The logging middleware
+// is always placed outermost so it observes the full logical request duration.
+func WithLoggingEnabled(enabled bool) ClientOption {
+	return func(b *clientBuilder) error {
+		b.loggingEnabled = enabled
+		return nil
+	}
+}
+
 func NewClient(opts ...ClientOption) (*Client, error) {
 	builder := newBuilder()
 
@@ -229,7 +241,13 @@ func (b *clientBuilder) build() (*Client, error) {
 	}
 
 	if b.httpClient == nil {
-		b.httpClient = createHTTPClient(b.token, b.requestTimeout, b.middlewares...)
+		mws := b.middlewares
+		if b.loggingEnabled {
+			// Prepend so the logging middleware is outermost in the chain,
+			// ensuring it captures the full round-trip including all user middlewares.
+			mws = append([]Middleware{NewLoggingMiddleware()}, mws...)
+		}
+		b.httpClient = createHTTPClient(b.token, b.requestTimeout, mws...)
 	}
 
 	if len(b.altURLs) == 0 && b.horizonURL != "" {
