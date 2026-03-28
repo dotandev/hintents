@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"encoding/json"
 	"github.com/atotto/clipboard"
 	"github.com/dotandev/hintents/internal/dwarf"
 	"github.com/dotandev/hintents/internal/visualizer"
@@ -154,6 +155,9 @@ func (v *InteractiveViewer) handleCommand(command string) bool {
 	}
 
 	switch cmd {
+	case "e", "export":
+		v.exportCurrentFrame()
+		return false
 	case "n", "next", "forward":
 		v.stepForward()
 	case "p", "prev", "back", "backward":
@@ -202,6 +206,32 @@ func (v *InteractiveViewer) handleCommand(command string) bool {
 	}
 
 	return false
+}
+// exportCurrentFrame prompts for a filename and saves the current state as pretty JSON
+func (v *InteractiveViewer) exportCurrentFrame() {
+	state, err := v.trace.GetCurrentState()
+	if err != nil {
+		fmt.Printf("%s %s\n", visualizer.Error(), err)
+		return
+	}
+	defaultName := fmt.Sprintf("frame_%d.json", state.Step)
+	fmt.Printf("Export current frame to file (default: %s): ", defaultName)
+	input, _ := v.reader.ReadString('\n')
+	filename := strings.TrimSpace(input)
+	if filename == "" {
+		filename = defaultName
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		fmt.Printf("%s Failed to encode frame: %v\n", visualizer.Error(), err)
+		return
+	}
+	err = os.WriteFile(filename, data, 0644)
+	if err != nil {
+		fmt.Printf("%s Failed to write file: %v\n", visualizer.Error(), err)
+		return
+	}
+	fmt.Printf("%s Frame exported to %s\n", visualizer.Success(), filename)
 }
 
 // stepForward moves to the next step, respecting the event filter and hideStdLib toggle.
@@ -565,7 +595,7 @@ func (v *InteractiveViewer) showHelp() {
 	fmt.Println()
 	fmt.Println("Display:")
 	fmt.Println("  s, show, state          - Show current state")
-	fmt.Println("  e, expand               - Expand / show full detail of current step")
+	fmt.Println("  e, export               - Export current frame as JSON")
 	fmt.Println("  S                       - Toggle hiding/showing Rust core::* traces")
 	fmt.Println("  e, expand               - Expand / collapse the current trace node")
 	fmt.Println("  r, reconstruct [step]   - Reconstruct state")
