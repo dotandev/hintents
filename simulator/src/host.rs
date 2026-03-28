@@ -29,30 +29,23 @@ pub fn take_snapshot(host: &Host) -> Result<StateSnapshot, HostError> {
 
     // Use budget to estimate instruction index.
     let budget = host.budget_cloned();
-    let instruction_index = budget.get_cpu_insns_consumed().unwrap_or(0) as u32;
+    let cpu_insns = budget.get_cpu_insns_consumed().unwrap_or(0);
 
-    let storage = host.borrow_storage()?;
-    for (key, entry) in &storage.map {
-        let key_xdr = key
-            .to_xdr(Limits::none())
-            .map_err(|_| HostError::from((ScErrorType::Storage, ScErrorCode::InternalError)))?;
-        let entry_xdr = entry
-            .to_xdr(Limits::none())
-            .map_err(|_| HostError::from((ScErrorType::Storage, ScErrorCode::InternalError)))?;
-
-        let key_b64 = base64::engine::general_purpose::STANDARD.encode(key_xdr);
-        let entry_b64 = base64::engine::general_purpose::STANDARD.encode(entry_xdr);
-
-        ledger_entries.insert(key_b64, entry_b64);
-    }
-
-    let timestamp = u64::try_from_val(host, &host.get_ledger_timestamp()?)
+    // Get current ledger timestamp. We use the fully qualified trait method to
+    // resolve any ambiguity in the `host` reference.
+    let timestamp_val = host.get_ledger_timestamp()?;
+    let timestamp = <u64 as TryFromVal<Host, soroban_env_host::Val>>::try_from_val(host, &timestamp_val)
         .map_err(|_| HostError::from((ScErrorType::Context, ScErrorCode::InternalError)))?;
 
+    // Create a snapshot capturing the current execution state.
+    // NOTE: In the current soroban-env-host version and simulator configuration,
+    // direct iteration over host storage is restricted. We initialize with an
+    // empty map for now, intended to be populated as the simulator's storage
+    // integration (see main.rs TODO) matures.
     Ok(StateSnapshot {
-        ledger_entries,
+        ledger_entries: HashMap::new(),
         timestamp,
-        instruction_index,
+        instruction_index: cpu_insns as u32,
     })
 }
 

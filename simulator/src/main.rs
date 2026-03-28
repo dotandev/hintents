@@ -514,43 +514,27 @@ fn main() {
 
     if let Some(entries) = &resolved_entries {
         for (key_xdr, entry_xdr) in entries {
-            match base64::engine::general_purpose::STANDARD.decode(key_xdr) {
-                Ok(b) => match soroban_env_host::xdr::LedgerKey::from_xdr(
-                    b,
-                    soroban_env_host::xdr::Limits::none(),
-                ) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        send_error(format!("Failed to parse LedgerKey XDR: {}", e));
-                        return;
-                    }
-                },
+            let key = match crate::snapshot::decode_ledger_key(key_xdr) {
+                Ok(k) => k,
                 Err(e) => {
-                    send_error(format!("Failed to decode LedgerKey Base64: {}", e));
+                    send_error(format!("Failed to decode LedgerKey: {}", e));
                     return;
                 }
             };
 
-            match base64::engine::general_purpose::STANDARD.decode(entry_xdr) {
-                Ok(b) => match soroban_env_host::xdr::LedgerEntry::from_xdr(
-                    b,
-                    soroban_env_host::xdr::Limits::none(),
-                ) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        send_error(format!("Failed to parse LedgerEntry XDR: {}", e));
-                        return;
-                    }
-                },
+            let entry = match crate::snapshot::decode_ledger_entry(entry_xdr) {
+                Ok(e) => e,
                 Err(e) => {
-                    send_error(format!("Failed to decode LedgerEntry Base64: {}", e));
+                    send_error(format!("Failed to decode LedgerEntry: {}", e));
                     return;
                 }
             };
 
-            // TODO: Inject into host storage.
-            // For MVP, we verify we can parse them.
-            eprintln!("Parsed Ledger Entry from XDR successfully");
+            // Inject into host storage.
+            if let Err(e) = host.put_ledger_entry(key, entry) {
+                send_error(format!("Failed to inject LedgerEntry into Host storage: {}", e));
+                return;
+            }
             loaded_entries_count += 1;
         }
     }
