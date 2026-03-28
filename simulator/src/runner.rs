@@ -7,6 +7,7 @@ use soroban_env_host::{
     xdr::{Hash, ScErrorCode, ScErrorType},
     DiagnosticLevel, Error as EnvError, Host, HostError, TryIntoVal, Val,
 };
+use crate::host;
 
 /// Wrapper around the Soroban Host to manage initialization and execution context.
 pub struct SimHost {
@@ -54,6 +55,11 @@ impl SimHost {
     /// Convert a u32 to a Soroban Val.
     pub fn _val_from_u32(&self, v: u32) -> Val {
         Val::from_u32(v).into()
+    }
+
+    /// Takes a snapshot of the current ledger state.
+    pub fn take_snapshot(&self) -> Result<crate::types::StateSnapshot, HostError> {
+        host::take_snapshot(&self.inner)
     }
 
     /// Convert a Val back to u32.

@@ -7,6 +7,7 @@ mod config;
 mod debug_host_fn;
 mod gas_optimizer;
 mod git_detector;
+mod host;
 mod ipc;
 mod runner;
 mod source_map_cache;
@@ -480,6 +481,7 @@ fn main() {
         request.memory_limit,
     );
     let host = sim_host.inner;
+    vm::prepare_host(&host);
 
     // --- START: Local WASM Loading Integration (Issue #70) ---
     if let Some(path) = &request.wasm_path {

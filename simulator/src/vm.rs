@@ -28,6 +28,14 @@ pub fn enforce_soroban_compatibility(wasm: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Prepares a host for VM execution.
+///
+/// Registers state capture hooks or other VM-level interceptions 
+/// required for simulation.
+pub fn prepare_host(host: &soroban_env_host::Host) {
+    crate::host::register_hook(host);
+}
+
 fn is_float_op<'a>(op: &Operator<'a>) -> bool {
     // Many of the `Operator` variants are prefixed with `F32` or `F64` when
     // they perform floating-point operations. To avoid having to keep an
