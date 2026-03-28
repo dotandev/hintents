@@ -28,6 +28,13 @@ type ExecutionState struct {
 	SourceFile      string                 `json:"source_file,omitempty"`
 	SourceLine      int                    `json:"source_line,omitempty"`
 	GitHubLink      string                 `json:"github_link,omitempty"`
+	// Resource usage metrics at this step
+	CPUInstructions   uint64  `json:"cpu_instructions,omitempty"`
+	MemoryBytes       uint64  `json:"memory_bytes,omitempty"`
+	CPULimit          uint64  `json:"cpu_limit,omitempty"`
+	MemoryLimit       uint64  `json:"memory_limit,omitempty"`
+	CPUUsagePercent   float64 `json:"cpu_usage_percent,omitempty"`
+	MemoryUsagePercent float64 `json:"memory_usage_percent,omitempty"`
 }
 
 // DefaultSnapshotInterval is the number of steps between state snapshots.
@@ -39,11 +46,18 @@ const DefaultSnapshotInterval = 100
 // HostState and Memory are populated lazily the first time the snapshot is read,
 // keeping AddState O(1) regardless of trace size.
 type StateSnapshot struct {
-	Step      int                    `json:"step"`
-	Timestamp time.Time              `json:"timestamp"`
-	HostState map[string]interface{} `json:"host_state"`
-	Memory    map[string]interface{} `json:"memory"`
-	CallStack []string               `json:"call_stack"`
+	Step            int                    `json:"step"`
+	Timestamp       time.Time              `json:"timestamp"`
+	HostState       map[string]interface{} `json:"host_state"`
+	Memory          map[string]interface{} `json:"memory"`
+	CallStack       []string               `json:"call_stack"`
+	// Resource usage metrics at this snapshot point
+	CPUInstructions   uint64 `json:"cpu_instructions,omitempty"`
+	MemoryBytes       uint64 `json:"memory_bytes,omitempty"`
+	CPULimit          uint64 `json:"cpu_limit,omitempty"`
+	MemoryLimit       uint64 `json:"memory_limit,omitempty"`
+	CPUUsagePercent   float64 `json:"cpu_usage_percent,omitempty"`
+	MemoryUsagePercent float64 `json:"memory_usage_percent,omitempty"`
 	// built tracks whether HostState/Memory have been populated.
 	built bool
 }
