@@ -1,3 +1,9 @@
+// SnapshotRegistry defines snapshot/session management methods
+type SnapshotRegistry interface {
+	SaveSession(s *Session) error
+	SearchSessions(filters SearchFilters) ([]Session, error)
+}
+
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
@@ -32,6 +38,7 @@ type Runner struct {
 	closed     bool
 	MockTime   int64 // non-zero overrides Timestamp in every SimulationRequest
 	Validator  *Validator
+	Registry SnapshotRegistry
 }
 
 // Compile-time check to ensure Runner implements RunnerInterface
@@ -58,12 +65,22 @@ func NewRunner(simPathOverride string, debug bool) (*Runner, error) {
 		)
 	}
 
-	return &Runner{
-		BinaryPath: path,
-		Debug:      debug,
-		activeCmds: make(map[*exec.Cmd]struct{}),
-		Validator:  NewValidator(false),
-	}, nil
+	   return &Runner{
+		   BinaryPath: path,
+		   Debug:      debug,
+		   activeCmds: make(map[*exec.Cmd]struct{}),
+		   Validator:  NewValidator(false),
+	   }, nil
+
+	// NewRunnerWithRegistry allows injecting a SnapshotRegistry
+	func NewRunnerWithRegistry(simPathOverride string, debug bool, reg SnapshotRegistry) (*Runner, error) {
+	   r, err := NewRunner(simPathOverride, debug)
+	   if err != nil {
+		   return nil, err
+	   }
+	   r.Registry = reg
+	   return r, nil
+	}
 }
 
 // NewRunnerWithMockTime creates a Runner that overrides the ledger timestamp on

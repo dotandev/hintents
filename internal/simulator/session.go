@@ -1,3 +1,5 @@
+// Ensure DB implements SnapshotRegistry
+var _ SnapshotRegistry = (*DB)(nil)
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
