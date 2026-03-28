@@ -71,6 +71,59 @@ type ExecutionTrace struct {
 	Snapshots        []StateSnapshot  `json:"snapshots"`
 	CurrentStep      int              `json:"current_step"`
 	SnapshotInterval int              `json:"snapshot_interval"`
+	// snapshotIndex provides O(log N) lookup of snapshots by step number
+	snapshotIndex []int // maps sorted step numbers to snapshot indices
+}
+
+// GetSnapshotAtInstruction returns the snapshot index for the given instruction/step.
+// It uses binary search on the sorted snapshot steps for O(log N) lookup.
+// Returns the index of the closest snapshot at or before the requested step.
+func (t *ExecutionTrace) GetSnapshotAtInstruction(step int) int {
+	if len(t.Snapshots) == 0 {
+		return -1
+	}
+
+	// Build snapshot index if not already built
+	if len(t.snapshotIndex) == 0 {
+		t.buildSnapshotIndex()
+	}
+
+	// Binary search for the closest snapshot at or before the target step
+	idx := t.binarySearchSnapshot(step)
+	if idx < 0 || idx >= len(t.Snapshots) {
+		return -1
+	}
+
+	return idx
+}
+
+// buildSnapshotIndex builds a sorted index of snapshot steps for O(log N) lookup
+func (t *ExecutionTrace) buildSnapshotIndex() {
+	t.snapshotIndex = make([]int, len(t.Snapshots))
+	for i, snapshot := range t.Snapshots {
+		t.snapshotIndex[i] = snapshot.Step
+	}
+	// Snapshots are already sorted by step number (added in order)
+}
+
+// binarySearchSnapshot performs binary search to find the closest snapshot at or before target step
+func (t *ExecutionTrace) binarySearchSnapshot(targetStep int) int {
+	left, right := 0, len(t.Snapshots)-1
+	result := -1
+
+	for left <= right {
+		mid := left + (right-left)/2
+		snapshotStep := t.Snapshots[mid].Step
+
+		if snapshotStep <= targetStep {
+			result = mid
+			left = mid + 1
+		} else {
+			right = mid - 1
+		}
+	}
+
+	return result
 }
 
 // NewExecutionTrace creates a new execution trace.
@@ -215,19 +268,14 @@ func (t *ExecutionTrace) GetCurrentState() (*ExecutionState, error) {
 // ReconstructStateAt reconstructs the complete state at a given step.
 // It finds the nearest snapshot (materialising it lazily if needed) to
 // minimise the number of states that must be replayed.
+// Uses O(log N) binary search for fast snapshot lookup.
 func (t *ExecutionTrace) ReconstructStateAt(step int) (*ExecutionState, error) {
 	if step < 0 || step >= len(t.States) {
 		return nil, fmt.Errorf("step %d out of range", step)
 	}
 
-	// Find the nearest snapshot before or at the target step
-	snapshotIdx := -1
-	for i := len(t.Snapshots) - 1; i >= 0; i-- {
-		if t.Snapshots[i].Step <= step {
-			snapshotIdx = i
-			break
-		}
-	}
+	// Use O(log N) binary search to find the nearest snapshot
+	snapshotIdx := t.GetSnapshotAtInstruction(step)
 
 	// Start with empty state
 	reconstructedState := &ExecutionState{
