@@ -61,6 +61,22 @@ func loadFromEnv(cfg *Config) error {
 		cfg.MaxTraceDepth = n
 	}
 
+	if v := os.Getenv("ERST_CIRCUIT_BREAKER_THRESHOLD"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return errors.WrapValidationError("ERST_CIRCUIT_BREAKER_THRESHOLD must be an integer")
+		}
+		cfg.CircuitBreakerThreshold = n
+	}
+
+	if v := os.Getenv("ERST_CIRCUIT_BREAKER_TIMEOUT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return errors.WrapValidationError("ERST_CIRCUIT_BREAKER_TIMEOUT must be an integer")
+		}
+		cfg.CircuitBreakerTimeout = n
+	}
+
 	switch strings.ToLower(os.Getenv("ERST_CRASH_REPORTING")) {
 	case "":
 	case "1", "true", "yes":
@@ -207,6 +223,18 @@ func (c *Config) parseTOML(content string) error {
 				return errors.WrapValidationError("max_cache_size must be a valid size (e.g., 500MB)")
 			}
 			c.MaxCacheSize = n
+		case "circuit_breaker_threshold":
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				return errors.WrapValidationError("circuit_breaker_threshold must be an integer")
+			}
+			c.CircuitBreakerThreshold = n
+		case "circuit_breaker_timeout":
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				return errors.WrapValidationError("circuit_breaker_timeout must be an integer")
+			}
+			c.CircuitBreakerTimeout = n
 		}
 	}
 
