@@ -53,6 +53,50 @@ func TestCheckProtocolRegistration(t *testing.T) {
 	}
 }
 
+func TestProtocolCheckResultHasRequiredFields(t *testing.T) {
+	// When not registered, should have information about why
+	result := checkProtocolRegistration()
+	if !result.Registered && len(result.Issues) == 0 {
+		t.Error("when not registered, should have at least one issue")
+	}
+	if !result.Registered && len(result.Fixes) == 0 {
+		t.Error("when not registered, should have at least one fix recommendation")
+	}
+}
+
+func TestExtractBinaryPathFromPlist(t *testing.T) {
+	plistXML := `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/erst</string>
+        <string>protocol-handler</string>
+    </array>
+</dict>
+</plist>`
+	
+	path := extractBinaryPathFromPlist(plistXML)
+	if path != "/usr/local/bin/erst" {
+		t.Errorf("expected /usr/local/bin/erst, got %q", path)
+	}
+}
+
+func TestExtractBinaryPathFromDesktop(t *testing.T) {
+	desktopContent := `[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ERST Protocol Handler
+Exec=/usr/local/bin/erst protocol-handler %u
+MimeType=x-scheme-handler/erst;
+NoDisplay=true`
+
+	path := extractBinaryPathFromDesktop(desktopContent)
+	if path != "/usr/local/bin/erst" {
+		t.Errorf("expected /usr/local/bin/erst, got %q", path)
+	}
+}
+
 func TestCheckProtocolDarwin(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("darwin-only test")
