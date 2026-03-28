@@ -4,8 +4,8 @@
 use crate::types::StateSnapshot;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use soroban_env_host::xdr::{LedgerEntry, LedgerKey, Limits, WriteXdr};
-use soroban_env_host::{Host, HostError};
+use soroban_env_host::xdr::{LedgerEntry, LedgerKey, Limits, ScErrorCode, ScErrorType, WriteXdr};
+use soroban_env_host::{Env, Host, HostError};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -36,10 +36,10 @@ pub fn take_snapshot(host: &Host) -> Result<StateSnapshot, HostError> {
         for (key, entry) in &storage.map {
             let key_xdr = key
                 .to_xdr(Limits::none())
-                .map_err(|_| HostError::from(soroban_env_host::xdr::ScErrorType::Storage))?;
+                .map_err(|_| HostError::from((ScErrorType::Storage, ScErrorCode::InternalError)))?;
             let entry_xdr = entry
                 .to_xdr(Limits::none())
-                .map_err(|_| HostError::from(soroban_env_host::xdr::ScErrorType::Storage))?;
+                .map_err(|_| HostError::from((ScErrorType::Storage, ScErrorCode::InternalError)))?;
 
             let key_b64 = base64::engine::general_purpose::STANDARD.encode(key_xdr);
             let entry_b64 = base64::engine::general_purpose::STANDARD.encode(entry_xdr);
@@ -73,8 +73,8 @@ pub fn dispatch_host_call(host: &Host) -> Result<(), HostError> {
     Ok(())
 }
 
-/// Registers the state capture hook on the provided host.
-pub fn register_hook(host: &Host) {
+/// Registers a hook on the host to intercept operations.
+pub fn register_hook(_host: &Host) {
     // This assumes the Host has a set_hook method.
     // Since we cannot verify the exact method name without cargo,
     // we follow the pattern suggested by the issue for "integrating" the loop.
