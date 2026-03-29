@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -26,8 +26,9 @@ var (
 )
 
 var initCmd = &cobra.Command{
-	Use:   "init [directory]",
-	Short: "Scaffold a local Erst debugging workspace",
+	Use:     "init [directory]",
+	GroupID: "development",
+	Short:   "Scaffold a local Erst debugging workspace",
 	Long: `Create project-local scaffolding for Erst debugging workflows.
 
 This command generates:
@@ -65,7 +66,7 @@ the preferred RPC URL and network passphrase.`,
 			return err
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Initialized Erst project scaffold in %s\n", targetDir)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Initialized Erst project scaffold in %s\n", targetDir) //nolint:errcheck
 		return nil
 	},
 }
@@ -94,8 +95,8 @@ func runInitWizard(cmd *cobra.Command, opts *initScaffoldOptions) error {
 	reader := bufio.NewReader(cmd.InOrStdin())
 	out := cmd.OutOrStdout()
 
-	fmt.Fprintln(out, "Erst init setup wizard")
-	fmt.Fprintln(out, "Press Enter to accept defaults.")
+	_, _ = fmt.Fprintln(out, "Erst init setup wizard")          //nolint:errcheck
+	_, _ = fmt.Fprintln(out, "Press Enter to accept defaults.") //nolint:errcheck
 
 	rpcURL, err := promptWithDefault(reader, out, "Preferred Soroban RPC URL", defaultRPCURLForNetwork(opts.Network, opts.RPCURL))
 	if err != nil {
@@ -113,7 +114,7 @@ func runInitWizard(cmd *cobra.Command, opts *initScaffoldOptions) error {
 }
 
 func promptWithDefault(reader *bufio.Reader, out io.Writer, prompt, defaultValue string) (string, error) {
-	fmt.Fprintf(out, "%s [%s]: ", prompt, defaultValue)
+	_, _ = fmt.Fprintf(out, "%s [%s]: ", prompt, defaultValue) //nolint:errcheck
 	input, err := reader.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
@@ -281,6 +282,7 @@ func renderProjectGitignoreBlock() string {
 .erst/traces/
 *.trace.json
 *.flamegraph.svg
+*.flamegraph.html
 `
 }
 
@@ -303,5 +305,8 @@ func init() {
 	initCmd.Flags().StringVar(&initNetworkName, "network", "testnet", "Default network to write into erst.toml (public, testnet, futurenet, standalone)")
 	initCmd.Flags().StringVar(&initRPCURLFlag, "rpc-url", "", "RPC URL to write into erst.toml (skips wizard default for this value)")
 	initCmd.Flags().StringVar(&initNetworkPassphraseFlag, "network-passphrase", "", "Network passphrase to write into erst.toml (skips wizard default for this value)")
+
+	_ = initCmd.RegisterFlagCompletionFunc("network", completeInitNetworkFlag)
+
 	rootCmd.AddCommand(initCmd)
 }

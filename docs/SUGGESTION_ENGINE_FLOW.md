@@ -274,5 +274,5 @@
 
 ## License
 
-Copyright 2025 Erst Users  
+Copyright 2026 Erst Users  
 SPDX-License-Identifier: Apache-2.0

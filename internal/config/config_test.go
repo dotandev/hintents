@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package config
@@ -46,22 +46,22 @@ func TestConfigValidation(t *testing.T) {
 	}{
 		{
 			"valid public network",
-			&Config{RpcUrl: "https://test.com", Network: NetworkPublic},
+			&Config{RpcUrl: "https://test.com", Network: NetworkPublic, RequestTimeout: 30, MaxTraceDepth: 50},
 			false,
 		},
 		{
 			"valid testnet",
-			&Config{RpcUrl: "https://test.com", Network: NetworkTestnet},
+			&Config{RpcUrl: "https://test.com", Network: NetworkTestnet, RequestTimeout: 30, MaxTraceDepth: 50},
 			false,
 		},
 		{
 			"valid futurenet",
-			&Config{RpcUrl: "https://test.com", Network: NetworkFuturenet},
+			&Config{RpcUrl: "https://test.com", Network: NetworkFuturenet, RequestTimeout: 30, MaxTraceDepth: 50},
 			false,
 		},
 		{
 			"valid standalone",
-			&Config{RpcUrl: "https://test.com", Network: NetworkStandalone},
+			&Config{RpcUrl: "https://test.com", Network: NetworkStandalone, RequestTimeout: 30, MaxTraceDepth: 50},
 			false,
 		},
 		{
@@ -274,6 +274,31 @@ func TestLoadFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestGetEnv_RequiresErstPrefix(t *testing.T) {
+	// Ensure non-ERST env keys are ignored by getEnv
+	origStellar := os.Getenv("STELLAR_RPC_URL")
+	origErst := os.Getenv("ERST_RPC_URL")
+	defer func() {
+		os.Setenv("STELLAR_RPC_URL", origStellar)
+		os.Setenv("ERST_RPC_URL", origErst)
+	}()
+
+	os.Setenv("STELLAR_RPC_URL", "https://stellar.example.com")
+	os.Unsetenv("ERST_RPC_URL")
+
+	// getEnv should return the default when asked for non-ERST key
+	def := "https://default.example.com"
+	if got := getEnv("STELLAR_RPC_URL", def); got != def {
+		t.Errorf("expected getEnv to return default for non-ERST key, got %s", got)
+	}
+
+	// But should return value for ERST_ key
+	os.Setenv("ERST_RPC_URL", "https://erst.example.com")
+	if got := getEnv("ERST_RPC_URL", def); got != "https://erst.example.com" {
+		t.Errorf("expected getEnv to read ERST_ env var, got %s", got)
+	}
+}
+
 func TestLoadTOMLFile(t *testing.T) {
 	tmpdir := t.TempDir()
 	configPath := filepath.Join(tmpdir, "test.toml")
@@ -298,6 +323,53 @@ log_level = "trace"`
 
 	if cfg.Network != NetworkTestnet {
 		t.Errorf("expected Network from file, got %s", cfg.Network)
+	}
+}
+
+func TestLoad_ConfigPrecedence_LocalOverridesHome(t *testing.T) {
+	tmpDir := t.TempDir()
+	homeDir := filepath.Join(tmpDir, "home")
+	projectDir := filepath.Join(tmpDir, "project")
+
+	if err := os.MkdirAll(homeDir, 0700); err != nil {
+		t.Fatalf("failed to create home dir: %v", err)
+	}
+	if err := os.MkdirAll(projectDir, 0700); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+
+	homeConfig := filepath.Join(homeDir, ".erst.toml")
+	if err := os.WriteFile(homeConfig, []byte(`rpc_url = "https://home.example.com"`), 0644); err != nil {
+		t.Fatalf("failed to write home config: %v", err)
+	}
+
+	localConfig := filepath.Join(projectDir, ".erst.toml")
+	if err := os.WriteFile(localConfig, []byte(`rpc_url = "https://local.example.com"`), 0644); err != nil {
+		t.Fatalf("failed to write local config: %v", err)
+	}
+
+	origHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", origHome)
+	os.Setenv("HOME", homeDir)
+
+	origPwd, _ := os.Getwd()
+	defer func() {
+		_ = os.Chdir(origPwd)
+	}()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatalf("failed to chdir: %v", err)
+	}
+
+	for _, key := range []string{"ERST_RPC_URL", "ERST_RPC_URLS", "STELLAR_RPC_URLS"} {
+		os.Unsetenv(key)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RpcUrl != "https://local.example.com" {
+		t.Errorf("expected local config to override home, got %s", cfg.RpcUrl)
 	}
 }
 
@@ -489,7 +561,7 @@ func TestLoad_RequestTimeoutInvalidEnvIgnored(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cfg.RequestTimeout != 15 {
-		t.Errorf("expected default RequestTimeout=15 for invalid env value, got %d", cfg.RequestTimeout)
+		t.Errorf("expected RequestTimeout to fall back to default 15, got %d", cfg.RequestTimeout)
 	}
 }
 
@@ -530,8 +602,27 @@ request_timeout = -5`
 	if err := cfg.parseTOML(content); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.RequestTimeout != 0 {
-		t.Errorf("expected RequestTimeout unchanged for negative value, got %d", cfg.RequestTimeout)
+	if cfg.RequestTimeout != -5 {
+		t.Errorf("expected RequestTimeout to parse raw value, got %d", cfg.RequestTimeout)
+	}
+}
+
+func TestParseTOML_InvalidTypes(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "request_timeout invalid type", content: `request_timeout = "abc"`},
+		{name: "crash_reporting invalid type", content: `crash_reporting = "maybe"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			if err := cfg.parseTOML(tt.content); err == nil {
+				t.Fatal("expected parse error")
+			}
+		})
 	}
 }
 
@@ -539,5 +630,43 @@ func TestWithRequestTimeout(t *testing.T) {
 	cfg := NewConfig("https://test.com", NetworkTestnet).WithRequestTimeout(45)
 	if cfg.RequestTimeout != 45 {
 		t.Errorf("expected RequestTimeout=45, got %d", cfg.RequestTimeout)
+	}
+}
+
+// ---- MaxTraceDepth config --------------------------------------------------
+
+func TestDefaultConfig_MaxTraceDepth(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.MaxTraceDepth != 50 {
+		t.Errorf("expected default MaxTraceDepth=50, got %d", cfg.MaxTraceDepth)
+	}
+}
+
+func TestLoad_MaxTraceDepthFromEnv(t *testing.T) {
+	orig := os.Getenv("ERST_MAX_TRACE_DEPTH")
+	defer os.Setenv("ERST_MAX_TRACE_DEPTH", orig)
+
+	os.Setenv("ERST_MAX_TRACE_DEPTH", "100")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxTraceDepth != 100 {
+		t.Errorf("expected MaxTraceDepth=100 from env, got %d", cfg.MaxTraceDepth)
+	}
+}
+
+func TestParseTOML_MaxTraceDepth(t *testing.T) {
+	content := `rpc_url = "https://test.com"
+network = "testnet"
+max_trace_depth = 25`
+
+	cfg := &Config{}
+	if err := cfg.parseTOML(content); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxTraceDepth != 25 {
+		t.Errorf("expected MaxTraceDepth=25 from TOML, got %d", cfg.MaxTraceDepth)
 	}
 }

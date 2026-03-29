@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+﻿// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 #[cfg(test)]
@@ -54,7 +54,9 @@ mod ledger_state_injection_tests {
     fn test_decode_ledger_key_invalid_base64() {
         let result = decode_ledger_key("not-valid-base64!!!");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Failed to decode LedgerKey Base64"));
+        assert!(result
+            .unwrap_err()
+            .contains("Failed to decode LedgerKey Base64"));
     }
 
     #[test]
@@ -63,7 +65,9 @@ mod ledger_state_injection_tests {
         let invalid_xdr = base64::engine::general_purpose::STANDARD.encode(b"invalid xdr data");
         let result = decode_ledger_key(&invalid_xdr);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Failed to parse LedgerKey XDR"));
+        assert!(result
+            .unwrap_err()
+            .contains("Failed to parse LedgerKey XDR"));
     }
 
     #[test]
@@ -355,8 +359,7 @@ mod ledger_state_injection_tests {
 
         // Decode from base64
         let decoded_key = decode_ledger_key(&key_xdr).expect("Key decode should succeed");
-        let decoded_entry =
-            decode_ledger_entry(&entry_xdr).expect("Entry decode should succeed");
+        let decoded_entry = decode_ledger_entry(&entry_xdr).expect("Entry decode should succeed");
 
         // Inject
         let result = inject_ledger_entry(&host, &decoded_key, &decoded_entry);
@@ -399,9 +402,30 @@ mod contract_execution_tests {
         // Create empty operations vector
         let operations: VecM<Operation, 100> = VecM::default();
         let host = soroban_env_host::Host::default();
+        let mut coverage = CoverageTracker::default();
 
         // Should succeed with empty operations
-        let result = execute_operations(&host, &operations);
+        let request = crate::types::SimulationRequest {
+            envelope_xdr: String::new(),
+            result_meta_xdr: String::new(),
+            ledger_entries: None,
+            contract_wasm: None,
+            wasm_path: None,
+            no_cache: false,
+            enable_optimization_advisor: false,
+            profile: None,
+            _timestamp: None,
+            timestamp: String::new(),
+            mock_base_fee: None,
+            mock_gas_price: None,
+            mock_signature_verification: None,
+            enable_coverage: false,
+            coverage_lcov_path: None,
+            resource_calibration: None,
+            memory_limit: None,
+            restore_preamble: None,
+        };
+        let result = execute_operations(&host, &operations, &request, None, &mut coverage);
         assert!(result.is_ok());
 
         let logs = result.unwrap();
@@ -596,10 +620,13 @@ mod contract_execution_tests {
         });
 
         if let Err(panic_info) = result {
-            let message = panic_info
-                .downcast_ref::<&str>()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "Unknown".to_string());
+            let message = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "Unknown".to_string()
+            };
 
             // Error message should contain actionable information
             assert!(message.contains("insufficient balance"));
@@ -658,7 +685,9 @@ mod contract_execution_tests {
 
             match result {
                 Ok(msg) => results.push(("success", msg)),
-                Err(_) => results.push(("error", format!("Request {} panicked", name))),
+                Err(_) => {
+                    results.push(("error", format!("Request {} panicked", name)));
+                }
             }
         }
 
@@ -766,13 +795,22 @@ mod contract_execution_tests {
             .iter()
             .any(|t| t.message.contains("50") && t.message.contains("%")));
 
-        println!("
-Inefficient Contract Report:");
+        println!("Inefficient Contract Report:");
         println!("Efficiency: {:.1}%", report.overall_efficiency);
         println!("Comparison: {}", report.comparison_to_baseline);
-        for tip in &report.tips {
-            println!("  - [{}] {}: {}", tip.severity, tip.category, tip.message);
-            println!("    Savings: {}", tip.estimated_savings);
+        println!("Optimization Tips:");
+        for (i, tip) in report.tips.iter().enumerate() {
+            println!(
+                "{}. [{}] {}",
+                i + 1,
+                tip.severity.to_uppercase(),
+                tip.category
+            );
+            println!("   {}", tip.message);
+            println!("   Potential Savings: {}", tip.estimated_savings);
+            if let Some(location) = &tip.code_location {
+                println!("   Location: {}", location);
+            }
         }
     }
 
@@ -796,8 +834,7 @@ Inefficient Contract Report:");
             .iter()
             .any(|t| t.message.contains("Memory usage") && t.message.contains("%")));
 
-        println!("
-High Memory Usage Report:");
+        println!("High Memory Usage Report:");
         for tip in &report.tips {
             println!("  - [{}] {}: {}", tip.severity, tip.category, tip.message);
         }
@@ -817,8 +854,7 @@ High Memory Usage Report:");
         assert!(tip.message.contains("150 times"));
         assert!(tip.estimated_savings.contains("30-50%"));
 
-        println!("
-Loop Optimization Tip:");
+        println!("Loop Optimization Tip:");
         println!("  {}", tip.message);
         println!("  Estimated Savings: {}", tip.estimated_savings);
     }
@@ -837,8 +873,7 @@ Loop Optimization Tip:");
         assert!(tip.message.contains("60 storage reads"));
         assert!(tip.message.contains("Cache"));
 
-        println!("
-Storage Read Optimization Tip:");
+        println!("Storage Read Optimization Tip:");
         println!("  {}", tip.message);
     }
 
@@ -856,8 +891,7 @@ Storage Read Optimization Tip:");
         assert!(tip.message.contains("25 storage writes"));
         assert!(tip.message.contains("Batch"));
 
-        println!("
-Storage Write Optimization Tip:");
+        println!("Storage Write Optimization Tip:");
         println!("  {}", tip.message);
     }
 
@@ -886,8 +920,7 @@ Storage Write Optimization Tip:");
         let mem_pct = report.budget_breakdown.get("memory_usage_percent").unwrap();
         assert!(*mem_pct > 30.0 && *mem_pct < 40.0);
 
-        println!("
-Budget Breakdown:");
+        println!("Budget Breakdown:");
         for (key, value) in &report.budget_breakdown {
             println!("  {}: {:.2}", key, value);
         }
@@ -907,8 +940,7 @@ Budget Breakdown:");
         let tip3 = advisor.analyze_operation_pattern("storage_write", 10, 15_000);
         assert!(tip3.is_none());
 
-        println!("
-No optimization tips needed for efficient operations");
+        println!("No optimization tips needed for efficient operations");
     }
 
     #[test]
@@ -934,16 +966,13 @@ No optimization tips needed for efficient operations");
         // Should recommend poor status
         assert!(report.comparison_to_baseline.contains("Poor"));
 
-        println!("
-Comprehensive Unoptimized Contract Report:");
+        println!("Comprehensive Unoptimized Contract Report:");
         println!("Efficiency Score: {:.1}%", report.overall_efficiency);
         println!("Status: {}", report.comparison_to_baseline);
-        println!("
-Optimization Tips:");
+        println!("Optimization Tips:");
         for (i, tip) in report.tips.iter().enumerate() {
             println!(
-                "
-{}. [{}] {}",
+                "{}. [{}] {}",
                 i + 1,
                 tip.severity.to_uppercase(),
                 tip.category

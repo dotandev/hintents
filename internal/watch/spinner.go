@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package watch
@@ -7,12 +7,9 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/dotandev/hintents/internal/terminal"
 )
 
 type Spinner struct {
-	renderer  terminal.Renderer
 	frames    []string
 	current   int
 	done      chan struct{}
@@ -22,15 +19,9 @@ type Spinner struct {
 
 func NewSpinner() *Spinner {
 	return &Spinner{
-		renderer: terminal.NewANSIRenderer(),
-		frames:   []string{"|", "/", "-", "\\"},
-		done:     make(chan struct{}),
+		frames: []string{"|", "/", "-", "\\"},
+		done:   make(chan struct{}),
 	}
-}
-
-func (s *Spinner) WithRenderer(r terminal.Renderer) *Spinner {
-	s.renderer = r
-	return s
 }
 
 func (s *Spinner) Start(message string) {
@@ -49,11 +40,11 @@ func (s *Spinner) Start(message string) {
 		for {
 			select {
 			case <-s.done:
-				s.renderer.ClearLine()
+				fmt.Print("\r\033[K")
 				return
 			case <-ticker.C:
 				s.mu.Lock()
-				s.renderer.Printf("\r%s %s", s.frames[s.current], message)
+				fmt.Printf("\r%s %s", s.frames[s.current], message)
 				s.current = (s.current + 1) % len(s.frames)
 				s.mu.Unlock()
 			}
@@ -80,10 +71,10 @@ func (s *Spinner) Stop() {
 
 func (s *Spinner) StopWithMessage(message string) {
 	s.Stop()
-	s.renderer.Printf("\r[OK] %s\n", message)
+	fmt.Printf("\r[OK] %s\n", message)
 }
 
 func (s *Spinner) StopWithError(message string) {
 	s.Stop()
-	s.renderer.Printf("\r[ERROR] %s\n", message)
+	fmt.Printf("\r[ERROR] %s\n", message)
 }

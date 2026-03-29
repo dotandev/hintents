@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -13,7 +13,6 @@ import (
 
 var (
 	fuzzIterations     uint64
-	fuzzSeed           uint64
 	fuzzTimeout        uint64
 	fuzzMaxSize        int
 	fuzzInputXDR       string
@@ -22,8 +21,9 @@ var (
 )
 
 var fuzzCmd = &cobra.Command{
-	Use:   "fuzz",
-	Short: "Fuzz test XDR inputs against Soroban contracts",
+	Use:     "fuzz",
+	GroupID: "testing",
+	Short:   "Fuzz test XDR inputs against Soroban contracts",
 	Long: `Perform fuzzing of XDR inputs to discover edge cases and potential crashes
 in Soroban contract execution.
 
@@ -80,13 +80,13 @@ func runFuzz(cmd *cobra.Command, args []string) error {
 	// If specific XDR is provided, validate and fuzz it
 	if fuzzInputXDR != "" {
 		// Validate it's valid hex
-		if _, err := hex.DecodeString(fuzzInputXDR); err != nil {
-			return fmt.Errorf("invalid XDR hex encoding: %w", err)
+		if _, decodeErr := hex.DecodeString(fuzzInputXDR); decodeErr != nil {
+			return fmt.Errorf("invalid XDR hex encoding: %w", decodeErr)
 		}
 
-		result, err := harness.FuzzXDR(fuzzInputXDR)
-		if err != nil {
-			return fmt.Errorf("fuzzing failed: %w", err)
+		result, fuzzErr := harness.FuzzXDR(fuzzInputXDR)
+		if fuzzErr != nil {
+			return fmt.Errorf("fuzzing failed: %w", fuzzErr)
 		}
 
 		fmt.Printf("\nFuzz Test Result:\n")

@@ -116,6 +116,10 @@ Adds a single ledger entry. Both key and value must be non-empty.
 
 Sets multiple ledger entries at once. Replaces any previously set entries. Passing `nil` clears all entries.
 
+#### `WithMockBaseFee(baseFee uint32) *SimulationRequestBuilder`
+
+Sets an optional custom baseline inclusion fee (in stroops) for local fee sufficiency checks during simulation.
+
 #### `Reset() *SimulationRequestBuilder`
 
 Clears all fields and errors, allowing the builder to be reused.

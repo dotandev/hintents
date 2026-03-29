@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package abi
@@ -105,12 +105,12 @@ func FormatText(spec *ContractSpec) string {
 
 // jsonSpec is the JSON-friendly representation of a contract spec.
 type jsonSpec struct {
-	Functions  []jsonFunction  `json:"functions,omitempty"`
-	Structs    []jsonStruct    `json:"structs,omitempty"`
-	Enums      []jsonEnum      `json:"enums,omitempty"`
-	Unions     []jsonUnion     `json:"unions,omitempty"`
-	ErrorEnums []jsonEnum      `json:"error_enums,omitempty"`
-	Events     []jsonEvent     `json:"events,omitempty"`
+	Functions  []jsonFunction `json:"functions,omitempty"`
+	Structs    []jsonStruct   `json:"structs,omitempty"`
+	Enums      []jsonEnum     `json:"enums,omitempty"`
+	Unions     []jsonUnion    `json:"unions,omitempty"`
+	ErrorEnums []jsonEnum     `json:"error_enums,omitempty"`
+	Events     []jsonEvent    `json:"events,omitempty"`
 }
 
 type jsonFunction struct {
@@ -263,7 +263,7 @@ func formatFunction(fn xdr.ScSpecFunctionV0) string {
 }
 
 // FormatTypeDef returns a human-readable string for an ScSpecTypeDef.
-func FormatTypeDef(td xdr.ScSpecTypeDef) string {
+func FormatTypeDef(td xdr.ScSpecTypeDef) string { //nolint:gocyclo
 	switch td.Type {
 	case xdr.ScSpecTypeScSpecTypeVal:
 		return "Val"

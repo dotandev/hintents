@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package report_test
@@ -11,11 +11,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dotandev/hintents/internal/audit"
 	"github.com/dotandev/hintents/internal/report"
 )
 
-func auditDumpFixture() *report.AuditDump {
-	return &report.AuditDump{
+func auditDumpFixture() *audit.AuditDump {
+	return &audit.AuditDump{
 		Input: map[string]interface{}{
 			"amount":   100,
 			"currency": "USD",
@@ -30,8 +31,8 @@ func auditDumpFixture() *report.AuditDump {
 	}
 }
 
-func signedAuditDumpFixture() *report.SignedAuditDump {
-	return &report.SignedAuditDump{
+func signedAuditDumpFixture() *audit.SignedAuditDump {
+	return &audit.SignedAuditDump{
 		Trace:     *auditDumpFixture(),
 		Hash:      "abc123deadbeef",
 		Signature: "sig0011223344",
@@ -86,7 +87,7 @@ func TestFromAuditDump_Timestamp(t *testing.T) {
 }
 
 func TestFromAuditDump_EmptyEvents(t *testing.T) {
-	dump := &report.AuditDump{
+	dump := &audit.AuditDump{
 		Input:     map[string]interface{}{"x": 1},
 		State:     map[string]interface{}{},
 		Events:    []interface{}{},

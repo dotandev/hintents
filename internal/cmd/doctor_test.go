@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+
+	"github.com/dotandev/hintents/internal/rpc"
 )
 
 func TestCheckGo(t *testing.T) {
@@ -105,6 +107,72 @@ func TestCheckSimulatorPaths(t *testing.T) {
 	}
 }
 
+func TestGoVersionMismatch(t *testing.T) {
+	// write a temporary go.mod with incompatible version
+	orig, err := os.ReadFile("go.mod")
+	defer func() {
+		if err != nil {
+			os.Remove("go.mod")
+		} else {
+			os.WriteFile("go.mod", orig, 0644)
+		}
+	}()
+	_ = os.WriteFile("go.mod", []byte("module foo\n\ngo 9.99\n"), 0644)
+	dep := checkGo(false)
+	if dep.FixHint == "" {
+		t.Error("expected FixHint when go version mismatches go.mod")
+	}
+}
+
+func TestCheckConfigTOML(t *testing.T) {
+	// no config file -> success
+	os.Remove(".erst.toml")
+	dep := checkConfigTOML(false)
+	if !dep.Installed {
+		t.Error("expected config check to pass when no file present")
+	}
+
+	// valid config
+	os.WriteFile(".erst.toml", []byte("rpc_url = \"https://example.com\"\n"), 0644)
+	dep = checkConfigTOML(false)
+	if !dep.Installed {
+		t.Error("expected valid toml to succeed")
+	}
+
+	// invalid syntax
+	os.WriteFile(".erst.toml", []byte("rpc_url = \n"), 0644)
+	dep = checkConfigTOML(true)
+	if dep.Installed {
+		t.Error("expected invalid toml to fail")
+	}
+	os.Remove(".erst.toml")
+}
+
+func TestCheckRPC(t *testing.T) {
+	// start mock server responding healthy
+	rs := rpc.NewMockServer(map[string]rpc.MockRoute{
+		"/": rpc.SuccessRoute(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"result":  map[string]interface{}{"status": "healthy"},
+		}),
+	})
+	defer rs.Close()
+	os.Setenv("ERST_RPC_URL", rs.URL())
+	defer os.Unsetenv("ERST_RPC_URL")
+	dep := checkRPC(false)
+	if !dep.Installed {
+		t.Error("expected rpc check to succeed against mock server")
+	}
+
+	// bad url
+	os.Setenv("ERST_RPC_URL", "http://nonexistent.invalid")
+	dep = checkRPC(false)
+	if dep.Installed {
+		t.Error("expected rpc check to fail for unreachable url")
+	}
+}
+
 func TestDoctorCommand(t *testing.T) {
 	// Test that the command is registered
 	if doctorCmd == nil {
@@ -119,5 +187,51 @@ func TestDoctorCommand(t *testing.T) {
 	verboseFlag := doctorCmd.Flags().Lookup("verbose")
 	if verboseFlag == nil {
 		t.Error("doctor command should have --verbose flag")
+	}
+}
+
+// TestCheckDeepLink_Name verifies the check returns the correct display name.
+func TestCheckDeepLink_Name(t *testing.T) {
+	dep := checkDeepLink(false)
+	if dep.Name != "Deep link (erst:// scheme)" {
+		t.Errorf("checkDeepLink() name = %q, want %q", dep.Name, "Deep link (erst:// scheme)")
+	}
+}
+
+// TestCheckDeepLink_FailHasHint verifies that when the scheme is not registered
+// a non-empty FixHint is provided.
+func TestCheckDeepLink_FailHasHint(t *testing.T) {
+	dep := checkDeepLink(false)
+	// On CI the scheme is almost certainly not registered, so we only assert
+	// that a hint is present when the check fails.
+	if !dep.Installed && dep.FixHint == "" {
+		t.Error("checkDeepLink() should provide FixHint when scheme is not registered")
+	}
+}
+
+// TestCheckDeepLink_VerbosePath verifies that verbose mode populates Path when
+// the check succeeds.
+func TestCheckDeepLink_VerbosePath(t *testing.T) {
+	dep := checkDeepLink(true)
+	if dep.Installed && dep.Path == "" {
+		t.Error("checkDeepLink(verbose=true) should set Path when installed")
+	}
+}
+
+// TestBuildDeepLinkFixHint_Empty verifies the fallback message when no steps
+// are provided.
+func TestBuildDeepLinkFixHint_Empty(t *testing.T) {
+	hint := buildDeepLinkFixHint(nil)
+	if hint == "" {
+		t.Error("buildDeepLinkFixHint(nil) must return a non-empty fallback hint")
+	}
+}
+
+// TestBuildDeepLinkFixHint_UsesFirstStep verifies that the first step is used.
+func TestBuildDeepLinkFixHint_UsesFirstStep(t *testing.T) {
+	steps := []string{"step one", "step two"}
+	hint := buildDeepLinkFixHint(steps)
+	if hint != "step one" {
+		t.Errorf("buildDeepLinkFixHint() = %q, want %q", hint, "step one")
 	}
 }

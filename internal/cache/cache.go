@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cache
@@ -166,9 +166,9 @@ func (m *Manager) CleanLRU() (*CleanupStatus, error) {
 			break
 		}
 
-		err := os.Remove(file.Path)
-		if err != nil {
-			logger.Logger.Warn("Failed to delete cache file", "path", file.Path, "error", err)
+		removeErr := os.Remove(file.Path)
+		if removeErr != nil {
+			logger.Logger.Warn("Failed to delete cache file", "path", file.Path, "error", removeErr)
 			continue
 		}
 
@@ -227,8 +227,8 @@ func (m *Manager) Clean(force bool) (*CleanupStatus, error) {
 	if !force {
 		fmt.Print("\nThis will delete the oldest cached files. Continue? (yes/no): ")
 		var response string
-		if _, err := fmt.Scanln(&response); err != nil {
-			return status, fmt.Errorf("failed to read input: %w", err)
+		if _, scanErr := fmt.Scanln(&response); scanErr != nil {
+			return status, fmt.Errorf("failed to read input: %w", scanErr)
 		}
 		if response != "yes" && response != "y" {
 			fmt.Println("Cache cleanup cancelled")
@@ -263,9 +263,9 @@ func (m *Manager) Clean(force bool) (*CleanupStatus, error) {
 			break
 		}
 
-		err := os.Remove(file.Path)
-		if err != nil {
-			logger.Logger.Warn("Failed to delete cache file", "path", file.Path, "error", err)
+		removeErr := os.Remove(file.Path)
+		if removeErr != nil {
+			logger.Logger.Warn("Failed to delete cache file", "path", file.Path, "error", removeErr)
 			continue
 		}
 

@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package telemetry
@@ -24,51 +24,41 @@ type Config struct {
 	ServiceName string
 }
 
-// MethodTelemetry provides duration tracking for SDK methods
-type MethodTelemetry interface {
-	// RecordMethodDuration records the execution duration of a method
-	RecordMethodDuration(ctx context.Context, methodName string, duration time.Duration, attrs ...attribute.KeyValue)
-
-	// WithMethodTiming creates a span with automatic timing for a method
-	WithMethodTiming(ctx context.Context, methodName string, attrs ...attribute.KeyValue) (context.Context, func())
+// silentSpanExporter wraps a SpanExporter and swallows all export errors so
+// collector outages never block or log. Core SDK paths must not depend on telemetry.
+type silentSpanExporter struct {
+	delegate trace.SpanExporter
 }
 
-// methodTelemetry implements MethodTelemetry interface
-type methodTelemetry struct {
-	tracer oteltrace.Tracer
-	meter  metric.Meter
-
-	// Histogram for method durations
-	durationHistogram metric.Float64Histogram
+func (s *silentSpanExporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) error {
+	_ = s.delegate.ExportSpans(ctx, spans)
+	return nil
 }
 
-// Global method telemetry instance
-var globalMethodTelemetry MethodTelemetry = &noOpMethodTelemetry{}
-
-// noOpMethodTelemetry provides a no-op implementation when telemetry is disabled
-type noOpMethodTelemetry struct{}
-
-func (t *noOpMethodTelemetry) RecordMethodDuration(ctx context.Context, methodName string, duration time.Duration, attrs ...attribute.KeyValue) {
-	// No-op when telemetry is disabled
+func (s *silentSpanExporter) Shutdown(ctx context.Context) error {
+	_ = s.delegate.Shutdown(ctx)
+	return nil
 }
 
-func (t *noOpMethodTelemetry) WithMethodTiming(ctx context.Context, methodName string, attrs ...attribute.KeyValue) (context.Context, func()) {
-	return ctx, func() {} // No-op when telemetry is disabled
-}
-
-// Init initializes OpenTelemetry with the given configuration
+// Init initializes OpenTelemetry with the given configuration.
+// Graceful degradation: if the metrics collector is unreachable or init fails,
+// a no-op provider is used instead so the application never blocks or errors.
+// Export failures are swallowed; telemetry fails silently.
 func Init(ctx context.Context, config Config) (func(), error) {
 	if !config.Enabled {
 		return func() {}, nil
 	}
 
-	// Create OTLP HTTP exporter
+	// Create OTLP HTTP exporter (best-effort; short timeout to avoid blocking)
 	exporter, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpoint(config.ExporterURL),
-		otlptracehttp.WithInsecure(), // Use HTTP instead of HTTPS for local development
+		otlptracehttp.WithInsecure(),
+		otlptracehttp.WithTimeout(5*time.Second),
 	)
 	if err != nil {
-		return nil, err
+		// Collector unreachable at init: use no-op so core paths are unaffected
+		otel.SetTracerProvider(trace.NewTracerProvider())
+		return func() {}, nil
 	}
 
 	// Create resource
@@ -79,17 +69,23 @@ func Init(ctx context.Context, config Config) (func(), error) {
 		),
 	)
 	if err != nil {
-		return nil, err
+		_ = exporter.Shutdown(ctx)
+		otel.SetTracerProvider(trace.NewTracerProvider())
+		return func() {}, nil
 	}
 
-	// Create trace provider
+	// Wrap exporter so export failures never surface or log
+	silent := &silentSpanExporter{delegate: exporter}
+
+	// Create trace provider with silent exporter so collector downtime doesn't block or log
 	tp := trace.NewTracerProvider(
-		trace.WithBatcher(exporter),
+		trace.WithBatcher(silent),
 		trace.WithResource(res),
 	)
 
 	otel.SetTracerProvider(tp)
 
+<<<<<<< HEAD
 	// Initialize method telemetry
 	tracer := otel.Tracer("erst")
 	meter := otel.Meter("erst")
@@ -110,10 +106,12 @@ func Init(ctx context.Context, config Config) (func(), error) {
 	}
 
 	// Return cleanup function
+=======
+>>>>>>> 23e162859b4c64e23090936823dac357ddd7a38e
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = tp.Shutdown(ctx) // Ignore error in cleanup
+		_ = tp.Shutdown(ctx)
 	}, nil
 }
 

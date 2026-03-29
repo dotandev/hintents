@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package rpc
@@ -124,6 +124,16 @@ func TestWithHTTPClient(t *testing.T) {
 	}
 	if hc.HTTP != customClient {
 		t.Errorf("expected custom HTTP client to be used")
+	}
+}
+
+func TestMethodTelemetry_DefaultsToNoop(t *testing.T) {
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if client.methodTelemetry == nil {
+		t.Fatal("expected default no-op method telemetry")
 	}
 }
 

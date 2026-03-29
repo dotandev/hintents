@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package cmd
@@ -18,8 +18,9 @@ var (
 )
 
 var profileCmd = &cobra.Command{
-	Use:   "profile [trace-file]",
-	Short: "Export trace as pprof profile for gas-to-function mapping",
+	Use:     "profile [trace-file]",
+	GroupID: "utility",
+	Short:   "Export trace as pprof profile for gas-to-function mapping",
 	Long: `Synthesize trace events into a pprof-compliant profile that maps gas
 consumption to functions. The output can be viewed with go tool pprof.
 

@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package report
@@ -8,30 +8,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/dotandev/hintents/internal/audit"
 )
 
-// AuditDump is the raw {input, state, events} JSON payload produced by AuditLogger.
-type AuditDump struct {
-	Input     map[string]interface{} `json:"input"`
-	State     map[string]interface{} `json:"state"`
-	Events    []interface{}          `json:"events"`
-	Timestamp string                 `json:"timestamp"`
-}
-
-// SignedAuditDump extends AuditDump with signing metadata (matches SignedAuditLog from TS).
-type SignedAuditDump struct {
-	Trace     AuditDump `json:"trace"`
-	Hash      string    `json:"hash"`
-	Signature string    `json:"signature"`
-	Algorithm string    `json:"algorithm"`
-	PublicKey string    `json:"publicKey"`
-	Signer    struct {
-		Provider string `json:"provider"`
-	} `json:"signer"`
-}
-
 // FromAuditDump converts a raw AuditDump into a Report for HTML/PDF rendering.
-func FromAuditDump(dump *AuditDump) *Report {
+func FromAuditDump(dump *audit.AuditDump) *Report {
 	r := NewReport("Audit Report")
 
 	ts, err := parseTimestamp(dump.Timestamp)
@@ -53,38 +35,30 @@ func FromAuditDump(dump *AuditDump) *Report {
 }
 
 // FromSignedAuditDump converts a SignedAuditDump into a Report, including integrity metadata.
-func FromSignedAuditDump(dump *SignedAuditDump) *Report {
+func FromSignedAuditDump(dump *audit.SignedAuditDump) *Report {
 	r := FromAuditDump(&dump.Trace)
 	r.Title = "Signed Audit Report"
 
 	r.Metadata.DataSource = fmt.Sprintf("signed-audit-dump (signer: %s)", dump.Signer.Provider)
 	r.Metadata.Tags = map[string]string{
-		"algorithm":    dump.Algorithm,
-		"hash":         dump.Hash,
-		"signer":       dump.Signer.Provider,
-		"public_key":   truncate(dump.PublicKey, 64),
-		"signature":    truncate(dump.Signature, 32) + "...",
+		"algorithm":  dump.Algorithm,
+		"hash":       dump.Hash,
+		"signer":     dump.Signer.Provider,
+		"public_key": truncate(dump.PublicKey, 64),
+		"signature":  truncate(dump.Signature, 32) + "...",
 	}
 
 	return r
 }
 
 // ParseAuditDump deserialises raw JSON into an AuditDump.
-func ParseAuditDump(data []byte) (*AuditDump, error) {
-	var d AuditDump
-	if err := json.Unmarshal(data, &d); err != nil {
-		return nil, fmt.Errorf("failed to parse audit dump: %w", err)
-	}
-	return &d, nil
+func ParseAuditDump(data []byte) (*audit.AuditDump, error) {
+	return audit.ParseAuditDump(data)
 }
 
 // ParseSignedAuditDump deserialises raw JSON into a SignedAuditDump.
-func ParseSignedAuditDump(data []byte) (*SignedAuditDump, error) {
-	var d SignedAuditDump
-	if err := json.Unmarshal(data, &d); err != nil {
-		return nil, fmt.Errorf("failed to parse signed audit dump: %w", err)
-	}
-	return &d, nil
+func ParseSignedAuditDump(data []byte) (*audit.SignedAuditDump, error) {
+	return audit.ParseSignedAuditDump(data)
 }
 
 // RenderAuditDumpHTML is a convenience function: parse JSON bytes and render directly to HTML.
@@ -114,7 +88,7 @@ func RenderAuditDumpHTML(data []byte) ([]byte, error) {
 }
 
 // dumpToSteps converts the input, state, and events into ExecutionSteps for the report.
-func dumpToSteps(dump *AuditDump) []ExecutionStep {
+func dumpToSteps(dump *audit.AuditDump) []ExecutionStep {
 	var steps []ExecutionStep
 	idx := 0
 

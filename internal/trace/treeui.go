@@ -1,4 +1,4 @@
-// Copyright 2025 Erst Users
+// Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
 package trace
@@ -10,21 +10,21 @@ import (
 
 // TreeUINode represents a renderable node in the tree UI with mouse tracking
 type TreeUINode struct {
-	Node           *TraceNode
-	DisplayText    string
-	IndentLevel    int
-	ScreenRow      int // Row number on screen for mouse tracking
-	ExpandBoxCol   int // Column where the expand/collapse box is
-	IsVisible      bool
+	Node         *TraceNode
+	DisplayText  string
+	IndentLevel  int
+	ScreenRow    int // Row number on screen for mouse tracking
+	ExpandBoxCol int // Column where the expand/collapse box is
+	IsVisible    bool
 }
 
 // TreeRenderer handles rendering of the trace tree with mouse support
 type TreeRenderer struct {
-	nodes          []*TreeUINode
-	selectedRow    int
-	screenWidth    int
-	screenHeight   int
-	scrollOffset   int
+	nodes        []*TreeUINode
+	selectedRow  int
+	screenWidth  int
+	screenHeight int
+	scrollOffset int
 }
 
 // NewTreeRenderer creates a new tree renderer
@@ -185,7 +185,6 @@ func (tr *TreeRenderer) Render() string {
 
 	// Render scrollbar indicator if needed
 	if len(tr.nodes) > visibleRows {
-		_ = int(float64(tr.scrollOffset) / float64(len(tr.nodes)-visibleRows) * float64(visibleRows))
 		scrollLine := fmt.Sprintf("─ Showing %d-%d of %d lines (↑↓ navigate, click [+/-] to expand) ─",
 			startRow+1, endRow, len(tr.nodes))
 		output.WriteString(scrollLine)
@@ -214,4 +213,16 @@ func (tr *TreeRenderer) SelectRow(row int) {
 		tr.selectedRow = row
 		tr.ensureSelectedVisible()
 	}
+}
+
+// SelectNodeByID selects the first rendered row whose node ID matches nodeID.
+// Returns true when a matching node is found and selected.
+func (tr *TreeRenderer) SelectNodeByID(nodeID string) bool {
+	for i, node := range tr.nodes {
+		if node != nil && node.Node != nil && node.Node.ID == nodeID {
+			tr.SelectRow(i)
+			return true
+		}
+	}
+	return false
 }

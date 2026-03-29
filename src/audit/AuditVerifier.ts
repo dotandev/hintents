@@ -31,6 +31,11 @@ export interface AttestationVerification {
   issues: string[];
 }
 
+type SignatureEntry = {
+  signature: string;
+  publicKey: string;
+};
+
 /**
  * Verifies a signed audit log, including hardware attestation if present.
  *
@@ -54,7 +59,7 @@ export const verifyAuditLogDetailed = (
   auditLog: any,
   publicKeyPEM?: string
 ): VerificationResult => {
-  const { trace, hash, signature, hardware_attestation } = auditLog;
+  const { trace, hash, signature, hardware_attestation, signatures } = auditLog;
 
   // 1. Re-calculate the deterministic string
   // Must match the hashing logic in AuditLogger:
@@ -79,26 +84,53 @@ export const verifyAuditLogDetailed = (
     };
   }
 
-  // 3. Verify signature
-  const keyToUse = publicKeyPEM ?? auditLog.publicKey;
-  if (!keyToUse) {
-    return {
-      valid: false,
-      hash_valid: true,
-      signature_valid: false,
-    };
-  }
+  // 3. Verify signature(s)
+  let signatureValid = false;
+  if (Array.isArray(signatures) && signatures.length > 0) {
+    const entries: SignatureEntry[] = signatures;
+    if (publicKeyPEM) {
+      const match = entries.find((entry) => entry.publicKey === publicKeyPEM);
+      if (!match) {
+        signatureValid = false;
+      } else {
+        signatureValid = verify(
+          null,
+          Buffer.from(hash),
+          publicKeyPEM,
+          Buffer.from(match.signature, 'hex')
+        );
+      }
+    } else {
+      signatureValid = entries.every((entry) => {
+        if (!entry.publicKey || !entry.signature) return false;
+        return verify(
+          null,
+          Buffer.from(hash),
+          entry.publicKey,
+          Buffer.from(entry.signature, 'hex')
+        );
+      });
+    }
+  } else {
+    const keyToUse = publicKeyPEM ?? auditLog.publicKey;
+    if (!keyToUse) {
+      return {
+        valid: false,
+        hash_valid: true,
+        signature_valid: false,
+      };
+    }
 
-  let signatureValid: boolean;
-  try {
-    signatureValid = verify(
-      null,
-      Buffer.from(hash),
-      keyToUse,
-      Buffer.from(signature, 'hex')
-    );
-  } catch {
-    signatureValid = false;
+    try {
+      signatureValid = verify(
+        null,
+        Buffer.from(hash),
+        keyToUse,
+        Buffer.from(signature, 'hex')
+      );
+    } catch {
+      signatureValid = false;
+    }
   }
 
   // 4. Verify attestation chain if present

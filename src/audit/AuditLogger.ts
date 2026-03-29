@@ -21,8 +21,31 @@ export interface SignedAuditLog {
   publicKey: string;
   signer: {
     provider: string;
+    label?: string;
   };
   hardware_attestation?: HardwareAttestation;
+}
+
+export interface SignatureEntry {
+  signature: string;
+  publicKey: string;
+  signer: {
+    provider: string;
+    label?: string;
+  };
+}
+
+export interface MultiSignedAuditLog {
+  trace: ExecutionTrace;
+  hash: string;
+  algorithm: string;
+  signatures: SignatureEntry[];
+}
+
+export interface MultiSignerInput {
+  signer: AuditSigner;
+  provider: string;
+  label?: string;
 }
 
 export class AuditLogger {
@@ -82,5 +105,39 @@ export class AuditLogger {
     }
 
     return result;
+  }
+
+  /**
+   * Generates a deterministic audit log with multiple signatures.
+   */
+  public async generateMultiLog(
+    trace: ExecutionTrace,
+    signers: MultiSignerInput[]
+  ): Promise<MultiSignedAuditLog> {
+    const canonicalString = stringify(trace);
+    const traceHash = createHash('sha256').update(canonicalString).digest('hex');
+
+    const signatures: SignatureEntry[] = [];
+    for (const entry of signers) {
+      const signatureBuffer = await entry.signer.sign(Buffer.from(traceHash));
+      const signatureHex = Buffer.from(signatureBuffer).toString('hex');
+      const publicKeyPem = await entry.signer.public_key();
+
+      signatures.push({
+        signature: signatureHex,
+        publicKey: publicKeyPem,
+        signer: {
+          provider: entry.provider,
+          label: entry.label,
+        },
+      });
+    }
+
+    return {
+      trace,
+      hash: traceHash,
+      algorithm: 'Ed25519+SHA256',
+      signatures,
+    };
   }
 }

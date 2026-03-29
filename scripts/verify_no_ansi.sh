@@ -1,7 +1,6 @@
-# Copyright (c) Hintents Authors.
-# SPDX-License-Identifier: Apache-2.0
-
 #!/bin/bash
+# Copyright 2026 Erst Users
+# SPDX-License-Identifier: Apache-2.0
 # Verify that erst debug produces no ANSI escape characters when piped
 # Usage: ./scripts/verify_no_ansi.sh
 set -e

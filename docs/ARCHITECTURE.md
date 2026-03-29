@@ -166,8 +166,7 @@ graph LR
     D -->|Execute| E["Run VM"]
     E -->|Collect| F["Events & Logs"]
     F -->|Serialize| G["Format JSON"]
-    G -->|stdout| H["Go Client<br/>Receives"]
-    H -->|Deserialize| I["Parse Results"]
+    G -->|stdout| H["Go Client<br/>Receives"] -->|Deserialize| I["Parse Results"]
     I -->|Display| J["User Output"]
     
     style A fill:#4A90E2
@@ -175,6 +174,46 @@ graph LR
     style I fill:#4A90E2
     style J fill:#2ECC71
 ```
+
+### 4.2 Streaming IPC Protocol (NDJSON)
+
+While standard simulation requests use a single request/response pair, the **Time-Travel** and **Interactive** modes utilize a streaming protocol based on **Newline-Delimited JSON (NDJSON)**. This allows the simulator to emit intermediate state frames before the final execution result is ready, significantly reducing the **Time-to-First-Interactive (TTFI)**.
+
+#### Streaming Protocol Flow
+
+```mermaid
+graph TD
+    subgraph GoBridge["Go CLI (Bridge)"]
+        Scanner["Stdout Scanner<br/>(Background Goroutine)"]
+        FrameParser["NDJSON Frame Parser"]
+        UIEmitter["UI State Emitter"]
+    end
+    
+    subgraph RustSimulator["Rust Simulator (erst-sim)"]
+        SimEngine["Simulation Engine"]
+        HostCoW["CoW Snapshot Manager"]
+        FrameEmitter["StreamFrame Emitter"]
+    end
+    
+    SimEngine -->|Snapshot at T=0| HostCoW
+    HostCoW -->|Frame: {type: 'snapshot'}| FrameEmitter
+    FrameEmitter -->|stdout <line 1>| Scanner
+    
+    SimEngine -->|Execute WASM| SimEngine
+    
+    SimEngine -->|Snapshot at T=N| HostCoW
+    HostCoW -->|Frame: {type: 'snapshot'}| FrameEmitter
+    FrameEmitter -->|stdout <line 2>| Scanner
+    
+    Scanner --> FrameParser
+    FrameParser --> UIEmitter
+    UIEmitter -->|Populate Trace| UserUI["Interactive UI"]
+```
+
+**Key Advantages:**
+- **Asymmetric Processing**: The Go CLI can begin rendering the transaction trace while the Rust simulator is still executing intensive WASM or fetching subsequent ledger state.
+- **Low Latency**: NDJSON provides a lightweight, line-buffered stream that bypasses the overhead of parsing a monolithic JSON array.
+- **Reliability**: Frame sequence numbers (`seq`) ensure the consumer can detect dropped frames or out-of-order delivery across the pipe.
 
 ---
 
@@ -189,6 +228,7 @@ graph LR
 - Fetch transaction envelopes and metadata
 - Query ledger state at specific transaction points
 - Support multiple networks (Mainnet, Testnet, Futurenet)
+- **Standardized Middleware**: Support custom interceptors for requests/responses
 
 **Key Functions:**
 
@@ -199,14 +239,14 @@ type Client struct {
     Network Network
 }
 
-// NewClient creates network-specific RPC client
-func NewClient(net Network) *Client
+// NewClient creates network-specific RPC client with functional options
+func NewClient(opts ...ClientOption) (*Client, error)
+
+// WithMiddleware adds custom RoundTripper middleware
+func WithMiddleware(middlewares ...Middleware) ClientOption
 
 // Fetch transaction context
 func (c *Client) GetTransaction(ctx context.Context, txHash string) (*TransactionResponse, error)
-
-// Fetch ledger entries for simulation
-func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[string]string, error)
 ```
 
 **Network Support:**
@@ -219,6 +259,80 @@ graph TD
     Client -->|Futurenet| HorizonFuture["https://horizon-futurenet.stellar.org"]
     
     Client -->|JSON-RPC| RPCAPI["Stellar RPC API<br/>(Future Enhancement)"]
+```
+
+### 1.1 TypeScript RPC Client (Protocol V2)
+
+**Location:** `src/rpc/`
+
+**Overview:**
+The TypeScript RPC client provides Protocol V2 enhancements for the Stellar SDK, including type-safe methods, batch request support, and request/response validation.
+
+**Key Features:**
+
+- **Fallback Support**: Automatic failover across multiple RPC endpoints
+- **Circuit Breaker**: Prevents cascading failures with configurable threshold and timeout
+- **Batch Requests**: Execute multiple RPC calls in a single request (Protocol V2)
+- **Type-Safe Methods**: Full TypeScript support for all RPC methods
+- **Request/Response Validation**: Built-in validation for RPC requests and responses
+- **Performance Metrics**: Real-time endpoint health monitoring
+
+**Core Components:**
+
+```
+src/rpc/
+├── fallback-client.ts    # Main RPC client with fallback & circuit breaker
+├── types-v2.ts          # Protocol V2 type definitions
+├── validator.ts         # Request/response validation
+└── __tests__/
+    ├── fallback-client.spec.ts        # Core tests
+    └── fallback-client.benchmark.spec.ts  # Performance benchmarks
+```
+
+**Type-Safe Methods (Protocol V2):**
+
+```typescript
+const client = new FallbackRPCClient(config);
+
+// Individual type-safe calls
+const health = await client.getHealth();
+const tx = await client.getTransaction(hash);
+const result = await client.simulateTransaction(xdr);
+
+// Batch requests (Protocol V2)
+const results = await client.batchRequest([
+    { id: 1, method: 'getHealth', params: {} },
+    { id: 2, method: 'getLatestLedger', params: {} },
+]);
+
+// Parallel requests with concurrency control
+await client.parallelRequests(requests, 5);
+```
+
+**Validation:**
+
+```typescript
+import { RPCRequestValidator, RPCResponseValidator } from './validator';
+
+const errors = RPCRequestValidator.validate(request);
+if (errors.length > 0) {
+    // Handle validation errors
+}
+```
+
+**Configuration:**
+
+```typescript
+interface RPCClientConfig {
+    urls: string[];
+    timeout?: number;
+    retries?: number;
+    circuitBreakerThreshold?: number;
+    circuitBreakerTimeout?: number;
+    validateRequests?: boolean;
+    validateResponses?: boolean;
+    enableMetrics?: boolean;
+}
 ```
 
 ### 2. Simulator Runner
@@ -380,6 +494,28 @@ graph TB
 | Contract State | Ledger Entries | Execute contract logic |
 | Sequence Numbers | Account Query | Validate transaction ordering |
 | Fee Pool | Ledger Query | Calculate fee impacts |
+
+### 7.2 Time-Travel Architecture (Magic Rewind)
+
+"Time-Travel" (Magic Rewind) allows developers to observe contract behavior changes by overriding the ledger timestamp (`env.ledger().timestamp()`) while keeping all other state and metadata constant.
+
+#### 7.2.1 Snapshot Memory Management (Copy-on-Write)
+
+When running multiple simulations in a sequence (e.g., across a `--window`), Erst utilizes a **Copy-on-Write (CoW)** strategy to manage ledger state memory efficiently.
+
+- **Shared Base State**: The initial ledger load is stored in an `Arc<HashMap>` (Atomic Reference Count). `Arc::clone` is O(1) and allows multiple snapshots to share the same underlying memory.
+- **Delta Overlay**: Each individual simulation run maintains a private `delta` map. Only entries that are inserted, modified, or deleted during that specific run are stored here.
+- **Tombstones**: Deletions in the delta layer are represented as `None` values, effectively masking the entry in the base layer.
+
+**Justification:** This strategy reduces memory consumption by **>70%** for typical Soroban transactions. Instead of duplicating thousands of ledger entries (often several megabytes) for each point in a time-window, we only store the handful of entries actually mutated by the contract.
+
+#### 7.2.2 State-Diffing
+
+Erst implements **Byte-wise State-Diffing** to provide precise visibility into how a transaction affects the ledger state at different points in time.
+
+- **Mechanism**: The diff engine iterates over the merged (Base + Delta) views of two snapshots.
+- **Integrity**: Comparison is performed on the raw XDR bytes of each `LedgerEntry`, ensuring that even metadata changes (like TTL or sequence numbers) are captured accurately.
+- **Output**: Diffs are categorized into `Inserted`, `Modified`, and `Deleted` sets.
 
 ---
 
@@ -554,12 +690,21 @@ graph TD
     A --> D["Efficient Data Format"]
     D -->|Strategy| D1["Base64 encoding (portable)"]
     D -->|Strategy| D2["Compressed XDR for large states"]
+    D -->|Strategy| D3["Bincode for Cache Serialization"]
     
     style A fill:#FFE066
     style B fill:#51CF66
     style C fill:#51CF66
     style D fill:#51CF66
 ```
+
+### 11.2 Snapshot & Cache Management (Pruning)
+
+To prevent unbounded disk usage from repeated simulations, the **Source Map Cache** implements a **Last-Recently-Used (LRU)** pruning strategy.
+
+- **Bincode Serialization**: Cache entries are stored in Bincode format, which is significantly faster and more compact than JSON for large source mapping tables.
+- **Deterministic Hashing**: Files are indexed by the SHA256 hash of the WASM bytecode, ensuring that identical contracts across different transactions share a single cache entry.
+- **Pruning**: When the cache directory exceeds the configured `max_cache_size`, the simulator automatically evicts the oldest entries based on their `created_at` timestamp. This keeps the disk footprint bounded while retaining the most relevant mappings.
 
 ### Benchmarking Metrics
 
@@ -626,6 +771,21 @@ graph LR
     F -->|Simulate| D
     D -->|Verify| E
 ```
+
+### CI/CD & Pipeline Standardization
+
+CI and automation are treated as part of the architecture:
+
+- **Workflows**:
+  - General CI: `.github/workflows/ci.yml`
+  - Strict linting: `.github/workflows/strict-lint.yml`
+  - CI robustness checks: `.github/workflows/ci-standardization.yml`
+- **Helper scripts** (path-stable, independent of current working directory):
+  - `scripts/validate-ci.sh` — validates CI configuration and versions
+  - `scripts/test-ci-locally.sh` — mirrors CI checks locally
+  - `scripts/lint-strict.sh` / `scripts/test-strict-linting.sh` — strict linting and verification
+
+All scripts compute the repository root from their own location instead of assuming they are invoked from the project root, removing implicit global state dependencies from the CI/CD pipeline.
 
 ---
 
@@ -713,3 +873,34 @@ The Rust simulator returns a JSON object with the execution status, logs, and an
   "logs": ["Host Initialized", "Charged 100 fee"]
 }
 ```
+
+---
+
+## SDK Middleware
+
+The SDK type system supports custom middleware injection via `SDKMiddleware`.
+Middleware functions intercept requests flowing through `FallbackRPCClient`,
+following a composable `(ctx, next) => response` pattern.
+
+### Types
+
+| Type | Description |
+|------|-------------|
+| `SDKContext` | Request context carrying path, method, data, headers, and metadata |
+| `SDKResponse<T>` | Response wrapper with data, status, duration, endpoint, and metadata |
+| `SDKMiddleware<T>` | `(ctx: SDKContext, next: NextFn<T>) => Promise<SDKResponse<T>>` |
+| `NextFn<T>` | Calls the next middleware or the core handler |
+| `composeMiddleware` | Composes an array of middleware into a single chain |
+
+### Registration
+
+Middleware can be registered in two ways:
+
+1. **Via config** — pass `middleware` array in `RPCConfig`
+2. **Via `use()`** — call `client.use(mw)` on a `FallbackRPCClient` instance
+
+### Execution Order
+
+Middleware executes in registration order (first registered runs first).
+Each middleware calls `next(ctx)` to pass control to the next in the chain.
+Middleware may short-circuit by returning a response without calling `next`.

@@ -1,0 +1,72 @@
+# Git
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+docs/
+examples/
+
+# Build artifacts
+bin/
+target/
+dist/
+coverage.out
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test files
+*_test.go
+test/
+tests/
+*.test
+
+# CI/CD
+.github/workflows/
+.golangci.yml
+
+# Python scripts
+*.py
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules (if any)
+node_modules/
+package-lock.json
+
+# Rust build cache (will be rebuilt in container)
+simulator/target/
+
+# Go build cache
+go.sum.bak
+
+# Scripts not needed in container
+*.sh
+!fix_*.sh
+
+# Docker files
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Sample and test data
+sample_*.json
+*_results.txt
+test_*.sh
+verify_*
+erst-sim
+erst.example.toml

@@ -49,6 +49,27 @@ describe('audit signing (signer-agnostic)', () => {
 
     expect(verifyAuditLog(secureLog)).toBe(false);
   });
+
+  test('verifies multi-signature audit logs', async () => {
+    const signerA = new MockAuditSigner();
+    const signerB = new MockAuditSigner();
+    const logger = new AuditLogger(signerA, 'mock');
+
+    const traceData = {
+      input: { amount: 100 },
+      state: { balance_before: 500, balance_after: 400 },
+      events: ['INIT_TRANSFER'],
+      timestamp: new Date().toISOString(),
+    };
+
+    const multiLog = await logger.generateMultiLog(traceData as any, [
+      { signer: signerA, provider: 'mock', label: 'alice' },
+      { signer: signerB, provider: 'mock', label: 'bob' },
+    ]);
+
+    expect(verifyAuditLog(multiLog)).toBe(true);
+    expect(verifyAuditLog(multiLog, multiLog.signatures[0].publicKey)).toBe(true);
+  });
 });
 
 describe('audit with hardware attestation', () => {
