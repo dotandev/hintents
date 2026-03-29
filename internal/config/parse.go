@@ -31,6 +31,13 @@ func loadFromEnv(cfg *Config) error {
 	if v := os.Getenv("ERST_RPC_TOKEN"); v != "" {
 		cfg.RPCToken = v
 	}
+	if v := os.Getenv("ERST_MAX_CACHE_SIZE"); v != "" {
+		n, err := parseSize(v)
+		if err != nil {
+			return errors.WrapValidationError("ERST_MAX_CACHE_SIZE must be a valid size (e.g., 500MB)")
+		}
+		cfg.MaxCacheSize = n
+	}
 	if v := os.Getenv("ERST_CRASH_ENDPOINT"); v != "" {
 		cfg.CrashEndpoint = v
 	}
@@ -44,6 +51,14 @@ func loadFromEnv(cfg *Config) error {
 			return errors.WrapValidationError("ERST_REQUEST_TIMEOUT must be an integer")
 		}
 		cfg.RequestTimeout = n
+	}
+
+	if v := os.Getenv("ERST_MAX_TRACE_DEPTH"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return errors.WrapValidationError("ERST_MAX_TRACE_DEPTH must be an integer")
+		}
+		cfg.MaxTraceDepth = n
 	}
 
 	switch strings.ToLower(os.Getenv("ERST_CRASH_REPORTING")) {
@@ -168,6 +183,18 @@ func (c *Config) parseTOML(content string) error {
 				return errors.WrapValidationError("request_timeout must be an integer")
 			}
 			c.RequestTimeout = n
+		case "max_trace_depth":
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				return errors.WrapValidationError("max_trace_depth must be an integer")
+			}
+			c.MaxTraceDepth = n
+		case "max_cache_size":
+			n, err := parseSize(value)
+			if err != nil {
+				return errors.WrapValidationError("max_cache_size must be a valid size (e.g., 500MB)")
+			}
+			c.MaxCacheSize = n
 		}
 	}
 
@@ -182,4 +209,41 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func parseSize(value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+
+	var multiplier int64 = 1
+	lowerValue := strings.ToLower(value)
+
+	if strings.HasSuffix(lowerValue, "kb") {
+		multiplier = 1024
+		value = strings.TrimSuffix(value, "kb")
+	} else if strings.HasSuffix(lowerValue, "mb") {
+		multiplier = 1024 * 1024
+		value = strings.TrimSuffix(value, "mb")
+	} else if strings.HasSuffix(lowerValue, "gb") {
+		multiplier = 1024 * 1024 * 1024
+		value = strings.TrimSuffix(value, "gb")
+	} else if strings.HasSuffix(lowerValue, "k") {
+		multiplier = 1000
+		value = strings.TrimSuffix(value, "k")
+	} else if strings.HasSuffix(lowerValue, "m") {
+		multiplier = 1000 * 1000
+		value = strings.TrimSuffix(value, "m")
+	} else if strings.HasSuffix(lowerValue, "g") {
+		multiplier = 1000 * 1000 * 1000
+		value = strings.TrimSuffix(value, "g")
+	}
+
+	n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return n * multiplier, nil
 }

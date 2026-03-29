@@ -135,6 +135,34 @@ The command prints the signed audit log JSON to stdout so it can be redirected t
 
 For YubiKey PIV (YKCS11) usage details, see [docs/pkcs11-yubikey.md](docs/pkcs11-yubikey.md).
 
+### Protocol Handler
+
+Erst registers a custom `erst://` URI scheme, allowing external tools (browsers, dashboards) to deep-link directly into a debug session.
+
+Register the protocol handler:
+
+```bash
+./erst protocol:register
+```
+
+Open a debug session via URI:
+
+```bash
+./erst protocol:handle "erst://debug/<transaction-hash>?network=testnet"
+```
+
+With an optional operation index:
+
+```bash
+./erst protocol:handle "erst://debug/<transaction-hash>?network=mainnet&op=0"
+```
+
+Unregister the handler when no longer needed:
+
+```bash
+./erst protocol:unregister
+```
+
 ## Documentation
 
 - **[Architecture Overview](docs/architecture.md)**: Deep dive into how the Go CLI communicates with the Rust simulator, including data flow, IPC mechanisms, and design decisions.
@@ -142,6 +170,7 @@ For YubiKey PIV (YKCS11) usage details, see [docs/pkcs11-yubikey.md](docs/pkcs11
 - **[Source Mapping](docs/source-mapping.md)**: Implementation details for mapping WASM failures to Rust source code.
 - **[Debug Symbols Guide](docs/debug-symbols-guide.md)**: How to compile Soroban contracts with debug symbols.
 - **[Error Suggestions](docs/ERROR_SUGGESTIONS.md)**: Heuristic-based error suggestion engine for common Soroban errors.
+- **[Canonical JSON Serialization](docs/CANONICAL_JSON.md)**: Deterministic JSON serialization for audit log hashing.
 - **[Interactive Trace Showcase](docs/showcase/README.md)**: Try out the interactive trace explorer online.
 
 ## Technical Analysis
