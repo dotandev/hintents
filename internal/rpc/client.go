@@ -568,7 +568,7 @@ func (c *Client) getTransactionAttempt(ctx context.Context, hash string) (txResp
 		attribute.Int("result_meta.size_bytes", len(tx.ResultMetaXdr)),
 	)
 
-	logger.Logger.Info("Transaction fetched", "hash", hash, "envelope_size", len(tx.EnvelopeXdr), "url", c.HorizonURL)
+	logger.Logger.Debug("Transaction fetched", "hash", hash, "envelope_size", len(tx.EnvelopeXdr), "url", c.HorizonURL)
 
 	return ParseTransactionResponse(tx), nil
 }
@@ -711,7 +711,7 @@ func (c *Client) getLedgerHeaderAttempt(ctx context.Context, sequence uint32) (l
 		attribute.Int("ledger.tx_count", int(response.SuccessfulTxCount+response.FailedTxCount)),
 	)
 
-	logger.Logger.Info("Ledger header fetched successfully",
+	logger.Logger.Debug("Ledger header fetched successfully",
 		"sequence", sequence,
 		"hash", response.Hash,
 		"url", c.HorizonURL,
@@ -903,7 +903,7 @@ func (c *Client) getLedgerEntriesConcurrent(ctx context.Context, batches [][]str
 	batchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	logger.Logger.Info("Fetching ledger entries concurrently",
+	logger.Logger.Debug("Fetching ledger entries concurrently",
 		"batch_count", len(batches),
 		"total_keys", sumBatchSizes(batches))
 
@@ -956,7 +956,7 @@ func (c *Client) getLedgerEntriesConcurrent(ctx context.Context, batches [][]str
 		return nil, errors.WrapAllRPCFailed(errs[0])
 	}
 
-	logger.Logger.Info("Concurrent ledger entry fetch completed",
+	logger.Logger.Debug("Concurrent ledger entry fetch completed",
 		"total_entries", len(allEntries),
 		"batches", len(batches))
 
@@ -1033,6 +1033,7 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 	resp, err := c.getHTTPClient().Do(req)
 	duration := time.Since(startTime)
 	if err != nil {
+		logger.Logger.Error("Soroban getLedgerEntries request failed", "url", targetURL, "error", err)
 		// Record failed remote node response
 		metrics.RecordRemoteNodeResponse(targetURL, string(c.Network), false, duration)
 		return nil, errors.WrapRPCConnectionFailed(err)
@@ -1054,19 +1055,17 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 
 	var rpcResp GetLedgerEntriesResponse
 	if err := json.Unmarshal(respBytes, &rpcResp); err != nil {
+		logger.Logger.Error("Soroban getLedgerEntries response unmarshal failed", "url", targetURL, "error", err)
 		// Record failed remote node response
 		metrics.RecordRemoteNodeResponse(targetURL, string(c.Network), false, duration)
 		return nil, errors.WrapUnmarshalFailed(err, string(respBytes))
 	}
 
 	if rpcResp.Error != nil {
+		logger.Logger.Error("Soroban getLedgerEntries RPC error", "url", targetURL, "code", rpcResp.Error.Code, "message", rpcResp.Error.Message)
 		// Record failed remote node response
 		metrics.RecordRemoteNodeResponse(targetURL, string(c.Network), false, duration)
-<<<<<<< audit-internal-errors
 		return nil, errors.WrapRPCError(targetURL, stdErrors.New(rpcResp.Error.Message), rpcResp.Error.Code)
-=======
-		return nil, errors.WrapSorobanError(targetURL, rpcResp.Error.Message, rpcResp.Error.Code)
->>>>>>> main
 	}
 
 	// Record successful remote node response
@@ -1091,7 +1090,7 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 		return nil, errors.WrapValidationError("ledger entry verification failed", err)
 	}
 
-	logger.Logger.Info("Ledger entries fetched",
+	logger.Logger.Debug("Ledger entries fetched",
 		"total_requested", len(keysToFetch),
 		"from_cache", len(keysToFetch)-fetchedCount,
 		"from_rpc", fetchedCount,
@@ -1358,32 +1357,34 @@ func (c *Client) simulateTransactionAttempt(ctx context.Context, envelopeXdr str
 
 	resp, err := c.getHTTPClient().Do(req)
 	if err != nil {
+		logger.Logger.Error("Soroban simulateTransaction request failed", "url", targetURL, "error", err)
 		return nil, errors.WrapRPCConnectionFailed(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusRequestEntityTooLarge {
+		logger.Logger.Error("Soroban simulateTransaction response too large", "url", targetURL, "status", resp.StatusCode)
 		return nil, errors.WrapRPCResponseTooLarge(targetURL)
 	}
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logger.Logger.Error("Soroban simulateTransaction response read failed", "url", targetURL, "error", err)
 		return nil, errors.WrapUnmarshalFailed(err, "body read error")
 	}
 
 	var rpcResp SimulateTransactionResponse
 	if err := json.Unmarshal(respBytes, &rpcResp); err != nil {
+		logger.Logger.Error("Soroban simulateTransaction unmarshal failed", "url", targetURL, "error", err)
 		return nil, errors.WrapUnmarshalFailed(err, string(respBytes))
 	}
 
 	if rpcResp.Error != nil {
-<<<<<<< audit-internal-errors
 		return nil, errors.WrapRPCError(targetURL, stdErrors.New(rpcResp.Error.Message), rpcResp.Error.Code)
-=======
 		return nil, errors.WrapSorobanError(targetURL, rpcResp.Error.Message, rpcResp.Error.Code)
->>>>>>> main
 	}
 
+	logger.Logger.Debug("Soroban simulateTransaction succeeded", "url", targetURL)
 	return &rpcResp, nil
 }
 
@@ -1476,7 +1477,7 @@ func (c *Client) getHealthAttempt(ctx context.Context) (healthResp *GetHealthRes
 		return nil, errors.WrapRPCError(targetURL, stdErrors.New(rpcResp.Error.Message), rpcResp.Error.Code)
 	}
 
-	logger.Logger.Info("Soroban RPC health check successful", "url", targetURL, "status", rpcResp.Result.Status)
+	logger.Logger.Debug("Soroban RPC health check successful", "url", targetURL, "status", rpcResp.Result.Status)
 	return &rpcResp, nil
 }
 

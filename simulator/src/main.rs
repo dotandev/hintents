@@ -7,6 +7,7 @@ mod config;
 mod debug_host_fn;
 mod gas_optimizer;
 mod git_detector;
+mod ipc;
 mod runner;
 mod source_map_cache;
 mod source_mapper;
@@ -495,8 +496,21 @@ fn main() {
 
     let mut loaded_entries_count = 0;
 
-    // Populate Host Storage
-    if let Some(entries) = &request.ledger_entries {
+    // Populate Host Storage — resolve ledger entries (plain or zstd-compressed).
+    let resolved_entries: Option<std::collections::HashMap<String, String>> =
+        if let Some(b64) = &request.ledger_entries_zstd {
+            match ipc::decompress::decompress_ledger_entries(b64) {
+                Ok(entries) => Some(entries),
+                Err(e) => {
+                    send_error(format!("Failed to decompress ledger entries: {}", e));
+                    return;
+                }
+            }
+        } else {
+            request.ledger_entries.clone()
+        };
+
+    if let Some(entries) = &resolved_entries {
         for (key_xdr, entry_xdr) in entries {
             match base64::engine::general_purpose::STANDARD.decode(key_xdr) {
                 Ok(b) => match soroban_env_host::xdr::LedgerKey::from_xdr(

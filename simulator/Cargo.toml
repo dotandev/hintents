@@ -45,6 +45,7 @@ ed25519-dalek = { version = "2.2.0", features = ["pem", "pkcs8"] }
 k256 = { version = "0.13.4", features = ["ecdsa"] }
 rand = "0.8"
 libc = "0.2"
+zstd = "0.13"
 
 [dev-dependencies]
 tempfile = "3.26.0"

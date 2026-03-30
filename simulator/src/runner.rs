@@ -11,6 +11,8 @@ use soroban_env_host::{
 /// Wrapper around the Soroban Host to manage initialization and execution context.
 pub struct SimHost {
     pub inner: Host,
+    /// Events buffered since the last call to `_drain_events_for_snapshot`.
+    _pending_events: Vec<String>,
 }
 
 impl SimHost {
@@ -40,7 +42,10 @@ impl SimHost {
         host.set_diagnostic_level(DiagnosticLevel::Debug)
             .expect("failed to set diagnostic level");
 
-        Self { inner: host }
+        Self {
+            inner: host,
+            _pending_events: Vec::new(),
+        }
     }
 
     /// Set the contract ID for execution context.
@@ -61,6 +66,24 @@ impl SimHost {
         v.try_into_val(&self.inner).map_err(|_| {
             EnvError::from_type_and_code(ScErrorType::Context, ScErrorCode::InvalidInput).into()
         })
+    }
+
+    /// Buffer a contract event for inclusion in the next snapshot.
+    ///
+    /// Call this from the simulation loop each time an event is emitted so that
+    /// `_drain_events_for_snapshot` can associate the right events with each
+    /// snapshot window.
+    pub fn _push_event(&mut self, event: String) {
+        self._pending_events.push(event);
+    }
+
+    /// Return all events buffered since the last snapshot and clear the buffer.
+    ///
+    /// The returned `Vec` is moved into the `events` field of the `StateSnapshot`
+    /// being constructed.  After this call the buffer is empty and ready for the
+    /// next snapshot window.
+    pub fn _drain_events_for_snapshot(&mut self) -> Vec<String> {
+        std::mem::take(&mut self._pending_events)
     }
 }
 
@@ -97,5 +120,32 @@ mod tests {
         let res_b = host._val_to_u32(val_b).expect("conversion failed");
 
         assert_eq!(res_a + res_b, 30);
+    }
+
+    #[test]
+    fn test_drain_events_for_snapshot_returns_buffered_events() {
+        let mut host = SimHost::new(None, None, None);
+        host._push_event("event_a".to_string());
+        host._push_event("event_b".to_string());
+
+        let drained = host._drain_events_for_snapshot();
+        assert_eq!(drained, vec!["event_a", "event_b"]);
+    }
+
+    #[test]
+    fn test_drain_events_for_snapshot_clears_buffer() {
+        let mut host = SimHost::new(None, None, None);
+        host._push_event("event_a".to_string());
+        let _ = host._drain_events_for_snapshot();
+
+        let second_drain = host._drain_events_for_snapshot();
+        assert!(second_drain.is_empty());
+    }
+
+    #[test]
+    fn test_drain_events_for_snapshot_empty_buffer() {
+        let mut host = SimHost::new(None, None, None);
+        let drained = host._drain_events_for_snapshot();
+        assert!(drained.is_empty());
     }
 }

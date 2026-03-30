@@ -132,3 +132,79 @@ func TestLoadSavePreservesLinearMemory(t *testing.T) {
 		t.Fatalf("expected %q, got %q", memory, decoded)
 	}
 }
+
+func TestFingerprintIsDeterministic(t *testing.T) {
+	// Same entries in different insertion order must produce the same fingerprint.
+	s1 := FromMap(map[string]string{"key-b": "val-b", "key-a": "val-a"})
+	s2 := FromMap(map[string]string{"key-a": "val-a", "key-b": "val-b"})
+
+	if s1.Fingerprint == "" {
+		t.Fatal("expected non-empty fingerprint")
+	}
+	if s1.Fingerprint != s2.Fingerprint {
+		t.Fatalf("fingerprints differ: %s vs %s", s1.Fingerprint, s2.Fingerprint)
+	}
+}
+
+func TestFingerprintChangesOnMutation(t *testing.T) {
+	s1 := FromMap(map[string]string{"key-a": "val-a"})
+	s2 := FromMap(map[string]string{"key-a": "val-CHANGED"})
+
+	if s1.Fingerprint == s2.Fingerprint {
+		t.Fatal("expected different fingerprints for different values")
+	}
+}
+
+func TestFingerprintEmptySnapshot(t *testing.T) {
+	s := FromMap(nil)
+	if s.Fingerprint == "" {
+		t.Fatal("expected non-empty fingerprint for empty snapshot")
+	}
+	// Two empty snapshots must agree.
+	s2 := FromMap(map[string]string{})
+	if s.Fingerprint != s2.Fingerprint {
+		t.Fatalf("empty snapshots have different fingerprints: %s vs %s", s.Fingerprint, s2.Fingerprint)
+	}
+}
+
+func TestLoadDetectsDrift(t *testing.T) {
+	snap := FromMap(map[string]string{"k": "v"})
+
+	outPath := filepath.Join(t.TempDir(), "drift.json")
+	if err := Save(outPath, snap); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Tamper: overwrite the fingerprint in the file with a wrong value.
+	data, _ := os.ReadFile(outPath)
+	tampered := strings.Replace(string(data), snap.Fingerprint, "deadbeefdeadbeef", 1)
+	_ = os.WriteFile(outPath, []byte(tampered), 0644)
+
+	// Load should succeed but log the drift (we just verify it doesn't error).
+	loaded, err := Load(outPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	// The stored (tampered) fingerprint is preserved as-is; drift was logged.
+	if loaded.Fingerprint != "deadbeefdeadbeef" {
+		t.Fatalf("expected tampered fingerprint to be preserved, got %s", loaded.Fingerprint)
+	}
+}
+
+func TestSaveAndLoadPreservesFingerprint(t *testing.T) {
+	snap := FromMap(map[string]string{"key-1": "val-1", "key-2": "val-2"})
+	original := snap.Fingerprint
+
+	outPath := filepath.Join(t.TempDir(), "fp.json")
+	if err := Save(outPath, snap); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	loaded, err := Load(outPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if loaded.Fingerprint != original {
+		t.Fatalf("fingerprint changed after save/load: %s vs %s", original, loaded.Fingerprint)
+	}
+}

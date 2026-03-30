@@ -172,6 +172,7 @@ Unregister the handler when no longer needed:
 - **[Error Suggestions](docs/ERROR_SUGGESTIONS.md)**: Heuristic-based error suggestion engine for common Soroban errors.
 - **[Canonical JSON Serialization](docs/CANONICAL_JSON.md)**: Deterministic JSON serialization for audit log hashing.
 - **[Interactive Trace Showcase](docs/showcase/README.md)**: Try out the interactive trace explorer online.
+- **[Time Travel Guide](docs/TIME_TRAVEL_GUIDE.md)**: How to use Magic Rewind to replay transactions across time, save sessions to disk, and share reproducible debug files.
 
 ## Technical Analysis
 
