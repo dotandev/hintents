@@ -191,6 +191,10 @@ func TestDebugCommand_Setup(t *testing.T) {
 
 	mockGasPrice := debugCmd.Flags().Lookup("mock-gas-price")
 	assert.NotNil(t, mockGasPrice)
+
+	snapshots := debugCmd.Flags().Lookup("snapshots")
+	assert.NotNil(t, snapshots)
+	assert.Equal(t, "false", snapshots.DefValue)
 }
 
 func TestApplySimulationFeeMocks(t *testing.T) {

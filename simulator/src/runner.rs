@@ -169,6 +169,24 @@ impl SimHost {
             EnvError::from_type_and_code(ScErrorType::Context, ScErrorCode::InvalidInput).into()
         })
     }
+
+    /// Buffer a contract event for inclusion in the next snapshot.
+    ///
+    /// Call this from the simulation loop each time an event is emitted so that
+    /// `_drain_events_for_snapshot` can associate the right events with each
+    /// snapshot window.
+    pub fn _push_event(&mut self, event: String) {
+        self._pending_events.push(event);
+    }
+
+    /// Return all events buffered since the last snapshot and clear the buffer.
+    ///
+    /// The returned `Vec` is moved into the `events` field of the `StateSnapshot`
+    /// being constructed.  After this call the buffer is empty and ready for the
+    /// next snapshot window.
+    pub fn _drain_events_for_snapshot(&mut self) -> Vec<String> {
+        std::mem::take(&mut self._pending_events)
+    }
 }
 
 #[cfg(test)]

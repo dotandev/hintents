@@ -137,6 +137,11 @@ func (tv *TreeViewerWithMouse) handleInput() bool {
 
 	// Handle keyboard input
 	switch {
+	case input == "n": // Next step/instruction
+		tv.NextStep()
+		tv.renderView()
+		return false
+
 	case input == "\x1b[A" || input == "k": // Up arrow or k
 		tv.renderer.SelectUp()
 		tv.renderView()
@@ -223,8 +228,9 @@ func (tv *TreeViewerWithMouse) renderView() {
 	_, _ = fmt.Print(tv.renderer.Render()) //nolint:errcheck
 
 	// Render footer
-	_, _ = fmt.Print("\n─────────────────────────────────────────────────────────\n")                                                             //nolint:errcheck
-	_, _ = fmt.Print("Controls: ↑↓/kj=navigate | Space/Enter=expand | e=expand-all | c=collapse-all | h=help | q=quit | Click [+/-] to expand\n") //nolint:errcheck
+	_, _ = fmt.Print("\n─────────────────────────────────────────────────────────\n")                                                   //nolint:errcheck
+	_, _ = fmt.Print("Controls: n=next-step | ↑↓/kj=navigate | Space/Enter=expand | e=expand-all | c=collapse-all | h=help | q=quit\n") //nolint:errcheck
+	_, _ = fmt.Print(tv.renderCurrentStateView())                                                                                       //nolint:errcheck
 }
 
 // showHelp displays help information
@@ -234,6 +240,7 @@ func (tv *TreeViewerWithMouse) showHelp() {
 ║                              KEYBOARD SHORTCUTS                            ║
 ├────────────────────────────────────────────────────────────────────────────┤
 ║ Navigation:                                                                ║
+║   n              Move to next instruction/event                            ║
 ║   ↑ / k          Move up                                                   ║
 ║   ↓ / j          Move down                                                 ║
 ║   Space/Enter    Toggle expand/collapse on selected node                  ║
@@ -262,6 +269,55 @@ Press any key to continue...
 	_, _ = syscall.Read(0, buf) //nolint:errcheck
 
 	tv.renderView()
+}
+
+// NextStep advances to the next execution step and synchronizes tree focus
+// to the corresponding node in the rendered list.
+func (tv *TreeViewerWithMouse) NextStep() {
+	if tv.trace == nil || len(tv.trace.States) == 0 {
+		return
+	}
+
+	state, err := tv.trace.StepForward()
+	if err != nil {
+		return
+	}
+
+	// Tree nodes are currently built as step-<index>; sync focus to the new step.
+	tv.renderer.SelectNodeByID(fmt.Sprintf("step-%d", state.Step))
+}
+
+func (tv *TreeViewerWithMouse) renderCurrentStateView() string {
+	if tv.trace == nil || len(tv.trace.States) == 0 {
+		return "State: no trace loaded\n"
+	}
+
+	state, err := tv.trace.GetCurrentState()
+	if err != nil {
+		return "State: unavailable\n"
+	}
+
+	operation := state.Operation
+	if operation == "" {
+		operation = "-"
+	}
+	eventType := state.EventType
+	if eventType == "" {
+		eventType = "inferred"
+	}
+	function := state.Function
+	if function == "" {
+		function = "-"
+	}
+
+	return fmt.Sprintf(
+		"State: step=%d/%d op=%s event=%s fn=%s\n",
+		state.Step,
+		len(tv.trace.States)-1,
+		operation,
+		eventType,
+		function,
+	)
 }
 
 // Terminal control methods

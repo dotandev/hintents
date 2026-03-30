@@ -5,16 +5,20 @@ import * as vscode from 'vscode';
 import { Trace, TraceStep } from './erstClient';
 
 export class TraceTreeDataProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+    private currentStepIndex: number = 0;
+    private treeView?: vscode.TreeView<vscode.TreeItem>;
     private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined | null> = new vscode.EventEmitter<vscode.TreeItem | undefined | null>();
     readonly onDidChangeTreeData: vscode.Event<vscode.TreeItem | undefined | null> = this._onDidChangeTreeData.event;
-
     private currentTrace: Trace | undefined;
     private searchQuery = '';
 
-    constructor() { }
+    constructor(treeView?: vscode.TreeView<vscode.TreeItem>) {
+        this.treeView = treeView;
+    }
 
     refresh(trace: Trace): void {
         this.currentTrace = trace;
+        this.currentStepIndex = 0;
         this._onDidChangeTreeData.fire(undefined);
     }
 
@@ -29,6 +33,28 @@ export class TraceTreeDataProvider implements vscode.TreeDataProvider<vscode.Tre
 
     getSearchQuery(): string {
         return this.searchQuery;
+    }
+
+    setCurrentStepIndex(idx: number): void {
+        if (!this.currentTrace) return;
+        if (idx < 0 || idx >= this.currentTrace.states.length) return;
+        this.currentStepIndex = idx;
+        this._onDidChangeTreeData.fire(undefined);
+        if (this.treeView) {
+            const item = new TraceItem(
+                this.currentTrace.states[idx],
+                this.searchQuery,
+                idx > 0 ? this.currentTrace.states[idx - 1] : undefined,
+                true // isCurrent
+            );
+            setTimeout(() => {
+                this.treeView!.reveal(item, { select: true, focus: true, expand: false });
+            }, 100);
+        }
+    }
+
+    getCurrentStepIndex(): number {
+        return this.currentStepIndex;
     }
 
     getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
@@ -66,28 +92,32 @@ export class TraceTreeDataProvider implements vscode.TreeDataProvider<vscode.Tre
 
         const states = this.currentTrace.states;
         return Promise.resolve(
-            states.map((step, idx) => new TraceItem(step, this.searchQuery, idx > 0 ? states[idx - 1] : undefined))
+            states.map((step, idx) => new TraceItem(
+                step,
+                this.searchQuery,
+                idx > 0 ? states[idx - 1] : undefined,
+                idx === this.currentStepIndex // isCurrent
+            ))
         );
     }
 }
 
 export class TraceItem extends vscode.TreeItem {
     public isCrossContractBoundary: boolean;
-
     constructor(
         public readonly step: TraceStep,
         searchQuery: string,
-        previousStep?: TraceStep
+        previousStep?: TraceStep,
+        isCurrent: boolean = false
     ) {
         const isStateUpdate = step.operation === 'StateUpdate' || step.operation === 'LedgerState';
-
+        // Add marker for current step
+        const marker = isCurrent ? '\u25B6 ' : '';
         super(
-            `${step.step}: ${step.operation}${step.function ? ` (${step.function})` : ''}`,
+            `${marker}${step.step}: ${step.operation}${step.function ? ` (${step.function})` : ''}`,
             isStateUpdate ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
         );
-
         this.isCrossContractBoundary = isCrossContractTransition(previousStep, step);
-
         const budgetParts: string[] = [];
         if (step.cpu_delta !== undefined && step.cpu_delta > 0) {
             budgetParts.push(`CPU: ${this.formatNumber(step.cpu_delta)}`);
@@ -96,7 +126,6 @@ export class TraceItem extends vscode.TreeItem {
             budgetParts.push(`Mem: ${this.formatBytes(step.memory_delta)}`);
         }
         const budgetInfo = budgetParts.length > 0 ? ` [${budgetParts.join(', ')}]` : '';
-
         this.tooltip = `${this.label}${budgetInfo}`;
         this.description = step.error
             ? `Error: ${step.error}`
@@ -104,10 +133,11 @@ export class TraceItem extends vscode.TreeItem {
                 ? `[boundary] ${previousStep?.contract_id} -> ${step.contract_id}${budgetInfo}`
                 : budgetInfo;
         this.contextValue = this.isCrossContractBoundary ? 'traceStepBoundary' : 'traceStep';
-
         const matched = isStepMatch(step, searchQuery);
-
-        if (step.error) {
+        if (isCurrent) {
+            // Cyan/bold marker for current step
+            this.iconPath = new vscode.ThemeIcon('debug-start', new vscode.ThemeColor('charts.blue'));
+        } else if (step.error) {
             this.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
         } else if (matched) {
             this.iconPath = new vscode.ThemeIcon('search', new vscode.ThemeColor('charts.yellow'));
@@ -118,7 +148,6 @@ export class TraceItem extends vscode.TreeItem {
         } else {
             this.iconPath = new vscode.ThemeIcon('pass', new vscode.ThemeColor('debugIcon.startForeground'));
         }
-
         if (!isStateUpdate) {
             this.command = {
                 command: 'erst.selectTraceStep',

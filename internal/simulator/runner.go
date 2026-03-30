@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotandev/hintents/internal/bridge"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/ipc"
 	"github.com/dotandev/hintents/internal/logger"
@@ -289,6 +290,12 @@ func (r *Runner) runAttempt(ctx context.Context, req *SimulationRequest) (*Simul
 	inputBytes, err := json.Marshal(req)
 	if err != nil {
 		logger.Logger.Error("Failed to marshal simulation request", "error", err)
+		return nil, errors.WrapMarshalFailed(err)
+	}
+
+	inputBytes, err = bridge.CompressRequest(inputBytes)
+	if err != nil {
+		logger.Logger.Error("Failed to compress simulation request", "error", err)
 		return nil, errors.WrapMarshalFailed(err)
 	}
 
