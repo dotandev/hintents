@@ -131,3 +131,40 @@ func absDiff(a, b int64) int64 {
 		return d
 	}
 }
+
+// FindChangedKeySnapshots returns the timestamps of snapshots where the specified ledger key
+// was modified compared to the previous snapshot. Optimized for speed with O(n) time complexity.
+// snapshotKeyValue returns the value for a ledger key in a snapshot.
+// It avoids repeatedly creating maps for snapshots when iterating through changes.
+func snapshotKeyValue(snap *snapshot.Snapshot, key string) string {
+	if snap == nil || snap.LedgerEntries == nil {
+		return ""
+	}
+	for _, entry := range snap.LedgerEntries {
+		if len(entry) >= 2 && entry[0] == key {
+			return entry[1]
+		}
+	}
+	return ""
+}
+
+// FindChangedKeySnapshots returns the timestamps of snapshots where the specified ledger key
+// was modified compared to the previous snapshot. Optimized for speed with O(n) time complexity.
+func (r *Registry) FindChangedKeySnapshots(key string) []int64 {
+	if len(r.Entries) < 2 {
+		return nil
+	}
+
+	var changed []int64
+	prevValue := snapshotKeyValue(r.Entries[0].Snapshot, key)
+
+	for i := 1; i < len(r.Entries); i++ {
+		currentValue := snapshotKeyValue(r.Entries[i].Snapshot, key)
+		if currentValue != prevValue {
+			changed = append(changed, r.Entries[i].Timestamp)
+		}
+		prevValue = currentValue
+	}
+
+	return changed
+}

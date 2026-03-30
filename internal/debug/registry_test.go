@@ -56,3 +56,16 @@ func TestRegistry_Add_StoresNonZeroFingerprint(t *testing.T) {
 	assert.NotEqual(t, uint64(0), reg.Entries[0].Fingerprint,
 		"Add should store a non-zero fingerprint for a non-empty snapshot")
 }
+
+func TestRegistry_FindChangedKeySnapshots(t *testing.T) {
+	reg := debug.New("v1", "txhash", "testnet", "env", "meta")
+	reg.Add(1000, snapshot.FromMap(map[string]string{"k": "v1", "x": "y"}))
+	reg.Add(2000, snapshot.FromMap(map[string]string{"k": "v1", "x": "y"}))
+	reg.Add(3000, snapshot.FromMap(map[string]string{"k": "v2"}))
+	reg.Add(4000, snapshot.FromMap(map[string]string{"k": "v2", "new": "val"}))
+	reg.Add(5000, snapshot.FromMap(map[string]string{"k": ""}))
+
+	changed := reg.FindChangedKeySnapshots("k")
+	assert.Equal(t, []int64{3000, 5000}, changed)
+}
+
