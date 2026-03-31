@@ -30,6 +30,7 @@ const (
 type Checker struct {
 	currentVersion string
 	cacheDir       string
+	apiURL         string
 }
 
 // GitHubRelease represents the GitHub API response for a release

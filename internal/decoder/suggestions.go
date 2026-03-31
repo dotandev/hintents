@@ -250,6 +250,8 @@ func (e *SuggestionEngine) AnalyzeCallTree(root *CallNode) []Suggestion {
 
 // collectEvents recursively collects all events from a call tree
 func (e *SuggestionEngine) collectEvents(node *CallNode) []DecodedEvent {
+	events := make([]DecodedEvent, 0)
+
 	if node == nil {
 		return nil
 	}
