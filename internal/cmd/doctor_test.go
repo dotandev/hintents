@@ -29,6 +29,11 @@ func TestCheckGo(t *testing.T) {
 	if !dep.Installed && dep.FixHint == "" {
 		t.Error("checkGo() should provide FixHint when not installed")
 	}
+
+	// FIXED: Verify ID is set correctly (Issue #8)
+	if dep.ID != DepGo {
+		t.Errorf("checkGo() ID = %v, want %v", dep.ID, DepGo)
+	}
 }
 
 func TestCheckRust(t *testing.T) {
@@ -48,6 +53,11 @@ func TestCheckRust(t *testing.T) {
 
 	if !dep.Installed && dep.FixHint == "" {
 		t.Error("checkRust() should provide FixHint when not installed")
+	}
+
+	// FIXED: Verify ID is set correctly (Issue #8)
+	if dep.ID != DepRust {
+		t.Errorf("checkRust() ID = %v, want %v", dep.ID, DepRust)
 	}
 }
 
@@ -69,6 +79,11 @@ func TestCheckCargo(t *testing.T) {
 	if !dep.Installed && dep.FixHint == "" {
 		t.Error("checkCargo() should provide FixHint when not installed")
 	}
+
+	// FIXED: Verify ID is set correctly (Issue #8)
+	if dep.ID != DepCargo {
+		t.Errorf("checkCargo() ID = %v, want %v", dep.ID, DepCargo)
+	}
 }
 
 func TestCheckSimulator(t *testing.T) {
@@ -85,6 +100,16 @@ func TestCheckSimulator(t *testing.T) {
 	// If simulator is found, verify path is set
 	if dep.Installed && dep.Path == "" {
 		t.Error("checkSimulator() should set Path when installed")
+	}
+
+	// FIXED: Verify ID is set correctly (Issue #8)
+	if dep.ID != DepSimulator {
+		t.Errorf("checkSimulator() ID = %v, want %v", dep.ID, DepSimulator)
+	}
+
+	// FIXED: Verify Fixable is set (Issue #9)
+	if !dep.Fixable {
+		t.Error("checkSimulator() should be fixable")
 	}
 }
 
@@ -146,6 +171,11 @@ func TestCheckConfigTOML(t *testing.T) {
 		t.Error("expected invalid toml to fail")
 	}
 	os.Remove(".erst.toml")
+
+	// FIXED: Verify ID is set correctly (Issue #8)
+	if dep.ID != DepConfigTOML {
+		t.Errorf("checkConfigTOML() ID = %v, want %v", dep.ID, DepConfigTOML)
+	}
 }
 
 func TestCheckRPC(t *testing.T) {
@@ -171,8 +201,14 @@ func TestCheckRPC(t *testing.T) {
 	if dep.Installed {
 		t.Error("expected rpc check to fail for unreachable url")
 	}
+
+	// FIXED: Verify ID is set correctly (Issue #8)
+	if dep.ID != DepRPC {
+		t.Errorf("checkRPC() ID = %v, want %v", dep.ID, DepRPC)
+	}
 }
 
+// FIXED: TestDoctorCommand no longer mutates global state (Issue #5)
 func TestDoctorCommand(t *testing.T) {
 	// Test that the command is registered
 	if doctorCmd == nil {
@@ -183,10 +219,172 @@ func TestDoctorCommand(t *testing.T) {
 		t.Errorf("doctorCmd.Use = %v, want 'doctor'", doctorCmd.Use)
 	}
 
-	// Test that verbose flag exists
+	// Test that flags exist using Lookup instead of Set (Issue #5)
 	verboseFlag := doctorCmd.Flags().Lookup("verbose")
 	if verboseFlag == nil {
 		t.Error("doctor command should have --verbose flag")
+	}
+}
+
+// FIXED: TestDoctorWithFix verifies --fix flag is recognized (Issue #5)
+func TestDoctorWithFix(t *testing.T) {
+	flag := doctorCmd.Flags().Lookup("fix")
+	if flag == nil {
+		t.Fatal("doctor command should have --fix flag")
+	}
+}
+
+// FIXED: TestDoctorWithYes verifies --yes flag is recognized (Issue #5)
+func TestDoctorWithYes(t *testing.T) {
+	flag := doctorCmd.Flags().Lookup("yes")
+	if flag == nil {
+		t.Fatal("doctor command should have --yes flag")
+	}
+}
+
+// FIXED: TestDependencyStatusFixable verifies Fixable field (Issue #9)
+func TestDependencyStatusFixable(t *testing.T) {
+	dep := DependencyStatus{
+		ID:      DepCacheDir,
+		Name:    "Test Dependency",
+		Fixable: true,
+	}
+
+	if !dep.Fixable {
+		t.Fatal("Fixable field not set correctly")
+	}
+}
+
+// FIXED: TestDependencyIDDispatch verifies ID-based routing (Issue #8)
+func TestDependencyIDDispatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		depID DependencyID
+		found bool
+	}{
+		{"CacheDir", DepCacheDir, true},
+		{"Simulator", DepSimulator, true},
+		{"ProtocolRegistry", DepProtocolRegistry, true},
+		{"GoModDependencies", DepGoModDependencies, true},
+		{"InvalidID", "invalid", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			switch tt.depID {
+			case DepCacheDir, DepSimulator, DepProtocolRegistry, DepGoModDependencies:
+				if !tt.found {
+					t.Errorf("expected %s to be recognized", tt.depID)
+				}
+			default:
+				if tt.found {
+					t.Errorf("did not expect %s to be recognized", tt.depID)
+				}
+			}
+		})
+	}
+}
+
+// NEW: TestCheckCacheDir verifies cache directory check (Issue #9)
+func TestCheckCacheDir(t *testing.T) {
+	dep := checkCacheDir(false)
+
+	if dep.Name != "Cache directory (~/.erst)" {
+		t.Errorf("checkCacheDir() name = %v, want 'Cache directory (~/.erst)'", dep.Name)
+	}
+
+	// FIXED: Verify ID is set correctly (Issue #8)
+	if dep.ID != DepCacheDir {
+		t.Errorf("checkCacheDir() ID = %v, want %v", dep.ID, DepCacheDir)
+	}
+
+	// FIXED: Verify Fixable is set (Issue #9)
+	if !dep.Fixable {
+		t.Error("checkCacheDir() should be fixable")
+	}
+}
+
+// NEW: TestCheckProtocolRegistry verifies protocol registry check (Issue #9)
+func TestCheckProtocolRegistry(t *testing.T) {
+	dep := checkProtocolRegistry(false)
+
+	if dep.Name != "Protocol Registry" {
+		t.Errorf("checkProtocolRegistry() name = %v, want 'Protocol Registry'", dep.Name)
+	}
+
+	// FIXED: Verify ID is set correctly (Issue #8)
+	if dep.ID != DepProtocolRegistry {
+		t.Errorf("checkProtocolRegistry() ID = %v, want %v", dep.ID, DepProtocolRegistry)
+	}
+
+	// FIXED: Verify Fixable is set (Issue #9)
+	if !dep.Fixable {
+		t.Error("checkProtocolRegistry() should be fixable")
+	}
+}
+
+// NEW: TestCheckGoModDependencies verifies go.mod check (Issue #9)
+func TestCheckGoModDependencies(t *testing.T) {
+	dep := checkGoModDependencies(false)
+
+	if dep.Name != "Go Module Dependencies" {
+		t.Errorf("checkGoModDependencies() name = %v, want 'Go Module Dependencies'", dep.Name)
+	}
+
+	// FIXED: Verify ID is set correctly (Issue #8)
+	if dep.ID != DepGoModDependencies {
+		t.Errorf("checkGoModDependencies() ID = %v, want %v", dep.ID, DepGoModDependencies)
+	}
+
+	// FIXED: Verify Fixable is set (Issue #9)
+	if !dep.Fixable {
+		t.Error("checkGoModDependencies() should be fixable")
+	}
+}
+
+// NEW: Test all DependencyIDs are unique (Issue #8)
+func TestDependencyIDsUnique(t *testing.T) {
+	ids := map[DependencyID]bool{
+		DepGo:                true,
+		DepRust:              true,
+		DepCargo:             true,
+		DepSimulator:         true,
+		DepCacheDir:          true,
+		DepProtocolRegistry:  true,
+		DepGoModDependencies: true,
+		DepConfigTOML:        true,
+		DepRPC:               true,
+	}
+
+	if len(ids) != 9 {
+		t.Errorf("expected 9 unique DependencyIDs, got %d", len(ids))
+	}
+}
+
+// NEW: Test that all dependencies have required fields set
+func TestDependencyStatusFieldsSet(t *testing.T) {
+	deps := []DependencyStatus{
+		checkGo(false),
+		checkRust(false),
+		checkCargo(false),
+		checkSimulator(false),
+		checkCacheDir(false),
+		checkProtocolRegistry(false),
+		checkGoModDependencies(false),
+		checkConfigTOML(false),
+		checkRPC(false),
+	}
+
+	for _, dep := range deps {
+		if dep.ID == "" {
+			t.Errorf("dependency %s has empty ID", dep.Name)
+		}
+		if dep.Name == "" {
+			t.Errorf("dependency with ID %s has empty Name", dep.ID)
+		}
+		if dep.FixHint == "" && !dep.Installed {
+			t.Errorf("dependency %s has empty FixHint when not installed", dep.Name)
+		}
 	}
 }
 

@@ -22,10 +22,10 @@ func TestMarkFailureSuccessRace(t *testing.T) {
 	wg.Add(goroutines * 4)
 
 	for i := 0; i < goroutines; i++ {
-		go func() { defer wg.Done(); c.markHorizonFailure() }()
-		go func() { defer wg.Done(); c.markHorizonSuccess() }()
-		go func() { defer wg.Done(); c.markSorobanFailure() }()
-		go func() { defer wg.Done(); c.markSorobanSuccess() }()
+		go func() { defer wg.Done(); c.markFailure(c.HorizonURL) }()
+		go func() { defer wg.Done(); c.markSuccess(c.HorizonURL) }()
+		go func() { defer wg.Done(); c.markFailure(c.SorobanURL) }()
+		go func() { defer wg.Done(); c.markSuccess(c.SorobanURL) }()
 	}
 
 	wg.Wait()

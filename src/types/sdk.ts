@@ -1,6 +1,10 @@
 // Copyright (c) Hintents Authors.
 // SPDX-License-Identifier: Apache-2.0
 
+export type PublicKeyPEM = Brand<string, 'PublicKeyPEM'>;
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 // src/types/sdk.ts
 // Copyright (c) Hintents Authors.
 // SPDX-License-Identifier: Apache-2.0

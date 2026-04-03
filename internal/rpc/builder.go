@@ -38,7 +38,7 @@ type clientBuilder struct {
 	cacheEnabled    bool
 	methodTelemetry MethodTelemetry
 	config          *NetworkConfig
-	httpClient      *http.Client
+	httpClient      HTTPClient
 	requestTimeout  time.Duration
 	middlewares     []Middleware
 	loggingEnabled  bool
@@ -142,7 +142,7 @@ func WithRequestTimeout(d time.Duration) ClientOption {
 	}
 }
 
-func WithHTTPClient(client *http.Client) ClientOption {
+func WithHTTPClient(client HTTPClient) ClientOption {
 	return func(b *clientBuilder) error {
 		b.httpClient = client
 		return nil
@@ -272,6 +272,14 @@ func (b *clientBuilder) build() (*Client, error) {
 		b.config = &cfg
 	}
 
+	if b.horizonURL == "" {
+		b.horizonURL = b.config.HorizonURL
+	}
+
+	if len(b.altURLs) == 0 {
+		b.altURLs = []string{b.horizonURL}
+	}
+
 	if b.httpClient == nil {
 		mws := b.middlewares
 		if b.loggingEnabled {
@@ -321,5 +329,17 @@ func (b *clientBuilder) build() (*Client, error) {
 		middlewares:           b.middlewares,
 		circuitBreakerThreshold: b.circuitBreakerThreshold,
 		circuitBreakerTimeout:   b.circuitBreakerTimeout,
+		Network:         b.network,
+		SorobanURL:      b.sorobanURL,
+		AltURLs:         b.altURLs,
+		httpClient:      b.httpClient,
+		token:           b.token,
+		Config:          *b.config,
+		CacheEnabled:    b.cacheEnabled,
+		methodTelemetry: b.methodTelemetry,
+		failures:        make(map[string]int),
+		lastFailure:     make(map[string]time.Time),
+		middlewares:     b.middlewares,
+		healthCollector: NewHealthCollector(),
 	}, nil
 }

@@ -36,24 +36,97 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
-// Retrier handles HTTP request retries with exponential backoff and jitter
-type Retrier struct {
+// retryLogic holds the shared retry behavior used by both Retrier and RetryTransport.
+// Embedding this struct in either type promotes its methods, eliminating duplicated code
+// while keeping each type's transport/client wiring independent.
+type retryLogic struct {
 	config RetryConfig
+}
+
+// shouldRetry reports whether the given HTTP status code warrants a retry.
+func (rl retryLogic) shouldRetry(statusCode int) bool {
+	for _, code := range rl.config.StatusCodesToRetry {
+		if statusCode == code {
+			return true
+		}
+	}
+	return false
+}
+
+// getRetryAfter parses the Retry-After response header.
+// Supports both integer-seconds and RFC 1123 HTTP-date formats (RFC 7231 §7.1.3).
+func (rl retryLogic) getRetryAfter(resp *http.Response) time.Duration {
+	retryAfter := resp.Header.Get("Retry-After")
+	if retryAfter == "" {
+		return 0
+	}
+
+	// Try parsing as seconds (integer)
+	if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+
+	// Try parsing as HTTP-date
+	if t, err := time.Parse(time.RFC1123, retryAfter); err == nil {
+		dur := time.Until(t)
+		if dur > 0 {
+			return dur
+		}
+	}
+
+	return 0
+}
+
+// nextBackoff calculates the next wait duration using exponential backoff with full jitter.
+// Full jitter prevents thundering-herd problems when many clients retry simultaneously.
+func (rl retryLogic) nextBackoff(current time.Duration) time.Duration {
+	// Exponential backoff: double the current duration, capped at MaxBackoff
+	next := time.Duration(float64(current) * 2)
+	if next > rl.config.MaxBackoff {
+		next = rl.config.MaxBackoff
+	}
+
+	// Full jitter: random value in [0, next*(1+JitterFraction))
+	if rl.config.JitterFraction > 0 {
+		maxJitter := float64(next) * (1.0 + rl.config.JitterFraction)
+		jitter := time.Duration(rand.Float64() * maxJitter)
+		next = jitter
+		if next < 0 {
+			next = 0
+		}
+	}
+
+	return next
+}
+
+// waitWithContext sleeps for duration or returns early when ctx is cancelled.
+func (rl retryLogic) waitWithContext(ctx context.Context, duration time.Duration) error {
+	select {
+	case <-time.After(duration):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Retrier handles HTTP request retries with exponential backoff and jitter.
+type Retrier struct {
+	retryLogic
 	client *http.Client
 }
 
-// NewRetrier creates a new Retrier with the given config and HTTP client
+// NewRetrier creates a new Retrier with the given config and HTTP client.
 func NewRetrier(config RetryConfig, client *http.Client) *Retrier {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	return &Retrier{
-		config: config,
-		client: client,
+		retryLogic: retryLogic{config: config},
+		client:     client,
 	}
 }
 
-// Do executes an HTTP request with retry logic
+// Do executes an HTTP request with retry logic.
 func (r *Retrier) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	var lastErr error
 	backoff := r.config.InitialBackoff
@@ -114,92 +187,24 @@ func (r *Retrier) Do(ctx context.Context, req *http.Request) (*http.Response, er
 	return nil, errors.WrapRPCConnectionFailed(lastErr)
 }
 
-// shouldRetry determines if the response status code warrants a retry
-func (r *Retrier) shouldRetry(statusCode int) bool {
-	for _, code := range r.config.StatusCodesToRetry {
-		if statusCode == code {
-			return true
-		}
-	}
-	return false
-}
-
-// getRetryAfter parses the Retry-After header and returns the duration
-// Supports both "seconds" and "HTTP-date" formats (RFC 7231)
-func (r *Retrier) getRetryAfter(resp *http.Response) time.Duration {
-	retryAfter := resp.Header.Get("Retry-After")
-	if retryAfter == "" {
-		return 0
-	}
-
-	// Try parsing as seconds (integer)
-	if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds > 0 {
-		return time.Duration(seconds) * time.Second
-	}
-
-	// Try parsing as HTTP-date
-	if t, err := time.Parse(time.RFC1123, retryAfter); err == nil {
-		dur := time.Until(t)
-		if dur > 0 {
-			return dur
-		}
-	}
-
-	return 0
-}
-
-// nextBackoff calculates the next backoff duration with exponential backoff and jitter
-// Uses full jitter to prevent thundering herd problems when multiple clients retry simultaneously
-func (r *Retrier) nextBackoff(current time.Duration) time.Duration {
-	// Exponential backoff: double the current duration
-	next := time.Duration(float64(current) * 2)
-	if next > r.config.MaxBackoff {
-		next = r.config.MaxBackoff
-	}
-
-	// Add full jitter: random value between 0 and next duration
-	// This prevents thundering herd by spreading retry attempts randomly
-	if r.config.JitterFraction > 0 {
-		// Full jitter: random between 0 and next * (1 + JitterFraction)
-		maxJitter := float64(next) * (1.0 + r.config.JitterFraction)
-		jitter := time.Duration(rand.Float64() * maxJitter)
-		next = jitter
-		if next < 0 {
-			next = 0
-		}
-	}
-
-	return next
-}
-
-// waitWithContext waits for the specified duration or until context is cancelled
-func (r *Retrier) waitWithContext(ctx context.Context, duration time.Duration) error {
-	select {
-	case <-time.After(duration):
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// RetryTransport is an http.RoundTripper that adds retry logic to requests
+// RetryTransport is an http.RoundTripper that adds retry logic to every request.
 type RetryTransport struct {
-	config    RetryConfig
+	retryLogic
 	transport http.RoundTripper
 }
 
-// NewRetryTransport creates a new RetryTransport with the given config
+// NewRetryTransport creates a new RetryTransport with the given config.
 func NewRetryTransport(config RetryConfig, transport http.RoundTripper) *RetryTransport {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
 	return &RetryTransport{
-		config:    config,
-		transport: transport,
+		retryLogic: retryLogic{config: config},
+		transport:  transport,
 	}
 }
 
-// RoundTrip implements http.RoundTripper interface with retry logic
+// RoundTrip implements http.RoundTripper with retry logic.
 func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	var lastErr error
 	backoff := rt.config.InitialBackoff
@@ -258,71 +263,4 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, errors.WrapRPCConnectionFailed(lastErr)
-}
-
-// shouldRetry determines if the response status code warrants a retry
-func (rt *RetryTransport) shouldRetry(statusCode int) bool {
-	for _, code := range rt.config.StatusCodesToRetry {
-		if statusCode == code {
-			return true
-		}
-	}
-	return false
-}
-
-// getRetryAfter parses the Retry-After header and returns the duration
-func (rt *RetryTransport) getRetryAfter(resp *http.Response) time.Duration {
-	retryAfter := resp.Header.Get("Retry-After")
-	if retryAfter == "" {
-		return 0
-	}
-
-	// Try parsing as seconds (integer)
-	if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds > 0 {
-		return time.Duration(seconds) * time.Second
-	}
-
-	// Try parsing as HTTP-date
-	if t, err := time.Parse(time.RFC1123, retryAfter); err == nil {
-		dur := time.Until(t)
-		if dur > 0 {
-			return dur
-		}
-	}
-
-	return 0
-}
-
-// nextBackoff calculates the next backoff duration with exponential backoff and jitter
-// Uses full jitter to prevent thundering herd problems when multiple clients retry simultaneously
-func (rt *RetryTransport) nextBackoff(current time.Duration) time.Duration {
-	// Exponential backoff: double the current duration
-	next := time.Duration(float64(current) * 2)
-	if next > rt.config.MaxBackoff {
-		next = rt.config.MaxBackoff
-	}
-
-	// Add full jitter: random value between 0 and next duration
-	// This prevents thundering herd by spreading retry attempts randomly
-	if rt.config.JitterFraction > 0 {
-		// Full jitter: random between 0 and next * (1 + JitterFraction)
-		maxJitter := float64(next) * (1.0 + rt.config.JitterFraction)
-		jitter := time.Duration(rand.Float64() * maxJitter)
-		next = jitter
-		if next < 0 {
-			next = 0
-		}
-	}
-
-	return next
-}
-
-// waitWithContext waits for the specified duration or until context is cancelled
-func (rt *RetryTransport) waitWithContext(ctx context.Context, duration time.Duration) error {
-	select {
-	case <-time.After(duration):
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }

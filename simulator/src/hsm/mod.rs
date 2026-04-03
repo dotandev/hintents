@@ -7,6 +7,7 @@
 //! by different cryptographic backends, including software-based signers
 //! and PKCS#11 HSM signers.
 
+pub mod mock;
 pub mod pkcs11;
 pub mod software;
 
@@ -102,12 +103,23 @@ impl SignerFactory {
     pub async fn create_from_config(config: &SignerConfig) -> Result<Box<dyn Signer>, SignerError> {
         match config.signer_type.as_str() {
             "software" => {
-                let software_signer = software::SoftwareSigner::from_config(config)?;
+                let software_config = config.software.as_ref().ok_or_else(|| {
+                    SignerError::Config("Software signer config not provided".to_string())
+                })?;
+                let software_signer = software::SoftwareSigner::from_config(software_config)?;
                 Ok(Box::new(software_signer))
             }
             "pkcs11" => {
-                let pkcs11_signer = pkcs11::Pkcs11Signer::from_config(config).await?;
+                let pkcs11_config = config.pkcs11.clone().ok_or_else(|| {
+                    SignerError::Config("PKCS#11 signer config not provided".to_string())
+                })?;
+                let pkcs11_signer = pkcs11::Pkcs11Signer::from_config(pkcs11_config).await?;
                 Ok(Box::new(pkcs11_signer))
+            }
+            "mock" => {
+                let mock_config = config.mock.clone().unwrap_or_default();
+                let mock_hsm = mock::MockHsm::from_config(&mock_config)?;
+                Ok(Box::new(mock_hsm))
             }
             other => Err(SignerError::Config(format!(
                 "Unsupported signer type: {}",
@@ -126,7 +138,7 @@ impl SignerFactory {
 /// Configuration for signer creation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignerConfig {
-    /// Type of signer to create ("software", "pkcs11")
+    /// Type of signer to create ("software", "pkcs11", "mock")
     pub signer_type: String,
 
     /// Algorithm to use ("ed25519", "secp256k1")
@@ -137,22 +149,26 @@ pub struct SignerConfig {
 
     /// PKCS#11 signer configuration
     pub pkcs11: Option<Pkcs11SignerConfig>,
+
+    /// Mock HSM configuration
+    pub mock: Option<MockHsmConfig>,
 }
 
 impl SignerConfig {
     /// Create configuration from environment variables
     pub fn from_env() -> Result<Self, SignerError> {
-        let signer_type = std::env::var("ERST_SIGNER_TYPE")
-            .unwrap_or_else(|_| "software".to_string());
+        let signer_type =
+            std::env::var("ERST_SIGNER_TYPE").unwrap_or_else(|_| "software".to_string());
 
-        let algorithm = std::env::var("ERST_SIGNER_ALGORITHM")
-            .unwrap_or_else(|_| "ed25519".to_string());
+        let algorithm =
+            std::env::var("ERST_SIGNER_ALGORITHM").unwrap_or_else(|_| "ed25519".to_string());
 
         let mut config = SignerConfig {
             signer_type,
             algorithm,
             software: None,
             pkcs11: None,
+            mock: None,
         };
 
         match config.signer_type.as_str() {
@@ -161,6 +177,9 @@ impl SignerConfig {
             }
             "pkcs11" => {
                 config.pkcs11 = Some(Pkcs11SignerConfig::from_env()?);
+            }
+            "mock" => {
+                config.mock = Some(MockHsmConfig::from_env());
             }
             _ => {}
         }
@@ -240,6 +259,46 @@ impl Pkcs11SignerConfig {
     }
 }
 
+/// Configuration for mock HSM signer
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MockHsmConfig {
+    /// Simulated signing latency in milliseconds
+    pub latency_ms: u64,
+
+    /// Probability of signing failure (0.0 to 1.0)
+    pub failure_rate: f64,
+
+    /// Optional seed for deterministic key generation (hex-encoded 32 bytes)
+    pub seed_hex: Option<String>,
+}
+
+impl Default for MockHsmConfig {
+    fn default() -> Self {
+        Self {
+            latency_ms: 0,
+            failure_rate: 0.0,
+            seed_hex: None,
+        }
+    }
+}
+
+impl MockHsmConfig {
+    /// Create configuration from environment variables
+    pub fn from_env() -> Self {
+        Self {
+            latency_ms: std::env::var("ERST_MOCK_HSM_LATENCY_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            failure_rate: std::env::var("ERST_MOCK_HSM_FAILURE_RATE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0),
+            seed_hex: std::env::var("ERST_MOCK_HSM_SEED").ok(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,7 +326,7 @@ mod tests {
         // Temporarily unset environment variables
         let _type = std::env::var("ERST_SIGNER_TYPE");
         let _algo = std::env::var("ERST_SIGNER_ALGORITHM");
-        
+
         std::env::remove_var("ERST_SIGNER_TYPE");
         std::env::remove_var("ERST_SIGNER_ALGORITHM");
 

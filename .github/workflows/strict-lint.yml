@@ -81,12 +81,15 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Reclaim runner temp space before lint
+        run: bash ../scripts/ci-clean-build-space.sh
+
       - name: Cache Cargo dependencies and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: simulator -> target
           prefix-key: ${{ runner.os }}-rust-strict-stable
-          cache-targets: true
+          cache-targets: false
 
       - name: Check formatting
         run: |
@@ -111,6 +114,10 @@ jobs:
             exit 1
           }
           echo " Clippy checks passed"
+
+      - name: Reclaim runner temp space after lint
+        if: always()
+        run: bash ../scripts/ci-clean-build-space.sh
 
 
   # ============================================

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/simulator"
@@ -47,24 +48,26 @@ var exportCmd = &cobra.Command{
 			fmt.Println("Warning: No ledger entries found in the current session.")
 		}
 
-		var memoryDump []byte
+		var encodedMemory string
 		if exportIncludeMemoryFlag {
-			var simResp simulator.SimulationResponse
-			if err := json.Unmarshal([]byte(data.SimResponseJSON), &simResp); err != nil {
+			memoryBase64, err := extractLinearMemoryBase64(data.SimResponseJSON)
+			if err != nil {
 				return errors.WrapUnmarshalFailed(err, "simulation response")
 			}
-			if simResp.LinearMemoryDump == "" {
+			if memoryBase64 == "" {
 				fmt.Println("Warning: Simulator response does not include a linear memory dump.")
 			} else {
-				decoded, err := base64.StdEncoding.DecodeString(simResp.LinearMemoryDump)
-				if err != nil {
+				if _, err := base64.StdEncoding.DecodeString(memoryBase64); err != nil {
 					return errors.WrapValidationError(fmt.Sprintf("failed to decode simulator linear memory dump: %v", err))
 				}
-				memoryDump = decoded
+				encodedMemory = memoryBase64
 			}
 		}
 
-		snap := snapshot.FromMapWithOptions(simReq.LedgerEntries, snapshot.BuildOptions{LinearMemory: memoryDump})
+		snap := snapshot.FromMap(simReq.LedgerEntries)
+		if encodedMemory != "" {
+			snap.LinearMemory = encodedMemory
+		}
 
 		// Save
 		if err := snapshot.Save(exportSnapshotFlag, snap); err != nil {
@@ -73,7 +76,8 @@ var exportCmd = &cobra.Command{
 
 		fmt.Printf("Snapshot exported to %s (%d entries)\n", exportSnapshotFlag, len(snap.LedgerEntries))
 		if snap.LinearMemory != "" {
-			fmt.Printf("Included linear memory dump: %d bytes (base64)\n", len(memoryDump))
+			decodedBytes := base64.StdEncoding.DecodedLen(len(snap.LinearMemory)) - strings.Count(snap.LinearMemory, "=")
+			fmt.Printf("Included linear memory dump: %d bytes\n", decodedBytes)
 		}
 		return nil
 	},
@@ -164,12 +168,17 @@ func extractLinearMemoryBase64(simResponseJSON string) (string, error) {
 	}
 
 	var payload struct {
+		LinearMemoryDump   string `json:"linear_memory_dump"`
 		LinearMemoryBase64 string `json:"linear_memory_base64"`
 		LinearMemory       string `json:"linear_memory"`
 	}
 
 	if err := json.Unmarshal([]byte(simResponseJSON), &payload); err != nil {
 		return "", err
+	}
+
+	if payload.LinearMemoryDump != "" {
+		return payload.LinearMemoryDump, nil
 	}
 
 	if payload.LinearMemoryBase64 != "" {

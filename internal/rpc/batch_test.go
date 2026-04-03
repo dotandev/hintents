@@ -191,11 +191,13 @@ func makeKeys(n int) []string {
 
 // newMockSorobanServer creates an httptest.Server that echoes back entries for
 // every key present in the known set, matching the getLedgerEntries RPC shape.
+// Returned XDR entries are valid and pass cryptographic verification.
 func newMockSorobanServer(t *testing.T, known []string) *httptest.Server {
 	t.Helper()
-	index := make(map[string]struct{}, len(known))
+	// Pre-build valid entries for the known keys.
+	index := make(map[string]string, len(known))
 	for _, k := range known {
-		index[k] = struct{}{}
+		index[k] = buildValidEntryB64(k)
 	}
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -217,10 +219,10 @@ func newMockSorobanServer(t *testing.T, known []string) *httptest.Server {
 		var entries []entry
 		if len(req.Params) > 0 {
 			for _, k := range req.Params[0] {
-				if _, ok := index[k]; ok {
+				if xdrB64, ok := index[k]; ok {
 					entries = append(entries, entry{
 						Key:                k,
-						Xdr:                "xdr-" + k,
+						Xdr:                xdrB64,
 						LastModifiedLedger: 100,
 						LiveUntilLedger:    200,
 					})

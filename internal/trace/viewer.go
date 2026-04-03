@@ -5,11 +5,14 @@ package trace
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/dotandev/hintents/internal/dwarf"
@@ -25,6 +28,19 @@ type InteractiveViewer struct {
 	hideStdLib  bool
 	trap        *TrapInfo
 	dwarfParser *dwarf.Parser
+	navHistory  *NavigatorHistory // undo stack for Ctrl+Z navigation
+	stateMu     sync.RWMutex
+	stateCache  map[int]*ExecutionState
+	fetching    map[int]bool
+	fetchErr    map[int]string
+	fetchCh     chan fetchedState
+	fetchDelay  time.Duration
+}
+
+type fetchedState struct {
+	step  int
+	state *ExecutionState
+	err   error
 }
 
 // NewInteractiveViewer creates a new interactive trace viewer
@@ -34,6 +50,11 @@ func NewInteractiveViewer(trace *ExecutionTrace) *InteractiveViewer {
 		reader:      bufio.NewReader(os.Stdin),
 		eventFilter: "",
 		filterCycle: []string{"", EventTypeTrap, EventTypeContractCall, EventTypeHostFunction, EventTypeAuth},
+		navHistory:  NewNavigatorHistory(),
+		stateCache:  make(map[int]*ExecutionState),
+		fetching:    make(map[int]bool),
+		fetchErr:    make(map[int]string),
+		fetchCh:     make(chan fetchedState, 32),
 	}
 
 	// Detect any traps in the trace
@@ -50,6 +71,11 @@ func NewInteractiveViewerWithWASM(trace *ExecutionTrace, wasmData []byte) *Inter
 		reader:      bufio.NewReader(os.Stdin),
 		eventFilter: "",
 		filterCycle: []string{"", EventTypeTrap, EventTypeContractCall, EventTypeHostFunction, EventTypeAuth},
+		navHistory:  NewNavigatorHistory(),
+		stateCache:  make(map[int]*ExecutionState),
+		fetching:    make(map[int]bool),
+		fetchErr:    make(map[int]string),
+		fetchCh:     make(chan fetchedState, 32),
 	}
 
 	// Initialize DWARF parser if WASM data is provided
@@ -99,6 +125,13 @@ func (v *InteractiveViewer) Start() error {
 				fmt.Print("\n")
 				v.displayCurrentState()
 				fmt.Print("\n> ")
+			case fetched := <-v.fetchCh:
+				v.handleFetchedState(fetched)
+				if fetched.step == v.trace.CurrentStep {
+					fmt.Print("\n")
+					v.displayCurrentState()
+					fmt.Print("\n> ")
+				}
 			case <-done:
 				return
 			}
@@ -142,6 +175,13 @@ func (v *InteractiveViewer) handleCommand(command string) bool {
 	cmdExact := parts[0]
 	cmd := strings.ToLower(cmdExact)
 
+	// Handle case-sensitive single-character shortcuts before the lowercased switch.
+	// '$' and 'G' both jump to the final instruction.
+	if cmdExact == "$" || cmdExact == "G" {
+		v.jumpToEnd()
+		return false
+	}
+
 	// Handle case-sensitive 'S' for the stdlib toggle before the lowercased switch
 	if cmdExact == "S" {
 		v.hideStdLib = !v.hideStdLib
@@ -155,17 +195,22 @@ func (v *InteractiveViewer) handleCommand(command string) bool {
 
 	switch cmd {
 	case "n", "next", "forward":
+		v.navHistory.Push(v.trace.CurrentStep)
 		v.stepForward()
-	case "p", "prev", "back", "backward":
+	case "b", "p", "prev", "back", "backward":
+		v.navHistory.Push(v.trace.CurrentStep)
 		v.stepBackward()
 	case "f", "filter":
 		v.cycleEventFilter()
 	case "j", "jump":
 		if len(parts) > 1 {
+			v.navHistory.Push(v.trace.CurrentStep)
 			v.jumpToStep(parts[1])
 		} else {
 			fmt.Println("Usage: jump <step_number>")
 		}
+	case "u", "undo":
+		v.undoNavigation()
 	case "s", "show", "state":
 		v.displayCurrentState()
 	case "r", "reconstruct":
@@ -191,6 +236,8 @@ func (v *InteractiveViewer) handleCommand(command string) bool {
 	case "q", "quit", "exit":
 		fmt.Printf("Goodbye! %s\n", visualizer.Symbol("wave"))
 		return true
+	case "0", "rewind":
+		v.rewindToStart()
 	case "y", "yank", "copy":
 		if len(parts) > 1 {
 			v.handleYank(parts[1:])
@@ -202,6 +249,45 @@ func (v *InteractiveViewer) handleCommand(command string) bool {
 	}
 
 	return false
+}
+
+// rewindToStart resets the viewer to step 0, clearing filters and search state.
+func (v *InteractiveViewer) rewindToStart() {
+	if len(v.trace.States) == 0 {
+		fmt.Printf("%s No states to rewind to\n", visualizer.Error())
+		return
+	}
+
+	v.trace.CurrentStep = 0
+	v.eventFilter = ""
+
+	state, err := v.trace.GetCurrentState()
+	if err != nil {
+		fmt.Printf("%s %s\n", visualizer.Error(), err)
+		return
+	}
+
+	fmt.Printf("%s Rewound to step 0\n", visualizer.Symbol("target"))
+	_ = state
+	v.displayCurrentState()
+}
+
+// undoNavigation pops the last navigation index from the history stack and jumps back.
+func (v *InteractiveViewer) undoNavigation() {
+	idx, ok := v.navHistory.Pop()
+	if !ok {
+		fmt.Printf("%s Nothing to undo\n", visualizer.Symbol("arrow_l"))
+		return
+	}
+
+	state, err := v.trace.JumpToStep(idx)
+	if err != nil {
+		fmt.Printf("%s %s\n", visualizer.Error(), err)
+		return
+	}
+
+	fmt.Printf("%s Undo: returned to step %d\n", visualizer.Symbol("arrow_l"), state.Step)
+	v.displayCurrentState()
 }
 
 // stepForward moves to the next step, respecting the event filter and hideStdLib toggle.
@@ -289,6 +375,26 @@ func (v *InteractiveViewer) jumpToStep(stepStr string) {
 	v.displayCurrentState()
 }
 
+// jumpToEnd moves the cursor to the final instruction, loads its state, and
+// prints it. It mirrors the behaviour of the $ / G shortcut found in
+// vi-style navigation.
+func (v *InteractiveViewer) jumpToEnd() {
+	if len(v.trace.States) == 0 {
+		fmt.Printf("%s No instructions in trace\n", visualizer.Error())
+		return
+	}
+
+	lastStep := len(v.trace.States) - 1
+	state, err := v.trace.JumpToStep(lastStep)
+	if err != nil {
+		fmt.Printf("%s %s\n", visualizer.Error(), err)
+		return
+	}
+
+	fmt.Printf("%s Jumped to final instruction (step %d)\n", visualizer.Symbol("target"), state.Step)
+	v.displayCurrentState()
+}
+
 // displayCurrentState shows the current execution state, reflowing long
 // contract IDs and XDR strings to fit the current terminal width.
 func (v *InteractiveViewer) displayCurrentState() {
@@ -344,13 +450,157 @@ func (v *InteractiveViewer) displayCurrentState() {
 		}
 	}
 
-	// Show memory/state summary
-	if len(state.HostState) > 0 {
-		fmt.Printf("Host State: %d entries\n", len(state.HostState))
+	panelState, panelErr, loading := v.resolvePanelState(state.Step)
+	if loading {
+		fmt.Println("[ FETCHING STATE... ]")
+	} else if panelErr != "" {
+		fmt.Printf("[ FETCH FAILED: %s ]\n", panelErr)
+	} else if panelState != nil {
+		if len(panelState.HostState) > 0 {
+			fmt.Printf("Host State: %d entries\n", len(panelState.HostState))
+		}
+		if len(panelState.Memory) > 0 {
+			fmt.Printf("Memory: %d entries\n", len(panelState.Memory))
+		}
 	}
-	if len(state.Memory) > 0 {
-		fmt.Printf("Memory: %d entries\n", len(state.Memory))
+}
+
+func (v *InteractiveViewer) resolvePanelState(step int) (*ExecutionState, string, bool) {
+	v.stateMu.RLock()
+	if cached, ok := v.stateCache[step]; ok {
+		errMsg := v.fetchErr[step]
+		v.stateMu.RUnlock()
+		return cached, errMsg, false
 	}
+	if v.fetching[step] {
+		errMsg := v.fetchErr[step]
+		v.stateMu.RUnlock()
+		return nil, errMsg, true
+	}
+	v.stateMu.RUnlock()
+
+	v.stateMu.Lock()
+	if cached, ok := v.stateCache[step]; ok {
+		errMsg := v.fetchErr[step]
+		v.stateMu.Unlock()
+		return cached, errMsg, false
+	}
+	if v.fetching[step] {
+		errMsg := v.fetchErr[step]
+		v.stateMu.Unlock()
+		return nil, errMsg, true
+	}
+	v.fetching[step] = true
+	delete(v.fetchErr, step)
+	v.stateMu.Unlock()
+
+	go v.fetchPanelState(step)
+	return nil, "", true
+}
+
+func (v *InteractiveViewer) fetchPanelState(step int) {
+	if v.fetchDelay > 0 {
+		time.Sleep(v.fetchDelay)
+	}
+	state, err := v.trace.ReconstructStateAt(step)
+	v.fetchCh <- fetchedState{step: step, state: state, err: err}
+}
+
+func (v *InteractiveViewer) handleFetchedState(f fetchedState) {
+	v.stateMu.Lock()
+	defer v.stateMu.Unlock()
+
+	delete(v.fetching, f.step)
+	if f.err != nil {
+		v.fetchErr[f.step] = f.err.Error()
+		return
+	}
+	v.stateCache[f.step] = f.state
+	delete(v.fetchErr, f.step)
+}
+
+func (v *InteractiveViewer) statusBarLine(state *ExecutionState) string {
+	if state == nil || len(v.trace.States) == 0 {
+		return "Step 0/0 | Payload: 0.0kb | Memory: 0.00mb | Snapshot ID: none"
+	}
+
+	payloadKB := bytesToKB(statePayloadSizeBytes(state))
+	memoryMB := bytesToMB(stateMemorySizeBytes(state))
+	snapshotID := v.snapshotIDForStep(state.Step)
+
+	return fmt.Sprintf(
+		"Step %d/%d | Payload: %.1fkb | Memory: %.2fmb | Snapshot ID: %s",
+		state.Step+1,
+		len(v.trace.States),
+		payloadKB,
+		memoryMB,
+		snapshotID,
+	)
+}
+
+func (v *InteractiveViewer) snapshotIDForStep(step int) string {
+	bestIdx := -1
+	bestStep := -1
+	for i := range v.trace.Snapshots {
+		s := v.trace.Snapshots[i]
+		if s.Step <= step && s.Step >= bestStep {
+			bestIdx = i
+			bestStep = s.Step
+		}
+	}
+	if bestIdx < 0 {
+		return "none"
+	}
+	return fmt.Sprintf("snap-%03d@%d", bestIdx, bestStep)
+}
+
+func statePayloadSizeBytes(state *ExecutionState) int {
+	if state == nil {
+		return 0
+	}
+	payload := struct {
+		Arguments      []interface{} `json:"arguments,omitempty"`
+		RawArguments   []string      `json:"raw_arguments,omitempty"`
+		ReturnValue    interface{}   `json:"return_value,omitempty"`
+		RawReturnValue string        `json:"raw_return_value,omitempty"`
+		HostState      interface{}   `json:"host_state,omitempty"`
+	}{
+		Arguments:      state.Arguments,
+		RawArguments:   state.RawArguments,
+		ReturnValue:    state.ReturnValue,
+		RawReturnValue: state.RawReturnValue,
+		HostState:      state.HostState,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return 0
+	}
+	return len(b)
+}
+
+func stateMemorySizeBytes(state *ExecutionState) int {
+	if state == nil || len(state.Memory) == 0 {
+		return 0
+	}
+	b, err := json.Marshal(state.Memory)
+	if err != nil {
+		return 0
+	}
+	return len(b)
+}
+
+func bytesToKB(n int) float64 {
+	if n <= 0 {
+		return 0
+	}
+	return float64(n) / 1024.0
+}
+
+func bytesToMB(n int) float64 {
+	if n <= 0 {
+		return 0
+	}
+	return float64(n) / (1024.0 * 1024.0)
 }
 
 // reconstructCurrentState reconstructs and displays the current state
@@ -560,8 +810,11 @@ func (v *InteractiveViewer) showHelp() {
 	fmt.Println(separator(termW))
 	fmt.Println("Navigation:")
 	fmt.Println("  n, next, forward        - Step forward")
-	fmt.Println("  p, prev, back           - Step backward")
+	fmt.Println("  b, p, prev, back        - Step backward")
 	fmt.Println("  j, jump <step>          - Jump to specific step")
+	fmt.Println("  $, G                    - Jump to final instruction (last step)")
+	fmt.Println("  0, rewind               - Rewind to beginning (step 0)")
+	fmt.Println("  u, undo (Ctrl+Z)        - Undo last navigation step")
 	fmt.Println()
 	fmt.Println("Display:")
 	fmt.Println("  s, show, state          - Show current state")

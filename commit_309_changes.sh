@@ -4,7 +4,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Commit script for Issue #309 — Split-Pane View
+# Commit script for Issue #309 â€” Split-Pane View
 # Run from the repo root.
 
 echo "=== Staging and committing Issue #309 changes ==="

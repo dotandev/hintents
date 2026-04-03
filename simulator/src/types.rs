@@ -14,6 +14,10 @@ pub struct SimulationRequest {
     pub envelope_xdr: String,
     pub result_meta_xdr: String,
     pub ledger_entries: Option<HashMap<String, String>>,
+    /// Zstd-compressed, base64-encoded ledger_entries produced by the Go bridge.
+    /// When present, takes precedence over the plain `ledger_entries` field.
+    #[serde(default)]
+    pub ledger_entries_zstd: Option<String>,
     pub contract_wasm: Option<String>,
     pub wasm_path: Option<String>, // Added for local loading
     #[serde(default)]
@@ -53,6 +57,13 @@ pub struct ResourceCalibration {
     pub ed25519_fixed: u64,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SnapshotMetadata {
+    pub id: String,
+    pub gas_consumed: u64,
+    pub call_stack_depth: u32,
+}
+
 #[derive(Debug, Serialize)]
 pub struct SimulationResponse {
     pub status: String,
@@ -87,7 +98,15 @@ pub struct DiagnosticEvent {
     pub data: String,
     pub in_successful_contract_call: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_metadata: Option<SnapshotMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub wasm_instruction: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mem: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,4 +131,20 @@ pub struct StructuredError {
     pub error_type: String,
     pub message: String,
     pub details: Option<String>,
+}
+
+/// Captures the ledger state at a specific point in time during simulation.
+///
+/// Serves as the foundation for the rollback mechanism, allowing the simulator
+/// to restore a prior state by replaying from a known-good snapshot.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StateSnapshot {
+    /// Base64-encoded ledger entries (key → entry XDR) at the snapshot point.
+    pub ledger_entries: HashMap<String, String>,
+    /// Ledger timestamp (seconds since Unix epoch) at the snapshot point.
+    pub timestamp: u64,
+    /// Index of the WASM instruction at which the snapshot was taken.
+    pub instruction_index: u32,
+    /// Contract events emitted between the previous snapshot and this one.
+    pub events: Vec<String>,
 }

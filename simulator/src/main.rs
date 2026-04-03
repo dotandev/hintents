@@ -5,9 +5,12 @@
 
 mod config;
 mod debug_host_fn;
+mod events;
 mod gas_optimizer;
 mod git_detector;
+mod ipc;
 mod runner;
+mod snapshot;
 mod source_map_cache;
 mod source_mapper;
 mod stack_trace;
@@ -54,7 +57,7 @@ fn init_logger() {
 }
 
 fn send_error(msg: String) {
-    let trace = WasmStackTrace::from_host_error(&msg);
+    let trace = WasmStackTrace::from_host_error(&msg, None);
     let res = SimulationResponse {
         status: "error".to_string(),
         error: Some(msg),
@@ -147,6 +150,20 @@ fn check_memory_limit_or_panic(host: &Host, memory_limit: Option<u64>) {
             }
         }
     }
+}
+
+fn load_ledger_entries(host: &Host, entries: &HashMap<String, String>) -> Result<usize, String> {
+    let mut loaded_entries = 0usize;
+    for (key_xdr, entry_xdr) in entries {
+        let key = snapshot::decode_ledger_key(key_xdr)
+            .map_err(|e| format!("Failed to parse LedgerKey XDR: {e}"))?;
+        let entry = snapshot::decode_ledger_entry(entry_xdr)
+            .map_err(|e| format!("Failed to parse LedgerEntry XDR: {e}"))?;
+        host.put_ledger_entry(key, entry)
+            .map_err(|e| format!("Failed to inject ledger entry: {e:?}"))?;
+        loaded_entries += 1;
+    }
+    Ok(loaded_entries)
 }
 
 fn execute_operations(
@@ -272,7 +289,11 @@ fn check_signature_verification_mocks(
     }
 }
 
-fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<CategorizedEvent> {
+fn categorize_events(
+    events: &soroban_env_host::events::Events,
+    cpu: Option<u64>,
+    mem: Option<u64>,
+) -> Vec<CategorizedEvent> {
     events
         .0
         .iter()
@@ -298,6 +319,8 @@ fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<Categoriz
             };
 
             let wasm_instruction = extract_wasm_instruction(&topics, &data);
+            let metadata = events::build_snapshot_metadata(0, topics.len() as u32);
+            let snapshot_id = Some(metadata.id.clone());
             CategorizedEvent {
                 category,
                 event: DiagnosticEvent {
@@ -315,6 +338,10 @@ fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<Categoriz
                     data,
                     wasm_instruction,
                     in_successful_contract_call: !e.failed_call,
+                    cpu,
+                    mem,
+                    snapshot_id,
+                    snapshot_metadata: Some(metadata),
                 },
             }
         })
@@ -456,10 +483,10 @@ fn main() {
                 }
                 let mapper = SourceMapper::new_with_options(wasm_bytes, request.no_cache);
                 if mapper.has_debug_symbols() {
-                    eprintln!("Debug symbols found in WASM");
+                    eprintln!("Debug symbols found in WASM. SourceMapper initialized.");
                     Some(mapper)
                 } else {
-                    eprintln!("No debug symbols found in WASM");
+                    eprintln!("No debug symbols found in WASM. SourceMapper not used.");
                     None
                 }
             }
@@ -497,6 +524,29 @@ fn main() {
 
     // Populate Host Storage
     if let Some(entries) = &request.ledger_entries {
+        match load_ledger_entries(&host, entries) {
+            Ok(count) => {
+                loaded_entries_count += count;
+            }
+            Err(err) => {
+                send_error(err);
+                return;
+            }
+    // Populate Host Storage — resolve ledger entries (plain or zstd-compressed).
+    let resolved_entries: Option<std::collections::HashMap<String, String>> =
+        if let Some(b64) = &request.ledger_entries_zstd {
+            match ipc::decompress::decompress_ledger_entries(b64) {
+                Ok(entries) => Some(entries),
+                Err(e) => {
+                    send_error(format!("Failed to decompress ledger entries: {}", e));
+                    return;
+                }
+            }
+        } else {
+            request.ledger_entries.clone()
+        };
+
+    if let Some(entries) = &resolved_entries {
         for (key_xdr, entry_xdr) in entries {
             match base64::engine::general_purpose::STANDARD.decode(key_xdr) {
                 Ok(b) => match soroban_env_host::xdr::LedgerKey::from_xdr(
@@ -630,10 +680,11 @@ fn main() {
 
     match result {
         Ok(Ok(exec_logs)) => {
-            let (events, _diag_evs): (Vec<String>, Vec<DiagnosticEvent>) = match host.get_events() {
+            let (events, diagnostic_events): (Vec<String>, Vec<DiagnosticEvent>) = match host
+                .get_events()
+            {
                 Ok(evs) => {
-                    let raw_events: Vec<String> =
-                        (evs.0).iter().map(|e| format!("{:?}", e)).collect();
+                    let mut raw_events: Vec<String> = Vec::with_capacity(evs.0.len());
                     let diag_events: Vec<DiagnosticEvent> = (evs.0)
                         .iter()
                         .map(|event| {
@@ -662,12 +713,17 @@ fn main() {
                             };
 
                             let wasm_instruction = extract_wasm_instruction(&topics, &data);
+                            let metadata =
+                                events::build_snapshot_metadata(cpu_insns, topics.len() as u32);
+                            raw_events.push(format!("{:?} [snapshot_id={}]", event, metadata.id));
                             DiagnosticEvent {
                                 event_type,
                                 contract_id,
                                 topics,
                                 data,
                                 in_successful_contract_call: !event.failed_call,
+                                snapshot_id: Some(metadata.id.clone()),
+                                snapshot_metadata: Some(metadata),
                                 wasm_instruction,
                             }
                         })
@@ -681,7 +737,7 @@ fn main() {
             };
 
             categorized_events = match host.get_events() {
-                Ok(evs) => categorize_events(&evs),
+                Ok(evs) => categorize_events(&evs, Some(cpu_insns), Some(mem_bytes)),
                 Err(_) => vec![],
             };
 
@@ -692,6 +748,11 @@ fn main() {
                 format!("CPU Instructions Used: {}", cpu_insns),
                 format!("Memory Bytes Used: {}", mem_bytes),
             ];
+            if let Some(first) = diagnostic_events.first() {
+                if let Some(snapshot_id) = &first.snapshot_id {
+                    final_logs.push(format!("First linked SnapshotID: {snapshot_id}"));
+                }
+            }
             let contract_debug_logs: Vec<String> = match host.get_events() {
                 Ok(ref evs) => debug_host_fn::extract_debug_logs(evs)
                     .into_iter()
@@ -782,7 +843,19 @@ fn main() {
             let error_debug = format!("{:?}", host_error);
             let _error_msg = format!("{:?}", host_error);
             let decoded_msg = decode_error(&error_debug);
-            let wasm_trace = WasmStackTrace::from_host_error(&error_debug);
+
+            let wasm_trace = WasmStackTrace::from_host_error(&error_debug, source_mapper.as_ref());
+
+            if wasm_trace
+                .frames
+                .iter()
+                .any(|f| f.source_location.is_some())
+            {
+                eprintln!("Source locations resolved for HostError trace.");
+            } else {
+                eprintln!("No source locations resolved for HostError trace.");
+            }
+
             let trace_display = wasm_trace.display();
 
             let _structured_error = StructuredError {
@@ -809,7 +882,7 @@ fn main() {
             ];
 
             let _categorized_events = match host.get_events() {
-                Ok(evs) => categorize_events(&evs),
+                Ok(evs) => categorize_events(&evs, Some(cpu_insns), Some(mem_bytes)),
                 Err(_) => vec![],
             };
 
@@ -917,7 +990,20 @@ fn main() {
                 "Unknown panic".to_string()
             };
 
-            let wasm_trace = WasmStackTrace::from_panic(&panic_msg);
+            let mut wasm_trace = WasmStackTrace::from_panic(&panic_msg);
+            if let Some(ref mapper) = source_mapper {
+                eprintln!("Attempting to resolve sources for Panic trace...");
+                wasm_trace.resolve_sources(mapper);
+                if wasm_trace
+                    .frames
+                    .iter()
+                    .any(|f| f.source_location.is_some())
+                {
+                    eprintln!("Source locations resolved for Panic trace.");
+                } else {
+                    eprintln!("No source locations resolved for Panic trace.");
+                }
+            }
             let memory_limit_exceeded = panic_msg.contains(ERR_MEMORY_LIMIT_EXCEEDED);
 
             let response = SimulationResponse {
@@ -1217,7 +1303,7 @@ mod tests {
 
         // failed_call = true  →  in_successful_contract_call must be false
         let evs_failed = Events(vec![make_event(true)]);
-        let categorized = categorize_events(&evs_failed);
+        let categorized = categorize_events(&evs_failed, None, None);
         assert_eq!(categorized.len(), 1);
         assert!(
             !categorized[0].event.in_successful_contract_call,
@@ -1226,7 +1312,7 @@ mod tests {
 
         // failed_call = false  →  in_successful_contract_call must be true
         let evs_ok = Events(vec![make_event(false)]);
-        let categorized = categorize_events(&evs_ok);
+        let categorized = categorize_events(&evs_ok, None, None);
         assert_eq!(categorized.len(), 1);
         assert!(
             categorized[0].event.in_successful_contract_call,
@@ -1263,7 +1349,7 @@ mod tests {
             make_typed_event(ContractEventType::Diagnostic),
         ]);
 
-        let cats = categorize_events(&evs);
+        let cats = categorize_events(&evs, None, None);
         assert_eq!(cats[0].category, "Contract");
         assert_eq!(cats[1].category, "System");
         assert_eq!(cats[2].category, "Diagnostic");
@@ -1359,5 +1445,42 @@ mod tests {
         assert!(report.contains("FNDA:1,InvokeContract::\"init\""));
         assert!(report.contains("FNF:2"));
         assert!(report.contains("FNH:2"));
+    }
+
+    #[test]
+    fn test_load_ledger_entries_injects_into_host() {
+        use base64::engine::general_purpose::STANDARD;
+        use soroban_env_host::xdr::{
+            ContractDataDurability, ContractDataEntry, Hash, LedgerEntry, LedgerEntryData,
+            LedgerEntryExt, LedgerKey, LedgerKeyContractData, ScAddress, ScVal, WriteXdr,
+        };
+
+        let contract_id = Hash([7u8; 32]);
+        let key = LedgerKey::ContractData(LedgerKeyContractData {
+            contract: ScAddress::Contract(contract_id),
+            key: ScVal::U32(5),
+            durability: ContractDataDurability::Persistent,
+        });
+        let entry = LedgerEntry {
+            last_modified_ledger_seq: 99,
+            data: LedgerEntryData::ContractData(ContractDataEntry {
+                ext: soroban_env_host::xdr::ExtensionPoint::V0,
+                contract: ScAddress::Contract(contract_id),
+                key: ScVal::U32(5),
+                durability: ContractDataDurability::Persistent,
+                val: ScVal::U64(9),
+            }),
+            ext: LedgerEntryExt::V0,
+        };
+
+        let mut entries = HashMap::new();
+        entries.insert(
+            STANDARD.encode(key.to_xdr(soroban_env_host::xdr::Limits::none()).unwrap()),
+            STANDARD.encode(entry.to_xdr(soroban_env_host::xdr::Limits::none()).unwrap()),
+        );
+
+        let host = runner::SimHost::new(None, None, None).inner;
+        let count = load_ledger_entries(&host, &entries).expect("failed to load entries");
+        assert_eq!(count, 1);
     }
 }
