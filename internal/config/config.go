@@ -28,6 +28,10 @@ type Validator interface {
 
 // -- Types --
 
+type DebugConfig struct {
+	EnableSnapshots bool `json:"enable_snapshots"`
+}
+
 type Network string
 
 const (

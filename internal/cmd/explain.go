@@ -4,9 +4,11 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/dotandev/hintents/internal/config"
 	"github.com/dotandev/hintents/internal/heuristic"
@@ -42,6 +44,23 @@ Examples:
 		}
 		if err := rpc.ValidateTransactionHash(args[0]); err != nil {
 			return fmt.Errorf("invalid transaction hash: %w", err)
+		}
+		if !cmd.Flags().Changed("network") {
+			token := explainRPCToken
+			if token == "" {
+				token = os.Getenv("ERST_RPC_TOKEN")
+			}
+			if token == "" {
+				if cfg, err := config.LoadConfig(); err == nil && cfg.RPCToken != "" {
+					token = cfg.RPCToken
+				}
+			}
+			probeCtx, probeCancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+			defer probeCancel()
+			if resolved, err := rpc.ResolveNetwork(probeCtx, args[0], token); err == nil {
+				explainNetworkFlag = string(resolved)
+				fmt.Printf("Resolved network: %s\n", explainNetworkFlag)
+			}
 		}
 		switch rpc.Network(explainNetworkFlag) {
 		case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:

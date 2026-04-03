@@ -24,8 +24,9 @@ type SimulationRequestBuilder struct {
 	resultMetaXdr   string
 	ledgerEntries   map[string]string
 	restorePreamble map[string]interface{}
-	mockBaseFee     *uint32
-	errors          []string
+	mockBaseFee               *uint32
+	enableOptimizationAdvisor bool
+	errors                    []string
 }
 
 // NewSimulationRequestBuilder creates a new builder instance.
@@ -101,6 +102,12 @@ func (b *SimulationRequestBuilder) WithMockBaseFee(baseFee uint32) *SimulationRe
 	return b
 }
 
+// WithOptimizationAdvisor enables the gas optimization advisor for the simulation.
+func (b *SimulationRequestBuilder) WithOptimizationAdvisor(enable bool) *SimulationRequestBuilder {
+	b.enableOptimizationAdvisor = enable
+	return b
+}
+
 // Build constructs and validates the final SimulationRequest.
 // Returns an error if required fields are missing or validation fails.
 func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
@@ -138,6 +145,8 @@ func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 		req.MockBaseFee = b.mockBaseFee
 	}
 
+	req.EnableOptimizationAdvisor = b.enableOptimizationAdvisor
+
 	return req, nil
 }
 
@@ -158,6 +167,7 @@ func (b *SimulationRequestBuilder) Reset() *SimulationRequestBuilder {
 	b.ledgerEntries = make(map[string]string)
 	b.restorePreamble = nil
 	b.mockBaseFee = nil
+	b.enableOptimizationAdvisor = false
 	b.errors = make([]string, 0)
 	return b
 }

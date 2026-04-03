@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/dotandev/hintents/internal/simulator"
 )
 
 // ExecutionState represents the state at a specific point in execution
@@ -110,6 +112,14 @@ func (t *ExecutionTrace) binarySearchSnapshot(targetStep int) int {
 	}
 
 	return result
+	TransactionHash  string                       `json:"transaction_hash"`
+	StartTime        time.Time                    `json:"start_time"`
+	EndTime          time.Time                    `json:"end_time"`
+	States           []ExecutionState             `json:"states"`
+	Snapshots        []StateSnapshot              `json:"snapshots"`
+	DiagnosticEvents []simulator.DiagnosticEvent `json:"diagnostic_events,omitempty"`
+	CurrentStep      int                          `json:"current_step"`
+	SnapshotInterval int                          `json:"snapshot_interval"`
 }
 
 // NewExecutionTrace creates a new execution trace.

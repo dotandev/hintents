@@ -4,7 +4,9 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,12 +22,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// DependencyID is a unique identifier for each dependency (Issue #8: type-safe dispatch)
+type DependencyID string
+
+const (
+	DepGo                DependencyID = "go"
+	DepRust              DependencyID = "rust"
+	DepCargo             DependencyID = "cargo"
+	DepSimulator         DependencyID = "simulator"
+	DepCacheDir          DependencyID = "cache_dir"
+	DepProtocolRegistry  DependencyID = "protocol_registry"
+	DepGoModDependencies DependencyID = "go_mod_dependencies"
+	DepConfigTOML        DependencyID = "toml_config"
+	DepRPC               DependencyID = "rpc"
+)
+
 type DependencyStatus struct {
+	ID        DependencyID // NEW: unique identifier for type-safe dispatch
 	Name      string
 	Installed bool
 	Version   string
 	Path      string
 	FixHint   string
+	Fixable   bool // NEW: indicates if this can be auto-fixed
 }
 
 var doctorCmd = &cobra.Command{
@@ -47,13 +66,21 @@ Use this to troubleshoot installation issues or verify your setup.`,
   erst doctor
 
   # View detailed diagnostics
-  erst doctor --verbose`,
+  erst doctor --verbose
+
+  # Fix common issues (with prompts)
+  erst doctor --fix
+
+  # Fix without prompts (CI mode)
+  erst doctor --fix --yes`,
 	Args: cobra.NoArgs,
 	RunE: runDoctor,
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
 	verbose, _ := cmd.Flags().GetBool("verbose")
+	fix, _ := cmd.Flags().GetBool("fix")
+	yes, _ := cmd.Flags().GetBool("yes")
 
 	fmt.Println("Erst Environment Diagnostics")
 	fmt.Println("=============================")
@@ -64,6 +91,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		checkRust(verbose),
 		checkCargo(verbose),
 		checkSimulator(verbose),
+		checkCacheDir(verbose),
+		checkProtocolRegistry(verbose),
+		checkGoModDependencies(verbose),
 		checkConfigTOML(verbose),
 		checkRPC(verbose),
 		checkDeepLink(verbose),
@@ -71,6 +101,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Print results
 	allOK := true
+	fixableCount := 0
 	for _, dep := range dependencies {
 		status := "[OK]"
 		statusColor := "\033[32m" // Green
@@ -78,6 +109,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			status = "[FAIL]"
 			statusColor = "\033[31m" // Red
 			allOK = false
+			if dep.Fixable {
+				fixableCount++
+				status = "[FAIL*]" // * indicates fixable
+			}
 		}
 
 		fmt.Printf("%s%s\033[0m %s", statusColor, status, dep.Name)
@@ -103,14 +138,29 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// NEW: Handle --fix mode
+	if fix {
+		fmt.Printf("\n\033[36m[FIX MODE]\033[0m Attempting to fix %d issue(s)\n", fixableCount)
+		if yes {
+			fmt.Println("(Running in non-interactive mode)")
+		}
+		fmt.Println()
+		return runFixers(dependencies, yes, verbose)
+	}
+
 	fmt.Println("\033[33m⚠ Some dependencies are missing. Follow the hints above to fix.\033[0m")
+	if fixableCount > 0 {
+		fmt.Printf("\nTip: Run 'erst doctor --fix' to attempt automatic fixes for %d issue(s).\n", fixableCount)
+	}
 	return nil
 }
 
 func checkGo(verbose bool) DependencyStatus {
 	dep := DependencyStatus{
+		ID:      DepGo,
 		Name:    "Go",
 		FixHint: "Install Go from https://go.dev/doc/install (requires Go 1.21+)",
+		Fixable: false, // Cannot auto-fix Go installation
 	}
 
 	goPath, err := exec.LookPath("go")
@@ -153,8 +203,10 @@ func checkGo(verbose bool) DependencyStatus {
 
 func checkRust(verbose bool) DependencyStatus {
 	dep := DependencyStatus{
+		ID:      DepRust,
 		Name:    "Rust (rustc)",
 		FixHint: "Install Rust from https://rustup.rs/ or run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+		Fixable: false,
 	}
 
 	rustcPath, err := exec.LookPath("rustc")
@@ -182,8 +234,10 @@ func checkRust(verbose bool) DependencyStatus {
 
 func checkCargo(verbose bool) DependencyStatus {
 	dep := DependencyStatus{
+		ID:      DepCargo,
 		Name:    "Cargo",
 		FixHint: "Cargo is included with Rust. Install from https://rustup.rs/",
+		Fixable: false,
 	}
 
 	cargoPath, err := exec.LookPath("cargo")
@@ -211,8 +265,10 @@ func checkCargo(verbose bool) DependencyStatus {
 
 func checkSimulator(verbose bool) DependencyStatus {
 	dep := DependencyStatus{
+		ID:      DepSimulator,
 		Name:    "Simulator Binary (erst-sim)",
 		FixHint: "Build the simulator: cd simulator && cargo build --release",
+		Fixable: true, // CAN be auto-fixed
 	}
 
 	// Check multiple possible locations
@@ -251,12 +307,130 @@ func checkSimulator(verbose bool) DependencyStatus {
 	return dep
 }
 
+// checkCacheDir verifies the cache directory exists (NEW: Issue #9)
+func checkCacheDir(verbose bool) DependencyStatus {
+	dep := DependencyStatus{
+		ID:      DepCacheDir,
+		Name:    "Cache directory (~/.erst)",
+		FixHint: "Run 'erst doctor --fix' to create cache directory",
+		Fixable: true, // CAN be auto-fixed
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		dep.FixHint = "Failed to determine home directory"
+		return dep
+	}
+
+	cacheDir := filepath.Join(homeDir, ".erst")
+
+	// Check if cache directory exists
+	if _, err := os.Stat(cacheDir); err != nil {
+		if os.IsNotExist(err) {
+			return dep // Not installed
+		}
+		dep.FixHint = fmt.Sprintf("Cache directory exists but inaccessible: %v", err)
+		return dep
+	}
+
+	// Verify subdirectories exist
+	requiredDirs := []string{"transactions", "protocols", "contracts"}
+	for _, subdir := range requiredDirs {
+		path := filepath.Join(cacheDir, subdir)
+		if _, err := os.Stat(path); err != nil {
+			dep.FixHint = fmt.Sprintf("Missing subdirectory: %s", subdir)
+			return dep
+		}
+	}
+
+	dep.Installed = true
+	dep.Path = cacheDir
+	dep.Version = "configured"
+	return dep
+}
+
+// checkProtocolRegistry verifies the protocol registry exists (NEW: Issue #9)
+func checkProtocolRegistry(verbose bool) DependencyStatus {
+	dep := DependencyStatus{
+		ID:      DepProtocolRegistry,
+		Name:    "Protocol Registry",
+		FixHint: "Run 'erst doctor --fix' to initialize protocol registry",
+		Fixable: true,
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		dep.FixHint = "Failed to determine home directory"
+		return dep
+	}
+
+	registryFile := filepath.Join(homeDir, ".erst", "protocols", "registered.json")
+
+	// Check if registry file exists and is valid
+	if _, err := os.Stat(registryFile); err != nil {
+		if os.IsNotExist(err) {
+			return dep // Not installed, but fixable
+		}
+		dep.FixHint = fmt.Sprintf("Registry file exists but inaccessible: %v", err)
+		return dep
+	}
+
+	// Verify it's valid JSON
+	data, err := os.ReadFile(registryFile)
+	if err != nil {
+		dep.FixHint = fmt.Sprintf("Failed to read registry: %v", err)
+		return dep
+	}
+
+	var registry map[string]interface{}
+	if err := json.Unmarshal(data, &registry); err != nil {
+		dep.FixHint = "Protocol registry is corrupted JSON"
+		return dep
+	}
+
+	dep.Installed = true
+	dep.Version = "configured"
+	return dep
+}
+
+// checkGoModDependencies verifies go.mod dependencies are synchronized (NEW: Issue #9)
+func checkGoModDependencies(verbose bool) DependencyStatus {
+	dep := DependencyStatus{
+		ID:      DepGoModDependencies,
+		Name:    "Go Module Dependencies",
+		FixHint: "Run 'erst doctor --fix' to resolve dependencies",
+		Fixable: true,
+	}
+
+	// Check if go.mod exists
+	if _, err := os.Stat("go.mod"); err != nil {
+		if os.IsNotExist(err) {
+			return dep // Not present
+		}
+		dep.FixHint = fmt.Sprintf("go.mod inaccessible: %v", err)
+		return dep
+	}
+
+	// Check go.sum exists
+	if _, err := os.Stat("go.sum"); err != nil {
+		if os.IsNotExist(err) {
+			return dep // Missing go.sum, needs fix
+		}
+	}
+
+	dep.Installed = true
+	dep.Version = "synchronized"
+	return dep
+}
+
 // checkConfigTOML verifies that any present configuration file can be parsed
 // as basic TOML (naive syntax check). Missing file is treated as OK.
 func checkConfigTOML(verbose bool) DependencyStatus {
 	dep := DependencyStatus{
+		ID:      DepConfigTOML,
 		Name:    "TOML config",
 		FixHint: "Fix syntax in .erst.toml or remove the malformed file",
+		Fixable: false,
 	}
 
 	paths := []string{
@@ -306,8 +480,10 @@ func checkConfigTOML(verbose bool) DependencyStatus {
 // checkRPC attempts a health ping to the current rpc endpoint
 func checkRPC(verbose bool) DependencyStatus {
 	dep := DependencyStatus{
+		ID:      DepRPC,
 		Name:    "RPC endpoint",
 		FixHint: "Set ERST_RPC_URL or ensure the default RPC is reachable",
+		Fixable: false,
 	}
 
 	cfg := config.DefaultConfig()
@@ -383,7 +559,79 @@ func buildDeepLinkFixHint(steps []string) string {
 	return steps[0]
 }
 
+// NEW: runFixers orchestrates automatic fixes with ID-based dispatch (Issues #3, #7, #8)
+func runFixers(deps []DependencyStatus, skipConfirm, verbose bool) error {
+	var failedFixes []string
+	var successFixes []string
+
+	for _, dep := range deps {
+		if dep.Installed || !dep.Fixable {
+			continue // Skip already installed or non-fixable items
+		}
+
+		shouldFix := skipConfirm
+		if !skipConfirm {
+			// Prompt user for confirmation
+			fmt.Printf("Fix %s? [y/N]: ", dep.Name)
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			shouldFix = strings.HasPrefix(strings.ToLower(response), "y")
+		}
+
+		if !shouldFix {
+			continue
+		}
+
+		// FIXED: Use ID-based dispatch instead of brittle string matching (Issue #8)
+		var err error
+		switch dep.ID {
+		case DepCacheDir:
+			err = FixMissingCacheDir(verbose)
+		case DepSimulator:
+			err = FixSimulatorBinary(verbose)
+		case DepProtocolRegistry:
+			err = FixProtocolRegistration(verbose)
+		case DepGoModDependencies:
+			err = FixGoModDependencies(verbose)
+		default:
+			continue
+		}
+
+		if err != nil {
+			failedFixes = append(failedFixes, fmt.Sprintf("%s: %v", dep.Name, err))
+		} else {
+			successFixes = append(successFixes, dep.Name)
+		}
+	}
+
+	// Summary
+	fmt.Println("\n=== Fix Summary ===")
+	if len(successFixes) > 0 {
+		fmt.Printf("\033[32m[OK] Fixed (%d):\033[0m\n", len(successFixes))
+		for _, fix := range successFixes {
+			fmt.Printf("  [OK] %s\n", fix)
+		}
+	}
+
+	if len(failedFixes) > 0 {
+		fmt.Printf("\033[31m[FAIL] Failed (%d):\033[0m\n", len(failedFixes))
+		for _, fix := range failedFixes {
+			fmt.Printf("  [FAIL] %s\n", fix)
+		}
+		return fmt.Errorf("some fixes failed")
+	}
+
+	if len(successFixes) > 0 {
+		fmt.Println("\033[32m[OK] All fixes applied successfully!\033[0m")
+	} else {
+		fmt.Println("[OK] No fixes needed")
+	}
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(doctorCmd)
 	doctorCmd.Flags().BoolP("verbose", "v", false, "Show detailed diagnostic information")
+	doctorCmd.Flags().BoolP("fix", "f", false, "Attempt to fix detected issues")
+	doctorCmd.Flags().Bool("yes", false, "Skip confirmation prompts (use with --fix)")
 }

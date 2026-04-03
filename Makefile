@@ -1,6 +1,6 @@
 .PHONY: build test lint lint-strict lint-unused test-unused validate-ci validate-interface clean
 .PHONY: rust-lint rust-lint-strict rust-test rust-build lint-all-strict
-.PHONY: build test lint validate-errors clean bench bench-rpc bench-sim bench-profile
+.PHONY: build test lint validate-errors clean bench bench-rpc bench-sim bench-profile bench-perf-regression
 .PHONY: fmt fmt-go fmt-rust pre-commit
 
 # Build variables
@@ -80,6 +80,12 @@ bench-sim:
 # Run benchmarks with CPU profiling
 bench-profile:
 	go test -bench=. -benchmem -cpuprofile=cpu.prof ./internal/rpc ./internal/simulator
+
+# Run performance regression tests for simulator
+bench-perf-regression:
+	@echo "Running performance regression tests..."
+	@go test -v -run 'TestPerfRegression' ./internal/simulator/...
+	@echo " Performance regression tests passed"
 
 # Rust simulator targets
 .PHONY: rust-lint rust-lint-strict rust-test rust-build

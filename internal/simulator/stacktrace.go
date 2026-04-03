@@ -11,11 +11,12 @@ type WasmStackTrace struct {
 }
 
 type StackFrame struct {
-	Index      int     `json:"index"`
-	FuncIndex  *uint32 `json:"func_index,omitempty"`
-	FuncName   *string `json:"func_name,omitempty"`
-	WasmOffset *uint64 `json:"wasm_offset,omitempty"`
-	Module     *string `json:"module,omitempty"`
+	Index          int             `json:"index"`
+	FuncIndex      *uint32         `json:"func_index,omitempty"`
+	FuncName       *string         `json:"func_name,omitempty"`
+	WasmOffset     *uint64         `json:"wasm_offset,omitempty"`
+	Module         *string         `json:"module,omitempty"`
+	SourceLocation *SourceLocation `json:"source_location,omitempty"`
 }
 
 type SourceLocation struct {

@@ -45,10 +45,9 @@ func TestFullJitterDistribution(t *testing.T) {
 	// Expected range: 0 to initialBackoff * 2 * (1 + JitterFraction)
 	expectedMax := time.Duration(float64(cfg.InitialBackoff) * 2 * (1.0 + cfg.JitterFraction))
 
-	// Test that jitter spreads values across the range
-	if min == 0 {
-		t.Error("Expected minimum backoff to be > 0 with full jitter")
-	}
+	// The full-jitter algorithm draws from [0, maxJitter) so min can legitimately be
+	// zero (rand.Float64() returns [0.0, 1.0)).  We verify spread via the mean and
+	// unique-value checks below instead of asserting min > 0.
 
 	if max > expectedMax {
 		t.Errorf("Maximum backoff %v exceeds expected max %v", max, expectedMax)

@@ -1,0 +1,41 @@
+#![no_std]
+
+use soroban_sdk::{contract, contractimpl, contracttype, Env};
+
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKey {
+    Counter,
+}
+
+#[contract]
+pub struct PanicContract;
+
+#[contractimpl]
+impl PanicContract {
+    pub fn init(env: Env) {
+        if !env.storage().instance().has(&DataKey::Counter) {
+            env.storage().instance().set(&DataKey::Counter, &0_u64);
+        }
+    }
+
+    pub fn step(env: Env) -> u64 {
+        let current = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::Counter)
+            .unwrap_or(0);
+        let next = current + 1;
+        env.storage().instance().set(&DataKey::Counter, &next);
+        next
+    }
+
+    pub fn panic_with_snapshot(env: Env) {
+        let current = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::Counter)
+            .unwrap_or(0);
+        panic!("forced trap after counter={} for snapshot consistency test", current);
+    }
+}

@@ -23,6 +23,14 @@ func TestExtractLinearMemoryBase64(t *testing.T) {
 		t.Fatalf("expected %q, got %q", enc, got)
 	}
 
+	got, err = extractLinearMemoryBase64(`{"linear_memory_dump":"` + enc + `"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != enc {
+		t.Fatalf("expected dump field %q, got %q", enc, got)
+	}
+
 	got, err = extractLinearMemoryBase64(`{"linear_memory":"` + enc + `"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

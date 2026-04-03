@@ -4,7 +4,7 @@
 package errors
 
 import (
-	"errors"
+	stdliberrors "errors"
 	"fmt"
 )
 
@@ -24,50 +24,50 @@ func formatBytes(bytes int64) string {
 
 // New is a proxy to the standard errors.New
 func New(text string) error {
-	return errors.New(text)
+	return stdliberrors.New(text)
 }
 
 // Is is a proxy to the standard errors.Is
 func Is(err, target error) bool {
-	return errors.Is(err, target)
+	return stdliberrors.Is(err, target)
 }
 
 // As is a proxy to the standard errors.As
 func As(err error, target any) bool {
-	return errors.As(err, target)
+	return stdliberrors.As(err, target)
 }
 
 // Sentinel errors for comparison with errors.Is
 var (
-	ErrTransactionNotFound  = errors.New("transaction not found")
-	ErrRPCConnectionFailed  = errors.New("RPC connection failed")
-	ErrRPCTimeout           = errors.New("RPC request timed out")
-	ErrAllRPCFailed         = errors.New("all RPC endpoints failed")
-	ErrSimulatorNotFound    = errors.New("simulator binary not found")
-	ErrSimulationFailed     = errors.New("simulation execution failed")
-	ErrSimCrash             = errors.New("simulator process crashed")
-	ErrInvalidNetwork       = errors.New("invalid network")
-	ErrMarshalFailed        = errors.New("failed to marshal request")
-	ErrUnmarshalFailed      = errors.New("failed to unmarshal response")
-	ErrSimulationLogicError = errors.New("simulation logic error")
-	ErrRPCError             = errors.New("RPC server returned an error")
-	ErrValidationFailed     = errors.New("validation failed")
-	ErrProtocolUnsupported  = errors.New("unsupported protocol version")
-	ErrArgumentRequired     = errors.New("required argument missing")
-	ErrAuditLogInvalid      = errors.New("audit log verification failed")
-	ErrSessionNotFound      = errors.New("session not found")
-	ErrUnauthorized         = errors.New("unauthorized")
-	ErrLedgerNotFound       = errors.New("ledger not found")
-	ErrLedgerArchived       = errors.New("ledger has been archived")
-	ErrRateLimitExceeded    = errors.New("rate limit exceeded")
-	ErrRPCResponseTooLarge  = errors.New("RPC response too large")
-	ErrRPCRequestTooLarge   = errors.New("RPC request payload too large")
-	ErrConfigFailed         = errors.New("configuration error")
-	ErrNetworkNotFound      = errors.New("network not found")
-	ErrMissingLedgerKey     = errors.New("missing ledger key in footprint")
-	ErrWasmInvalid          = errors.New("invalid WASM file")
-	ErrSpecNotFound         = errors.New("contract spec not found")
-	ErrShellExit            = errors.New("exit")
+	ErrTransactionNotFound  = stdliberrors.New("transaction not found")
+	ErrRPCConnectionFailed  = stdliberrors.New("RPC connection failed")
+	ErrRPCTimeout           = stdliberrors.New("RPC request timed out")
+	ErrAllRPCFailed         = stdliberrors.New("all RPC endpoints failed")
+	ErrSimulatorNotFound    = stdliberrors.New("simulator binary not found")
+	ErrSimulationFailed     = stdliberrors.New("simulation execution failed")
+	ErrSimCrash             = stdliberrors.New("simulator process crashed")
+	ErrInvalidNetwork       = stdliberrors.New("invalid network")
+	ErrMarshalFailed        = stdliberrors.New("failed to marshal request")
+	ErrUnmarshalFailed      = stdliberrors.New("failed to unmarshal response")
+	ErrSimulationLogicError = stdliberrors.New("simulation logic error")
+	ErrRPCError             = stdliberrors.New("RPC server returned an error")
+	ErrValidationFailed     = stdliberrors.New("validation failed")
+	ErrProtocolUnsupported  = stdliberrors.New("unsupported protocol version")
+	ErrArgumentRequired     = stdliberrors.New("required argument missing")
+	ErrAuditLogInvalid      = stdliberrors.New("audit log verification failed")
+	ErrSessionNotFound      = stdliberrors.New("session not found")
+	ErrUnauthorized         = stdliberrors.New("unauthorized")
+	ErrLedgerNotFound       = stdliberrors.New("ledger not found")
+	ErrLedgerArchived       = stdliberrors.New("ledger has been archived")
+	ErrRateLimitExceeded    = stdliberrors.New("rate limit exceeded")
+	ErrRPCResponseTooLarge  = stdliberrors.New("RPC response too large")
+	ErrRPCRequestTooLarge   = stdliberrors.New("RPC request payload too large")
+	ErrConfigFailed         = stdliberrors.New("configuration error")
+	ErrNetworkNotFound      = stdliberrors.New("network not found")
+	ErrMissingLedgerKey     = stdliberrors.New("missing ledger key in footprint")
+	ErrWasmInvalid          = stdliberrors.New("invalid WASM file")
+	ErrSpecNotFound         = stdliberrors.New("contract spec not found")
+	ErrShellExit            = stdliberrors.New("exit")
 )
 
 type LedgerNotFoundError struct {
@@ -139,7 +139,7 @@ func (e *MissingLedgerKeyError) Is(target error) bool {
 // Wrap functions for consistent error wrapping
 func WrapTransactionNotFound(err error) error {
 	return &ErstError{
-		Code:    ErstLedgerNotFound,
+		Code:    ErstTransactionNotFound,
 		Message: "transaction not found",
 		OrigErr: err,
 	}

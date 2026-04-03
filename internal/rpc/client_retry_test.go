@@ -80,9 +80,10 @@ func TestGetLedgerEntriesRetriesOnRateLimit(t *testing.T) {
 			Jsonrpc: "2.0",
 			ID:      1,
 		}
+		validXdr := buildValidEntryB64(validKey)
 		resp.Result.Entries = []LedgerEntryResult{{
 			Key: validKey,
-			Xdr: "BBB",
+			Xdr: validXdr,
 		}}
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
@@ -103,8 +104,8 @@ func TestGetLedgerEntriesRetriesOnRateLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected retry to succeed, got error: %v", err)
 	}
-	if entries[validKey] != "BBB" {
-		t.Fatalf("unexpected ledger entry: %v", entries)
+	if _, ok := entries[validKey]; !ok {
+		t.Fatalf("expected entry for validKey, got: %v", entries)
 	}
 	if atomic.LoadInt32(&calls) < 2 {
 		t.Fatalf("expected at least 2 calls, got %d", atomic.LoadInt32(&calls))

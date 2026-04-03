@@ -8,10 +8,14 @@ import { buildTraceTreeExport, renderStandaloneHtml } from './traceExport';
 
 export function activate(context: vscode.ExtensionContext) {
     const client = new ERSTClient('127.0.0.1', 8080);
-    const traceDataProvider = new TraceTreeDataProvider();
+    let treeView: vscode.TreeView<vscode.TreeItem> | undefined;
+    let traceDataProvider: TraceTreeDataProvider;
 
-    // Register TreeView
-    const treeView = vscode.window.createTreeView('erst-traces', { treeDataProvider: traceDataProvider });
+    // Register TreeView with provider (pass treeView to provider for auto-reveal)
+    traceDataProvider = new TraceTreeDataProvider();
+    treeView = vscode.window.createTreeView('erst-traces', { treeDataProvider: traceDataProvider });
+    // Patch: set treeView reference in provider for auto-reveal
+    (traceDataProvider as any).treeView = treeView;
 
     // Register TextDocumentContentProvider for states
     const stateProvider = new class implements vscode.TextDocumentContentProvider {
@@ -128,6 +132,24 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.executeCommand('vscode.diff', beforeUri, afterUri, 'State Diff (Before vs After)');
     });
 
+    // Navigation: next/prev step commands
+    let nextStepDisposable = vscode.commands.registerCommand('erst.nextTraceStep', () => {
+        const trace = traceDataProvider.getCurrentTrace();
+        if (!trace) return;
+        const idx = traceDataProvider.getCurrentStepIndex();
+        if (idx < trace.states.length - 1) {
+            traceDataProvider.setCurrentStepIndex(idx + 1);
+        }
+    });
+    let prevStepDisposable = vscode.commands.registerCommand('erst.prevTraceStep', () => {
+        const trace = traceDataProvider.getCurrentTrace();
+        if (!trace) return;
+        const idx = traceDataProvider.getCurrentStepIndex();
+        if (idx > 0) {
+            traceDataProvider.setCurrentStepIndex(idx - 1);
+        }
+    });
+
     context.subscriptions.push(
         triggerDebugDisposable,
         selectTraceStepDisposable,
@@ -136,7 +158,8 @@ export function activate(context: vscode.ExtensionContext) {
         treeView,
         showXdrDisposable,
         showStateDiffDisposable,
-        treeView,
+        nextStepDisposable,
+        prevStepDisposable,
         client
     );
 }

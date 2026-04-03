@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // captureOutput temporarily redirects stdout so that the supplied function's
@@ -61,5 +62,100 @@ func TestInteractiveViewer_HandleCommand_HelpAlias(t *testing.T) {
 
 	if !strings.Contains(out, "Keyboard Shortcuts") {
 		t.Errorf("help alias '?' did not display help overlay: %s", out)
+	}
+}
+
+func TestInteractiveViewer_DisplayCurrentState_ShowsFetchingPlaceholder(t *testing.T) {
+	trace := NewExecutionTrace("tx", 1)
+	trace.AddState(ExecutionState{Operation: "init", Memory: map[string]interface{}{"nonce": 1}})
+	trace.AddState(ExecutionState{Operation: "next"})
+	if _, err := trace.JumpToStep(1); err != nil {
+		t.Fatalf("JumpToStep failed: %v", err)
+	}
+
+	viewer := NewInteractiveViewer(trace)
+	viewer.fetchDelay = 100 * time.Millisecond
+
+	out := captureOutput(func() {
+		viewer.displayCurrentState()
+	})
+
+	if !strings.Contains(out, "[ FETCHING STATE... ]") {
+		t.Fatalf("expected loading placeholder, got: %s", out)
+	}
+}
+
+func TestInteractiveViewer_DisplayCurrentState_ClearsPlaceholderAfterFetch(t *testing.T) {
+	trace := NewExecutionTrace("tx", 1)
+	trace.AddState(ExecutionState{Operation: "init", Memory: map[string]interface{}{"nonce": 1}})
+	trace.AddState(ExecutionState{Operation: "next"})
+	if _, err := trace.JumpToStep(1); err != nil {
+		t.Fatalf("JumpToStep failed: %v", err)
+	}
+
+	viewer := NewInteractiveViewer(trace)
+	viewer.fetchDelay = 20 * time.Millisecond
+
+	_ = captureOutput(func() {
+		viewer.displayCurrentState()
+	})
+
+	select {
+	case fetched := <-viewer.fetchCh:
+		viewer.handleFetchedState(fetched)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for fetched state")
+	}
+
+	out := captureOutput(func() {
+		viewer.displayCurrentState()
+	})
+
+	if strings.Contains(out, "[ FETCHING STATE... ]") {
+		t.Fatalf("expected placeholder to be cleared, got: %s", out)
+	}
+	if !strings.Contains(out, "Memory: 1 entries") {
+		t.Fatalf("expected reconstructed memory summary, got: %s", out)
+	}
+}
+
+func TestInteractiveViewer_StatusBarLineFormat(t *testing.T) {
+	trace := NewExecutionTrace("tx", 1)
+	trace.AddState(ExecutionState{
+		Operation:    "require_auth",
+		Arguments:    []interface{}{"A", 1},
+		HostState:    map[string]interface{}{"status": "ok"},
+		Memory:       map[string]interface{}{"nonce": 42, "counter": 7},
+		RawArguments: []string{"AAAAAQ=="},
+	})
+
+	viewer := NewInteractiveViewer(trace)
+	state, err := trace.GetCurrentState()
+	if err != nil {
+		t.Fatalf("GetCurrentState failed: %v", err)
+	}
+
+	line := viewer.statusBarLine(state)
+
+	for _, want := range []string{"Step 1/1", "Payload:", "kb", "Memory:", "mb", "Snapshot ID:", "snap-000@0"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("status bar line missing %q: %s", want, line)
+		}
+	}
+}
+
+func TestInteractiveViewer_SnapshotIDForStep(t *testing.T) {
+	trace := NewExecutionTrace("tx", 2)
+	for i := 0; i < 5; i++ {
+		trace.AddState(ExecutionState{Operation: "op", Memory: map[string]interface{}{"i": i}})
+	}
+
+	viewer := NewInteractiveViewer(trace)
+
+	if got := viewer.snapshotIDForStep(0); got != "snap-000@0" {
+		t.Fatalf("snapshotIDForStep(0) = %q, want snap-000@0", got)
+	}
+	if got := viewer.snapshotIDForStep(3); got != "snap-001@2" {
+		t.Fatalf("snapshotIDForStep(3) = %q, want snap-001@2", got)
 	}
 }

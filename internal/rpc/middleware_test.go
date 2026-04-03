@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/stretchr/testify/assert"
@@ -73,6 +74,46 @@ func TestMiddlewareInjection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.Equal(t, "healthy", resp.Result.Status)
+}
+
+// TestCreateHTTPClient_MiddlewareAppliedOnce verifies that each middleware is wrapped
+// into the transport chain exactly once.  Before the Protocol V2 standardization fix,
+// createHTTPClient applied the middleware slice twice (once before RetryTransport and
+// once after), causing every middleware to intercept each request twice.
+func TestCreateHTTPClient_MiddlewareAppliedOnce(t *testing.T) {
+	wrapCount := 0
+	mw := func(next http.RoundTripper) http.RoundTripper {
+		wrapCount++
+		return next
+	}
+
+	_ = createHTTPClient("token", 5*time.Second, mw)
+
+	if wrapCount != 1 {
+		t.Errorf("middleware should be applied exactly once, got %d applications", wrapCount)
+	}
+}
+
+// TestCreateHTTPClient_MultipleMiddlewaresAppliedOnceEach verifies the invariant holds
+// when more than one middleware is provided.
+func TestCreateHTTPClient_MultipleMiddlewaresAppliedOnceEach(t *testing.T) {
+	counts := make([]int, 3)
+	mws := make([]Middleware, 3)
+	for i := range mws {
+		i := i
+		mws[i] = func(next http.RoundTripper) http.RoundTripper {
+			counts[i]++
+			return next
+		}
+	}
+
+	_ = createHTTPClient("", 5*time.Second, mws...)
+
+	for i, c := range counts {
+		if c != 1 {
+			t.Errorf("middleware[%d] should be applied exactly once, got %d", i, c)
+		}
+	}
 }
 
 func BenchmarkMiddleware(b *testing.B) {

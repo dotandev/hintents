@@ -3,7 +3,7 @@
 
 //! PKCS#11 HSM signer implementation for hardware-backed cryptographic operations.
 
-use super::{PublicKey, Signature, Signer, SignerError, SignerInfo, Pkcs11SignerConfig};
+use super::{Pkcs11SignerConfig, PublicKey, Signature, Signer, SignerError, SignerInfo};
 use async_trait::async_trait;
 use libloading::Library;
 use std::collections::HashMap;
@@ -101,22 +101,69 @@ pub struct CK_MECHANISM {
 }
 
 // PKCS#11 function types
+// Allow non-camel-case names for FFI compatibility with PKCS#11 standard
+#[allow(non_camel_case_types, non_snake_case)]
 type C_InitializeFn = unsafe extern "C" fn(pInitArgs: *mut c_void) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
 type C_FinalizeFn = unsafe extern "C" fn(pReserved: *mut c_void) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
 type C_GetInfoFn = unsafe extern "C" fn(pInfo: *mut CK_INFO) -> c_ulong;
-type C_GetSlotListFn = unsafe extern "C" fn(bTokenPresent: bool, pSlotList: *mut c_ulong, pulCount: *mut c_ulong) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
+type C_GetSlotListFn = unsafe extern "C" fn(
+    bTokenPresent: bool,
+    pSlotList: *mut c_ulong,
+    pulCount: *mut c_ulong,
+) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
 type C_GetSlotInfoFn = unsafe extern "C" fn(slotID: c_ulong, pInfo: *mut CK_SLOT_INFO) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
 type C_GetTokenInfoFn = unsafe extern "C" fn(slotID: c_ulong, pInfo: *mut CK_TOKEN_INFO) -> c_ulong;
-type C_OpenSessionFn = unsafe extern "C" fn(slotID: c_ulong, flags: c_ulong, phSession: *mut c_ulong) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
+type C_OpenSessionFn =
+    unsafe extern "C" fn(slotID: c_ulong, flags: c_ulong, phSession: *mut c_ulong) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
 type C_CloseSessionFn = unsafe extern "C" fn(hSession: c_ulong) -> c_ulong;
-type C_LoginFn = unsafe extern "C" fn(hSession: c_ulong, userType: c_ulong, pPin: *mut c_char) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
+type C_LoginFn =
+    unsafe extern "C" fn(hSession: c_ulong, userType: c_ulong, pPin: *mut c_char) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
 type C_LogoutFn = unsafe extern "C" fn(hSession: c_ulong) -> c_ulong;
-type C_FindObjectsInitFn = unsafe extern "C" fn(hSession: c_ulong, pTemplate: *mut CK_ATTRIBUTE, ulCount: c_ulong) -> c_ulong;
-type C_FindObjectsFn = unsafe extern "C" fn(hSession: c_ulong, phObject: *mut c_ulong, ulMaxObjectCount: c_ulong, pulObjectCount: *mut c_ulong) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
+type C_FindObjectsInitFn = unsafe extern "C" fn(
+    hSession: c_ulong,
+    pTemplate: *mut CK_ATTRIBUTE,
+    ulCount: c_ulong,
+) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
+type C_FindObjectsFn = unsafe extern "C" fn(
+    hSession: c_ulong,
+    phObject: *mut c_ulong,
+    ulMaxObjectCount: c_ulong,
+    pulObjectCount: *mut c_ulong,
+) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
 type C_FindObjectsFinalFn = unsafe extern "C" fn(hSession: c_ulong) -> c_ulong;
-type C_SignInitFn = unsafe extern "C" fn(hSession: c_ulong, pMechanism: *mut CK_MECHANISM, hKey: c_ulong) -> c_ulong;
-type C_SignFn = unsafe extern "C" fn(hSession: c_ulong, pData: *mut u8, ulDataLen: c_ulong, pSignature: *mut u8, pulSignatureLen: *mut c_ulong) -> c_ulong;
-type C_GetAttributeValueFn = unsafe extern "C" fn(hSession: c_ulong, hObject: c_ulong, pTemplate: *mut CK_ATTRIBUTE, ulCount: c_ulong) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
+type C_SignInitFn = unsafe extern "C" fn(
+    hSession: c_ulong,
+    pMechanism: *mut CK_MECHANISM,
+    hKey: c_ulong,
+) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
+type C_SignFn = unsafe extern "C" fn(
+    hSession: c_ulong,
+    pData: *mut u8,
+    ulDataLen: c_ulong,
+    pSignature: *mut u8,
+    pulSignatureLen: *mut c_ulong,
+) -> c_ulong;
+#[allow(non_camel_case_types, non_snake_case)]
+type C_GetAttributeValueFn = unsafe extern "C" fn(
+    hSession: c_ulong,
+    hObject: c_ulong,
+    pTemplate: *mut CK_ATTRIBUTE,
+    ulCount: c_ulong,
+) -> c_ulong;
 
 /// PKCS#11 HSM signer implementation
 pub struct Pkcs11Signer {
@@ -131,11 +178,8 @@ impl Pkcs11Signer {
         let library = unsafe { Library::new(&config.module_path) }
             .map_err(|e| SignerError::Pkcs11(format!("Failed to load PKCS#11 module: {}", e)))?;
 
-        let algorithm = if config.module_path.to_lowercase().contains("yubikey") {
-            "ed25519".to_string()
-        } else {
-            "ed25519".to_string() // Default to Ed25519
-        };
+        // Default to Ed25519 for now
+        let algorithm = "ed25519".to_string();
 
         Ok(Self {
             config,
@@ -147,24 +191,56 @@ impl Pkcs11Signer {
     /// Load PKCS#11 functions from the library
     unsafe fn load_functions(&self) -> Result<Pkcs11Functions, SignerError> {
         let lib = &self.library;
-        
+
         Ok(Pkcs11Functions {
-            C_Initialize: *lib.get(b"C_Initialize\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_Initialize: {}", e)))?,
-            C_Finalize: *lib.get(b"C_Finalize\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_Finalize: {}", e)))?,
-            C_GetInfo: *lib.get(b"C_GetInfo\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_GetInfo: {}", e)))?,
-            C_GetSlotList: *lib.get(b"C_GetSlotList\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_GetSlotList: {}", e)))?,
-            C_GetSlotInfo: *lib.get(b"C_GetSlotInfo\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_GetSlotInfo: {}", e)))?,
-            C_GetTokenInfo: *lib.get(b"C_GetTokenInfo\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_GetTokenInfo: {}", e)))?,
-            C_OpenSession: *lib.get(b"C_OpenSession\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_OpenSession: {}", e)))?,
-            C_CloseSession: *lib.get(b"C_CloseSession\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_CloseSession: {}", e)))?,
-            C_Login: *lib.get(b"C_Login\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_Login: {}", e)))?,
-            C_Logout: *lib.get(b"C_Logout\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_Logout: {}", e)))?,
-            C_FindObjectsInit: *lib.get(b"C_FindObjectsInit\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_FindObjectsInit: {}", e)))?,
-            C_FindObjects: *lib.get(b"C_FindObjects\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_FindObjects: {}", e)))?,
-            C_FindObjectsFinal: *lib.get(b"C_FindObjectsFinal\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_FindObjectsFinal: {}", e)))?,
-            C_SignInit: *lib.get(b"C_SignInit\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_SignInit: {}", e)))?,
-            C_Sign: *lib.get(b"C_Sign\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_Sign: {}", e)))?,
-            C_GetAttributeValue: *lib.get(b"C_GetAttributeValue\0").map_err(|e| SignerError::Pkcs11(format!("Failed to load C_GetAttributeValue: {}", e)))?,
+            C_Initialize: *lib
+                .get(b"C_Initialize\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_Initialize: {}", e)))?,
+            C_Finalize: *lib
+                .get(b"C_Finalize\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_Finalize: {}", e)))?,
+            C_GetInfo: *lib
+                .get(b"C_GetInfo\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_GetInfo: {}", e)))?,
+            C_GetSlotList: *lib
+                .get(b"C_GetSlotList\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_GetSlotList: {}", e)))?,
+            C_GetSlotInfo: *lib
+                .get(b"C_GetSlotInfo\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_GetSlotInfo: {}", e)))?,
+            C_GetTokenInfo: *lib.get(b"C_GetTokenInfo\0").map_err(|e| {
+                SignerError::Pkcs11(format!("Failed to load C_GetTokenInfo: {}", e))
+            })?,
+            C_OpenSession: *lib
+                .get(b"C_OpenSession\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_OpenSession: {}", e)))?,
+            C_CloseSession: *lib.get(b"C_CloseSession\0").map_err(|e| {
+                SignerError::Pkcs11(format!("Failed to load C_CloseSession: {}", e))
+            })?,
+            C_Login: *lib
+                .get(b"C_Login\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_Login: {}", e)))?,
+            C_Logout: *lib
+                .get(b"C_Logout\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_Logout: {}", e)))?,
+            C_FindObjectsInit: *lib.get(b"C_FindObjectsInit\0").map_err(|e| {
+                SignerError::Pkcs11(format!("Failed to load C_FindObjectsInit: {}", e))
+            })?,
+            C_FindObjects: *lib
+                .get(b"C_FindObjects\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_FindObjects: {}", e)))?,
+            C_FindObjectsFinal: *lib.get(b"C_FindObjectsFinal\0").map_err(|e| {
+                SignerError::Pkcs11(format!("Failed to load C_FindObjectsFinal: {}", e))
+            })?,
+            C_SignInit: *lib
+                .get(b"C_SignInit\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_SignInit: {}", e)))?,
+            C_Sign: *lib
+                .get(b"C_Sign\0")
+                .map_err(|e| SignerError::Pkcs11(format!("Failed to load C_Sign: {}", e)))?,
+            C_GetAttributeValue: *lib.get(b"C_GetAttributeValue\0").map_err(|e| {
+                SignerError::Pkcs11(format!("Failed to load C_GetAttributeValue: {}", e))
+            })?,
         })
     }
 
@@ -175,26 +251,35 @@ impl Pkcs11Signer {
             let mut slot_count: c_ulong = 0;
             let result = (functions.C_GetSlotList)(true, ptr::null_mut(), &mut slot_count);
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!("Failed to get slot count: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to get slot count: 0x{:x}",
+                    result
+                )));
             }
 
-            let mut slots = vec![0u64; slot_count as usize];
+            let mut slots = vec![0 as c_ulong; slot_count as usize];
             let result = (functions.C_GetSlotList)(true, slots.as_mut_ptr(), &mut slot_count);
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!("Failed to get slot list: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to get slot list: 0x{:x}",
+                    result
+                )));
             }
 
             // Find the appropriate slot
             if let Some(slot_index) = self.config.slot_index {
                 if slot_index as usize >= slots.len() {
-                    return Err(SignerError::Config(format!("Slot index {} out of range", slot_index)));
+                    return Err(SignerError::Config(format!(
+                        "Slot index {} out of range",
+                        slot_index
+                    )));
                 }
                 return Ok(slots[slot_index as usize]);
             }
 
             if let Some(ref token_label) = self.config.token_label {
-                let label_cstr = CString::new(token_label.as_str()).unwrap();
-                
+                let _label_cstr = CString::new(token_label.as_str()).unwrap();
+
                 for &slot in &slots {
                     let mut token_info = CK_TOKEN_INFO {
                         label: [0; 32],
@@ -219,47 +304,55 @@ impl Pkcs11Signer {
 
                     let result = (functions.C_GetTokenInfo)(slot, &mut token_info);
                     if result == CKR_OK {
-                        let token_label_str = CStr::from_ptr(token_info.label.as_ptr()).to_string_lossy();
+                        let token_label_str =
+                            CStr::from_ptr(token_info.label.as_ptr()).to_string_lossy();
                         if token_label_str.trim_matches('\0') == token_label {
                             return Ok(slot);
                         }
                     }
                 }
-                
-                return Err(SignerError::Config(format!("Token with label '{}' not found", token_label)));
+
+                return Err(SignerError::Config(format!(
+                    "Token with label '{}' not found",
+                    token_label
+                )));
             }
 
             // Use first slot if no specific configuration
             if slots.is_empty() {
                 return Err(SignerError::Pkcs11("No slots available".to_string()));
             }
-            
+
             Ok(slots[0])
         }
     }
 
     /// Find the private key in the HSM
-    fn find_private_key(&self, functions: &Pkcs11Functions, session: c_ulong) -> Result<c_ulong, SignerError> {
+    fn find_private_key(
+        &self,
+        functions: &Pkcs11Functions,
+        session: c_ulong,
+    ) -> Result<c_ulong, SignerError> {
         unsafe {
-            let mut template = vec![
-                CK_ATTRIBUTE {
-                    type_: CKA_CLASS,
-                    p_value: &mut CKO_PRIVATE_KEY as *mut _ as *mut c_void,
-                    ul_value_len: std::mem::size_of::<c_ulong>() as c_ulong,
-                },
-            ];
+            let mut class = CKO_PRIVATE_KEY;
+            let mut template = vec![CK_ATTRIBUTE {
+                type_: CKA_CLASS,
+                p_value: &mut class as *mut _ as *mut c_void,
+                ul_value_len: std::mem::size_of::<c_ulong>() as c_ulong,
+            }];
 
-            // Add key identifier if specified
-            if let Some(ref key_label) = self.config.key_label {
+            // Keep these alive for the duration of the function
+            let _label_cstr = self.config.key_label.as_ref().map(|key_label| {
                 let label_cstr = CString::new(key_label.as_str()).unwrap();
                 template.push(CK_ATTRIBUTE {
                     type_: CKA_LABEL,
                     p_value: label_cstr.as_ptr() as *mut c_void,
                     ul_value_len: key_label.len() as c_ulong,
                 });
-            }
+                label_cstr
+            });
 
-            if let Some(ref key_id_hex) = self.config.key_id_hex {
+            let _key_id_bytes = if let Some(ref key_id_hex) = self.config.key_id_hex {
                 let key_id_bytes = hex::decode(key_id_hex)
                     .map_err(|e| SignerError::Config(format!("Invalid key ID hex: {}", e)))?;
                 template.push(CK_ATTRIBUTE {
@@ -267,26 +360,41 @@ impl Pkcs11Signer {
                     p_value: key_id_bytes.as_ptr() as *mut c_void,
                     ul_value_len: key_id_bytes.len() as c_ulong,
                 });
-            }
+                Some(key_id_bytes)
+            } else {
+                None
+            };
 
-            let result = (functions.C_FindObjectsInit)(session, template.as_mut_ptr(), template.len() as c_ulong);
+            let result = (functions.C_FindObjectsInit)(
+                session,
+                template.as_mut_ptr(),
+                template.len() as c_ulong,
+            );
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!("Failed to initialize key search: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to initialize key search: 0x{:x}",
+                    result
+                )));
             }
 
             let mut key_handle: c_ulong = 0;
             let mut object_count: c_ulong = 0;
             let result = (functions.C_FindObjects)(session, &mut key_handle, 1, &mut object_count);
-            
+
             // Always finalize the search
             (functions.C_FindObjectsFinal)(session);
 
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!("Failed to find key: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to find key: 0x{:x}",
+                    result
+                )));
             }
 
             if object_count == 0 {
-                return Err(SignerError::KeyNotFound("Private key not found in HSM".to_string()));
+                return Err(SignerError::KeyNotFound(
+                    "Private key not found in HSM".to_string(),
+                ));
             }
 
             Ok(key_handle)
@@ -294,7 +402,11 @@ impl Pkcs11Signer {
     }
 
     /// Get public key from HSM
-    fn get_public_key(&self, functions: &Pkcs11Functions, session: c_ulong) -> Result<PublicKey, SignerError> {
+    fn get_public_key(
+        &self,
+        functions: &Pkcs11Functions,
+        session: c_ulong,
+    ) -> Result<PublicKey, SignerError> {
         unsafe {
             // If public key is provided in config, use it
             if let Some(ref pem_data) = self.config.public_key_pem {
@@ -306,25 +418,25 @@ impl Pkcs11Signer {
             }
 
             // Otherwise, extract public key from HSM
-            let mut template = vec![
-                CK_ATTRIBUTE {
-                    type_: CKA_CLASS,
-                    p_value: &mut CKO_PUBLIC_KEY as *mut _ as *mut c_void,
-                    ul_value_len: std::mem::size_of::<c_ulong>() as c_ulong,
-                },
-            ];
+            let mut class = CKO_PUBLIC_KEY;
+            let mut template = vec![CK_ATTRIBUTE {
+                type_: CKA_CLASS,
+                p_value: &mut class as *mut _ as *mut c_void,
+                ul_value_len: std::mem::size_of::<c_ulong>() as c_ulong,
+            }];
 
-            // Add key identifier if specified
-            if let Some(ref key_label) = self.config.key_label {
+            // Keep these alive for the duration of the function
+            let _label_cstr = self.config.key_label.as_ref().map(|key_label| {
                 let label_cstr = CString::new(key_label.as_str()).unwrap();
                 template.push(CK_ATTRIBUTE {
                     type_: CKA_LABEL,
                     p_value: label_cstr.as_ptr() as *mut c_void,
                     ul_value_len: key_label.len() as c_ulong,
                 });
-            }
+                label_cstr
+            });
 
-            if let Some(ref key_id_hex) = self.config.key_id_hex {
+            let _key_id_bytes = if let Some(ref key_id_hex) = self.config.key_id_hex {
                 let key_id_bytes = hex::decode(key_id_hex)
                     .map_err(|e| SignerError::Config(format!("Invalid key ID hex: {}", e)))?;
                 template.push(CK_ATTRIBUTE {
@@ -332,25 +444,40 @@ impl Pkcs11Signer {
                     p_value: key_id_bytes.as_ptr() as *mut c_void,
                     ul_value_len: key_id_bytes.len() as c_ulong,
                 });
-            }
+                Some(key_id_bytes)
+            } else {
+                None
+            };
 
-            let result = (functions.C_FindObjectsInit)(session, template.as_mut_ptr(), template.len() as c_ulong);
+            let result = (functions.C_FindObjectsInit)(
+                session,
+                template.as_mut_ptr(),
+                template.len() as c_ulong,
+            );
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!("Failed to initialize public key search: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to initialize public key search: 0x{:x}",
+                    result
+                )));
             }
 
             let mut key_handle: c_ulong = 0;
             let mut object_count: c_ulong = 0;
             let result = (functions.C_FindObjects)(session, &mut key_handle, 1, &mut object_count);
-            
+
             (functions.C_FindObjectsFinal)(session);
 
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!("Failed to find public key: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to find public key: 0x{:x}",
+                    result
+                )));
             }
 
             if object_count == 0 {
-                return Err(SignerError::KeyNotFound("Public key not found in HSM".to_string()));
+                return Err(SignerError::KeyNotFound(
+                    "Public key not found in HSM".to_string(),
+                ));
             }
 
             // Get EC point (public key)
@@ -372,7 +499,10 @@ impl Pkcs11Signer {
 
             let result = (functions.C_GetAttributeValue)(session, key_handle, &mut point_attr, 1);
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!("Failed to get public key point: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to get public key point: 0x{:x}",
+                    result
+                )));
             }
 
             // Convert to SPKI format (simplified - in practice you'd need proper DER encoding)
@@ -388,23 +518,30 @@ impl Pkcs11Signer {
 impl Signer for Pkcs11Signer {
     async fn sign(&self, data: &[u8]) -> Result<Signature, SignerError> {
         let functions = unsafe { self.load_functions()? };
-        
+
         unsafe {
             // Initialize PKCS#11
             let result = (functions.C_Initialize)(ptr::null_mut());
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!("Failed to initialize PKCS#11: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to initialize PKCS#11: 0x{:x}",
+                    result
+                )));
             }
 
             // Find slot
             let slot = self.find_slot(&functions)?;
-            
+
             // Open session
             let mut session: c_ulong = 0;
-            let result = (functions.C_OpenSession)(slot, CKF_SERIAL_SESSION | CKF_RW_SESSION, &mut session);
+            let result =
+                (functions.C_OpenSession)(slot, CKF_SERIAL_SESSION | CKF_RW_SESSION, &mut session);
             if result != CKR_OK {
                 (functions.C_Finalize)(ptr::null_mut());
-                return Err(SignerError::Pkcs11(format!("Failed to open session: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to open session: 0x{:x}",
+                    result
+                )));
             }
 
             // Login
@@ -413,14 +550,17 @@ impl Signer for Pkcs11Signer {
             if result != CKR_OK {
                 (functions.C_CloseSession)(session);
                 (functions.C_Finalize)(ptr::null_mut());
-                return Err(SignerError::Pkcs11(format!("Failed to login: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to login: 0x{:x}",
+                    result
+                )));
             }
 
             // Find private key
             let key_handle = self.find_private_key(&functions, session)?;
 
             // Initialize signing
-            let mechanism = if self.algorithm == "secp256k1" {
+            let mut mechanism = if self.algorithm == "secp256k1" {
                 CK_MECHANISM {
                     mechanism: CKM_ECDSA,
                     p_parameter: ptr::null_mut(),
@@ -439,30 +579,51 @@ impl Signer for Pkcs11Signer {
                 (functions.C_Logout)(session);
                 (functions.C_CloseSession)(session);
                 (functions.C_Finalize)(ptr::null_mut());
-                return Err(SignerError::Pkcs11(format!("Failed to initialize signing: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to initialize signing: 0x{:x}",
+                    result
+                )));
             }
 
             // Sign data
             let mut signature_len: c_ulong = 0;
             let data_ptr = data.as_ptr() as *mut u8;
-            let result = (functions.C_Sign)(session, data_ptr, data.len() as c_ulong, ptr::null_mut(), &mut signature_len);
+            let result = (functions.C_Sign)(
+                session,
+                data_ptr,
+                data.len() as c_ulong,
+                ptr::null_mut(),
+                &mut signature_len,
+            );
             if result != CKR_OK && result != CKR_BUFFER_TOO_SMALL {
                 (functions.C_Logout)(session);
                 (functions.C_CloseSession)(session);
                 (functions.C_Finalize)(ptr::null_mut());
-                return Err(SignerError::Pkcs11(format!("Failed to get signature length: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to get signature length: 0x{:x}",
+                    result
+                )));
             }
 
             let mut signature_bytes = vec![0u8; signature_len as usize];
-            let result = (functions.C_Sign)(session, data_ptr, data.len() as c_ulong, signature_bytes.as_mut_ptr(), &mut signature_len);
-            
+            let result = (functions.C_Sign)(
+                session,
+                data_ptr,
+                data.len() as c_ulong,
+                signature_bytes.as_mut_ptr(),
+                &mut signature_len,
+            );
+
             // Cleanup
             (functions.C_Logout)(session);
             (functions.C_CloseSession)(session);
             (functions.C_Finalize)(ptr::null_mut());
 
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!("Failed to sign data: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to sign data: 0x{:x}",
+                    result
+                )));
             }
 
             Ok(Signature {
@@ -474,23 +635,30 @@ impl Signer for Pkcs11Signer {
 
     async fn public_key(&self) -> Result<PublicKey, SignerError> {
         let functions = unsafe { self.load_functions()? };
-        
+
         unsafe {
             // Initialize PKCS#11
             let result = (functions.C_Initialize)(ptr::null_mut());
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!("Failed to initialize PKCS#11: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to initialize PKCS#11: 0x{:x}",
+                    result
+                )));
             }
 
             // Find slot
             let slot = self.find_slot(&functions)?;
-            
+
             // Open session
             let mut session: c_ulong = 0;
-            let result = (functions.C_OpenSession)(slot, CKF_SERIAL_SESSION | CKF_RW_SESSION, &mut session);
+            let result =
+                (functions.C_OpenSession)(slot, CKF_SERIAL_SESSION | CKF_RW_SESSION, &mut session);
             if result != CKR_OK {
                 (functions.C_Finalize)(ptr::null_mut());
-                return Err(SignerError::Pkcs11(format!("Failed to open session: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to open session: 0x{:x}",
+                    result
+                )));
             }
 
             // Login
@@ -499,7 +667,10 @@ impl Signer for Pkcs11Signer {
             if result != CKR_OK {
                 (functions.C_CloseSession)(session);
                 (functions.C_Finalize)(ptr::null_mut());
-                return Err(SignerError::Pkcs11(format!("Failed to login: 0x{:x}", result)));
+                return Err(SignerError::Pkcs11(format!(
+                    "Failed to login: 0x{:x}",
+                    result
+                )));
             }
 
             // Get public key
@@ -518,7 +689,7 @@ impl Signer for Pkcs11Signer {
         let mut metadata = HashMap::new();
         metadata.insert("implementation".to_string(), "pkcs11".to_string());
         metadata.insert("module_path".to_string(), self.config.module_path.clone());
-        
+
         if let Some(ref token_label) = self.config.token_label {
             metadata.insert("token_label".to_string(), token_label.clone());
         }
@@ -532,6 +703,7 @@ impl Signer for Pkcs11Signer {
 }
 
 /// PKCS#11 function pointers
+#[allow(non_snake_case)]
 struct Pkcs11Functions {
     C_Initialize: C_InitializeFn,
     C_Finalize: C_FinalizeFn,
@@ -559,18 +731,18 @@ mod tests {
     fn test_pkcs11_config_from_env() {
         // This test will fail unless environment variables are set
         // but it demonstrates the expected behavior
-        
+
         // Temporarily set environment variables
         std::env::set_var("ERST_PKCS11_MODULE", "/usr/lib/libykcs11.so");
         std::env::set_var("ERST_PKCS11_PIN", "123456");
-        
+
         let config = Pkcs11SignerConfig::from_env();
         assert!(config.is_ok());
-        
+
         let config = config.unwrap();
         assert_eq!(config.module_path, "/usr/lib/libykcs11.so");
         assert_eq!(config.pin, "123456");
-        
+
         // Clean up
         std::env::remove_var("ERST_PKCS11_MODULE");
         std::env::remove_var("ERST_PKCS11_PIN");
@@ -581,7 +753,7 @@ mod tests {
         // Should fail when required environment variables are missing
         std::env::remove_var("ERST_PKCS11_MODULE");
         std::env::remove_var("ERST_PKCS11_PIN");
-        
+
         let config = Pkcs11SignerConfig::from_env();
         assert!(config.is_err());
     }
