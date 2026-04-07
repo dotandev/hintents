@@ -13,11 +13,11 @@ echo
 
 # Check if Go is available
 if ! command -v go &> /dev/null; then
-    echo "⚠️  Go is not installed - skipping compilation checks"
+    echo "âš ï¸  Go is not installed - skipping compilation checks"
     echo "   Install Go to run full verification"
     GO_AVAILABLE=false
 else
-    echo "✓ Go is installed: $(go version)"
+    echo "âœ“ Go is installed: $(go version)"
     GO_AVAILABLE=true
 fi
 echo
@@ -37,9 +37,9 @@ files=(
 
 for file in "${files[@]}"; do
     if [ -f "$file" ]; then
-        echo "✓ $file exists"
+        echo "âœ“ $file exists"
     else
-        echo "✗ $file missing"
+        echo "âœ— $file missing"
     fi
 done
 echo
@@ -55,9 +55,9 @@ modified_files=(
 
 for file in "${modified_files[@]}"; do
     if [ -f "$file" ]; then
-        echo "✓ $file exists"
+        echo "âœ“ $file exists"
     else
-        echo "✗ $file missing"
+        echo "âœ— $file missing"
     fi
 done
 echo
@@ -67,55 +67,55 @@ echo "=== Checking Key Content ==="
 
 # Check prometheus.go has metrics
 if grep -q "remote_node_last_response_timestamp_seconds" internal/metrics/prometheus.go; then
-    echo "✓ Timestamp metric defined"
+    echo "âœ“ Timestamp metric defined"
 else
-    echo "✗ Timestamp metric missing"
+    echo "âœ— Timestamp metric missing"
 fi
 
 if grep -q "remote_node_response_total" internal/metrics/prometheus.go; then
-    echo "✓ Response counter metric defined"
+    echo "âœ“ Response counter metric defined"
 else
-    echo "✗ Response counter metric missing"
+    echo "âœ— Response counter metric missing"
 fi
 
 if grep -q "remote_node_response_duration_seconds" internal/metrics/prometheus.go; then
-    echo "✓ Duration histogram metric defined"
+    echo "âœ“ Duration histogram metric defined"
 else
-    echo "✗ Duration histogram metric missing"
+    echo "âœ— Duration histogram metric missing"
 fi
 
 if grep -q "simulation_execution_total" internal/metrics/prometheus.go; then
-    echo "✓ Simulation counter metric defined"
+    echo "âœ“ Simulation counter metric defined"
 else
-    echo "✗ Simulation counter metric missing"
+    echo "âœ— Simulation counter metric missing"
 fi
 
 # Check daemon server has metrics endpoint
 if grep -q "promhttp.Handler()" internal/daemon/server.go; then
-    echo "✓ Metrics endpoint added to daemon"
+    echo "âœ“ Metrics endpoint added to daemon"
 else
-    echo "✗ Metrics endpoint missing from daemon"
+    echo "âœ— Metrics endpoint missing from daemon"
 fi
 
 # Check RPC client records metrics
 if grep -q "metrics.RecordRemoteNodeResponse" internal/rpc/client.go; then
-    echo "✓ RPC client records metrics"
+    echo "âœ“ RPC client records metrics"
 else
-    echo "✗ RPC client doesn't record metrics"
+    echo "âœ— RPC client doesn't record metrics"
 fi
 
 # Check simulator records metrics
 if grep -q "metrics.RecordSimulationExecution" internal/simulator/runner.go; then
-    echo "✓ Simulator records metrics"
+    echo "âœ“ Simulator records metrics"
 else
-    echo "✗ Simulator doesn't record metrics"
+    echo "âœ— Simulator doesn't record metrics"
 fi
 
 # Check go.mod has prometheus dependency
 if grep -q "prometheus/client_golang" go.mod; then
-    echo "✓ Prometheus dependency added"
+    echo "âœ“ Prometheus dependency added"
 else
-    echo "✗ Prometheus dependency missing"
+    echo "âœ— Prometheus dependency missing"
 fi
 echo
 
@@ -126,19 +126,19 @@ if [ "$GO_AVAILABLE" = true ]; then
     # Check syntax
     echo "Checking syntax..."
     if go fmt ./internal/metrics/... > /dev/null 2>&1; then
-        echo "✓ Metrics package syntax is valid"
+        echo "âœ“ Metrics package syntax is valid"
     else
-        echo "✗ Metrics package has syntax errors"
+        echo "âœ— Metrics package has syntax errors"
     fi
     
     # Try to build (without running tests)
     echo "Checking if code compiles..."
     if go build -o /dev/null ./internal/metrics/... 2>&1 | grep -q "no Go files"; then
-        echo "✓ Metrics package structure is valid"
+        echo "âœ“ Metrics package structure is valid"
     elif go list ./internal/metrics/... > /dev/null 2>&1; then
-        echo "✓ Metrics package can be listed"
+        echo "âœ“ Metrics package can be listed"
     else
-        echo "⚠️  Could not verify compilation (may need dependencies)"
+        echo "âš ï¸  Could not verify compilation (may need dependencies)"
     fi
     
     echo
@@ -148,21 +148,21 @@ fi
 echo "=== Checking Documentation ==="
 
 if grep -q "remote_node_last_response_timestamp_seconds" docs/PROMETHEUS_METRICS.md; then
-    echo "✓ Documentation includes timestamp metric"
+    echo "âœ“ Documentation includes timestamp metric"
 else
-    echo "✗ Documentation missing timestamp metric"
+    echo "âœ— Documentation missing timestamp metric"
 fi
 
 if grep -q "time() - remote_node_last_response_timestamp_seconds > 60" docs/PROMETHEUS_METRICS.md; then
-    echo "✓ Documentation includes staleness alert example"
+    echo "âœ“ Documentation includes staleness alert example"
 else
-    echo "✗ Documentation missing staleness alert example"
+    echo "âœ— Documentation missing staleness alert example"
 fi
 
 if grep -q "PromQL" docs/PROMETHEUS_METRICS.md; then
-    echo "✓ Documentation includes PromQL queries"
+    echo "âœ“ Documentation includes PromQL queries"
 else
-    echo "✗ Documentation missing PromQL queries"
+    echo "âœ— Documentation missing PromQL queries"
 fi
 echo
 

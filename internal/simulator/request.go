@@ -7,6 +7,10 @@ type SimulationRequest struct {
 	EnvelopeXdr      string            `json:"envelope_xdr"`
 	ResultMetaXdr    string            `json:"result_meta_xdr"`
 	LedgerEntries    map[string]string `json:"ledger_entries,omitempty"`
+	ControlCommand   string            `json:"control_command,omitempty"`
+	RewindStep       *int              `json:"rewind_step,omitempty"`
+	ForkParams       map[string]string `json:"fork_params,omitempty"`
+	HarnessReset     bool              `json:"harness_reset,omitempty"`
 	Timestamp        int64             `json:"timestamp,omitempty"`
 	LedgerSequence   uint32            `json:"ledger_sequence,omitempty"`
 	WasmPath         *string           `json:"wasm_path,omitempty"`
@@ -17,16 +21,19 @@ type SimulationRequest struct {
 	MockBaseFee      *uint32           `json:"mock_base_fee,omitempty"`
 	MockGasPrice     *uint64           `json:"mock_gas_price,omitempty"`
 	MemoryLimit      *uint64           `json:"memory_limit,omitempty"`
+	EnableCoverage              bool              `json:"enable_coverage,omitempty"`
+	CoverageLCOVPath            *string           `json:"coverage_lcov_path,omitempty"`
+	EnableOptimizationAdvisor   bool              `json:"enable_optimization_advisor,omitempty"`
 	EnableCoverage   bool              `json:"enable_coverage,omitempty"`
 	CoverageLCOVPath *string           `json:"coverage_lcov_path,omitempty"`
-
+	EnableSnapshots  bool              `json:"enable_snapshots"`
 	RestorePreamble map[string]interface{} `json:"restore_preamble,omitempty"`
-
 	AuthTraceOpts       *AuthTraceOptions      `json:"auth_trace_opts,omitempty"`
 	CustomAuthCfg       map[string]interface{} `json:"custom_auth_config,omitempty"`
 	ResourceCalibration *ResourceCalibration   `json:"resource_calibration,omitempty"`
 
 	SandboxNativeTokenCapStroops *uint64 `json:"sandbox_native_token_cap_stroops,omitempty"`
+	ContractWasm                 *string `json:"contract_wasm,omitempty"`
 }
 
 type ResourceCalibration struct {

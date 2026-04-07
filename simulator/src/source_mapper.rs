@@ -15,7 +15,7 @@ pub struct SourceMapper {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SourceLocation {
     pub file: String,
     pub line: u32,

@@ -16,6 +16,11 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Monotonically increasing counter used to generate unique temp-file names,
+/// preventing concurrent writes from clobbering each other's `.tmp` files.
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Inline OS-level advisory file locking using libc, which is a transitive
 // dependency of soroban-env-host. This avoids adding a new crate while still
@@ -245,9 +250,15 @@ impl SourceMapCache {
     /// Uses an exclusive OS-level file lock and atomic write (temp file + rename)
     /// to prevent data corruption when multiple processes write concurrently.
     pub fn store(&self, entry: SourceMapCacheEntry) -> Result<(), String> {
-        // Ensure cache directory exists
-        fs::create_dir_all(&self.cache_dir)
-            .map_err(|e| format!("Failed to create cache directory: {}", e))?;
+        // Ensure cache directory exists.
+        // On Windows, concurrent calls to create_dir_all can race and return
+        // AlreadyExists (os error 183) even though the directory now exists —
+        // treat that as success.
+        match fs::create_dir_all(&self.cache_dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("Failed to create cache directory: {}", e)),
+        }
 
         let cache_path = self.get_cache_path(&entry.wasm_hash);
 
@@ -265,9 +276,14 @@ impl SourceMapCache {
         let bytes = bincode::serialize(&entry)
             .map_err(|e| format!("Failed to serialize cache entry: {}", e))?;
 
-        // Write atomically: write to a tmp file then rename to avoid readers
-        // observing a partially-written file.
-        let tmp_path = self.cache_dir.join(format!("{}.tmp", entry.wasm_hash));
+        // Write atomically: write to a unique tmp file then rename to avoid
+        // readers observing a partially-written file and to prevent concurrent
+        // writers from clobbering each other's tmp file (critical on Windows
+        // where flock is a no-op).
+        let tmp_id = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tmp_path = self
+            .cache_dir
+            .join(format!("{}.{}.tmp", entry.wasm_hash, tmp_id));
         let write_result = (|| {
             let mut file = File::create(&tmp_path)
                 .map_err(|e| format!("Failed to create temp cache file {:?}: {}", tmp_path, e))?;

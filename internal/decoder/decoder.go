@@ -8,15 +8,18 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // CallNode represents a node in the execution call tree
 type CallNode struct {
-	ContractID string         `json:"contract_id"`
-	Function   string         `json:"function,omitempty"`
-	Events     []DecodedEvent `json:"events,omitempty"`
-	SubCalls   []*CallNode    `json:"sub_calls,omitempty"`
+	ContractID      string         `json:"contract_id"`
+	Function        string         `json:"function,omitempty"`
+	Events          []DecodedEvent `json:"events,omitempty"`
+	SubCalls        []*CallNode    `json:"sub_calls,omitempty"`
+	CPUInstructions uint64         `json:"cpu,omitempty"`
+	MemoryBytes     uint64         `json:"mem,omitempty"`
 
 	// Internal for tree building
 	parent *CallNode
@@ -27,19 +30,14 @@ type DecodedEvent struct {
 	ContractID string   `json:"contract_id"`
 	Topics     []string `json:"topics"`
 	Data       string   `json:"data"`
+	CPU        uint64   `json:"cpu,omitempty"`
+	Memory     uint64   `json:"mem,omitempty"`
 }
 
 // DecodeEvents builds a call hierarchy from a list of base64-encoded XDR DiagnosticEvents.
-// If maxDepth > 0, the tree is truncated at that depth to prevent stack overflows
-// during subsequent recursive analysis.
-func DecodeEvents(eventsXdr []string, maxDepth int) (*CallNode, error) {
-	root := &CallNode{
-		ContractID: "ROOT",
-		Function:   "TOP_LEVEL",
-	}
-	current := root
-	currentDepth := 0
-
+// Deprecated: use DecodeDiagnosticEvents instead for gas-aware traces.
+func DecodeEvents(eventsXdr []string) (*CallNode, error) {
+	var diagEvents []simulator.DiagnosticEvent
 	for _, eventStr := range eventsXdr {
 		var diag xdr.DiagnosticEvent
 		data, err := base64.StdEncoding.DecodeString(eventStr)
@@ -50,11 +48,52 @@ func DecodeEvents(eventsXdr []string, maxDepth int) (*CallNode, error) {
 			return nil, fmt.Errorf("failed to unmarshal XDR event: %w", err)
 		}
 
-		decoded := parseEvent(diag)
+		decoded := simulator.DiagnosticEvent{
+			EventType:  fmt.Sprintf("%v", diag.Event.Type),
+			Topics:     make([]string, 0, len(diag.Event.Body.V0.Topics)),
+			Data:       fmt.Sprintf("%v", diag.Event.Body.V0.Data.Type),
+			InSuccessfulContractCall: diag.InSuccessfulContractCall,
+		}
+		if diag.Event.ContractId != nil {
+			id := hex.EncodeToString(diag.Event.ContractId[:])
+			decoded.ContractID = &id
+		}
+		for _, topic := range diag.Event.Body.V0.Topics {
+			if topic.Type == xdr.ScValTypeScvSymbol {
+				decoded.Topics = append(decoded.Topics, string(*topic.Sym))
+			} else {
+				decoded.Topics = append(decoded.Topics, fmt.Sprintf("%v", topic.Type))
+			}
+		}
+		diagEvents = append(diagEvents, decoded)
+	}
 
-		// Check for call/return markers in topics
-		// Convention: System events with topics ["fn_call", func_name, ...]
-		// Note: This relies on the environment emitting these diagnostic events.
+	return DecodeDiagnosticEvents(diagEvents)
+}
+
+// DecodeDiagnosticEvents builds a call hierarchy from a list of decoded simulator DiagnosticEvents
+func DecodeDiagnosticEvents(events []simulator.DiagnosticEvent) (*CallNode, error) {
+	root := &CallNode{
+		ContractID: "ROOT",
+		Function:   "TOP_LEVEL",
+	}
+	current := root
+
+	for _, event := range events {
+		decoded := DecodedEvent{
+			Topics: event.Topics,
+			Data:   event.Data,
+		}
+		if event.ContractID != nil {
+			decoded.ContractID = *event.ContractID
+		}
+		if event.CPU != nil {
+			decoded.CPU = *event.CPU
+		}
+		if event.Memory != nil {
+			decoded.Memory = *event.Memory
+		}
+
 		if isFunctionCall(decoded) {
 			if maxDepth > 0 && currentDepth >= maxDepth {
 				// Depth limit reached. Truncate this branch.
@@ -81,11 +120,14 @@ func DecodeEvents(eventsXdr []string, maxDepth int) (*CallNode, error) {
 				Function:   extractFunctionName(decoded),
 				parent:     current,
 			}
+			if event.CPU != nil {
+				child.CPUInstructions = *event.CPU
+			}
+			if event.Memory != nil {
+				child.MemoryBytes = *event.Memory
+			}
 			current.SubCalls = append(current.SubCalls, child)
 			current = child
-			currentDepth++
-
-			// Add the call event itself to the child (optional, but good for context)
 			current.Events = append(current.Events, decoded)
 		} else if isFunctionReturn(decoded) {
 			if maxDepth > 0 && currentDepth >= maxDepth {
@@ -94,11 +136,7 @@ func DecodeEvents(eventsXdr []string, maxDepth int) (*CallNode, error) {
 			}
 
 			returnedFn := extractFunctionName(decoded)
-
-			// Handle stack unwinding for failed/implicit returns
-			// If current function doesn't match the return event, check up the stack
 			if current.Function != returnedFn && current.Function != "TOP_LEVEL" {
-				// Search for the matching function up the stack
 				iter := current.parent
 				found := false
 				tempDepth := currentDepth - 1
@@ -110,8 +148,6 @@ func DecodeEvents(eventsXdr []string, maxDepth int) (*CallNode, error) {
 					iter = iter.parent
 					tempDepth--
 				}
-
-				// If found, unwind everything below it (they failed/exited without event)
 				if found {
 					for current != iter {
 						current = current.parent
@@ -120,18 +156,19 @@ func DecodeEvents(eventsXdr []string, maxDepth int) (*CallNode, error) {
 				}
 			}
 
-			// Add return event to current (which should now be the matching node)
-			if current.Function == returnedFn {
-				current.Events = append(current.Events, decoded)
+			// Calculate gas used by this node if both call and return have budget
+			if event.CPU != nil && current.CPUInstructions > 0 {
+				current.CPUInstructions = *event.CPU - current.CPUInstructions
+			}
+			if event.Memory != nil && current.MemoryBytes > 0 {
+				current.MemoryBytes = *event.Memory - current.MemoryBytes
+			}
 
-				// Pop stack
-				if current.parent != nil {
-					current = current.parent
-					currentDepth--
-				}
+			current.Events = append(current.Events, decoded)
+			if current.parent != nil {
+				current = current.parent
 			}
 		} else {
-			// Regular event, add to current scope
 			current.Events = append(current.Events, decoded)
 		}
 	}
@@ -139,33 +176,6 @@ func DecodeEvents(eventsXdr []string, maxDepth int) (*CallNode, error) {
 	return root, nil
 }
 
-func parseEvent(diag xdr.DiagnosticEvent) DecodedEvent {
-	var contractID string
-	if diag.Event.ContractId != nil {
-		contractID = hex.EncodeToString(diag.Event.ContractId[:])
-	}
-
-	// Pre-allocate topics slice capacity to reduce re-allocations
-	topics := make([]string, 0, len(diag.Event.Body.V0.Topics))
-	for _, topic := range diag.Event.Body.V0.Topics {
-		// Attempt to convert to string if symbol, otherwise hex/debug
-		if topic.Type == xdr.ScValTypeScvSymbol {
-			topics = append(topics, string(*topic.Sym))
-		} else {
-			// Fallback for other types
-			topics = append(topics, fmt.Sprintf("%v", topic.Type))
-		}
-	}
-
-	// Simple data stringification
-	data := fmt.Sprintf("%v", diag.Event.Body.V0.Data.Type)
-
-	return DecodedEvent{
-		ContractID: contractID,
-		Topics:     topics,
-		Data:       data,
-	}
-}
 
 func isFunctionCall(e DecodedEvent) bool {
 	return len(e.Topics) > 0 && e.Topics[0] == "fn_call"

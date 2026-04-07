@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flamegraph - {{.TxHash}}</title>
+<style>
+  body { font-family: monospace; background: #1e1e2e; color: #cdd6f4; margin: 0; padding: 16px; }
+  h1 { font-size: 1.1rem; margin: 0 0 10px; }
+  #info { background: #313244; border-radius: 6px; padding: 10px 14px; margin-bottom: 10px; font-size: 0.85rem; min-height: 38px; }
+  canvas { display: block; border-radius: 6px; cursor: pointer; }
+  #snapshot-panel { background: #313244; border-radius: 6px; padding: 10px 14px; margin-top: 12px; font-size: 0.85rem; }
+  #snapshot-panel h2 { font-size: 0.9rem; margin: 0 0 8px; }
+  #snapshot-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .snap-badge { background: #45475a; border-radius: 4px; padding: 4px 8px; cursor: pointer; user-select: none; }
+  .snap-badge.active { background: #89b4fa; color: #1e1e2e; }
+</style>
+</head>
+<body>
+<h1>Flamegraph &mdash; {{.TxHash}}</h1>
+<div id="info">Hover over a frame for details. Click a frame to jump to its snapshot.</div>
+<canvas id="fg" width="1100" height="60"></canvas>
+<div id="snapshot-panel">
+  <h2>Snapshot Summary</h2>
+  <div id="snapshot-list"></div>
+</div>
+<script>
+var frames = {{.Frames}};
+var snapshots = {{.Snapshots}};
+
+var canvas = document.getElementById('fg');
+var ctx = canvas.getContext('2d');
+var info = document.getElementById('info');
+var snapList = document.getElementById('snapshot-list');
+
+var W = canvas.width;
+var ROW_H = 24;
+var PAD = 2;
+var Y = PAD;
+
+var COLORS = ['#89b4fa','#cba6f7','#f38ba8','#fab387','#a6e3a1','#74c7ec','#f9e2af'];
+function frameColor(i) { return COLORS[i % COLORS.length]; }
+
+var totalGas = 0;
+for (var fi = 0; fi < frames.length; fi++) {
+  if (frames[fi].gas > 0) { totalGas += frames[fi].gas; }
+}
+if (totalGas === 0) { totalGas = frames.length || 1; }
+
+function renderSnapshots(activeID) {
+  snapList.innerHTML = '';
+  for (var si = 0; si < snapshots.length; si++) {
+    var s = snapshots[si];
+    var badge = document.createElement('span');
+    badge.className = 'snap-badge' + (s.snapshot_id === activeID ? ' active' : '');
+    badge.textContent = 'Snapshot #' + s.snapshot_id + ' (step ' + s.step + ', ' + s.key_count + ' keys)';
+    badge.dataset.id = s.snapshot_id;
+    (function(sid) {
+      badge.addEventListener('click', function() { renderSnapshots(sid); });
+    }(s.snapshot_id));
+    snapList.appendChild(badge);
+  }
+}
+renderSnapshots(-1);
+
+var frameRects = [];
+var x = 0;
+for (var i = 0; i < frames.length; i++) {
+  var f = frames[i];
+  var gas = f.gas > 0 ? f.gas : 1;
+  var w = Math.max(1, Math.floor((gas / totalGas) * W));
+  ctx.fillStyle = frameColor(i);
+  ctx.fillRect(x, Y, w - PAD, ROW_H);
+  if (w > 30) {
+    ctx.fillStyle = '#1e1e2e';
+    ctx.font = '10px monospace';
+    ctx.fillText(f.name.slice(0, Math.floor((w - PAD) / 7)), x + 3, Y + 15);
+  }
+  frameRects.push({ x: x, y: Y, w: w - PAD, h: ROW_H, frame: f });
+  x += w;
+}
+
+function hitTest(mx, my) {
+  for (var ri = 0; ri < frameRects.length; ri++) {
+    var r = frameRects[ri];
+    if (mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h) {
+      return r.frame;
+    }
+  }
+  return null;
+}
+
+canvas.addEventListener('mousemove', function(e) {
+  var rect = canvas.getBoundingClientRect();
+  var f = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+  if (f) {
+    info.textContent = f.name + ' | Gas: ' + f.gas + ' | State Churn: ' + f.state_churn + ' keys | Step: ' + f.step + ' | Snapshot #' + f.snapshot_id;
+  } else {
+    info.textContent = 'Hover over a frame for details. Click a frame to jump to its snapshot.';
+  }
+});
+
+canvas.addEventListener('click', function(e) {
+  var rect = canvas.getBoundingClientRect();
+  var f = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+  if (f) {
+    info.textContent = 'Selected: ' + f.name + ' | Gas: ' + f.gas + ' | State Churn: ' + f.state_churn + ' keys | Step: ' + f.step + ' | Snapshot #' + f.snapshot_id;
+    renderSnapshots(f.snapshot_id);
+  }
+});
+</script>
+</body>
+</html>

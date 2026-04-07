@@ -21,6 +21,12 @@ This command registers `erst://` with your operating system (Windows, macOS, or 
 You can check if the protocol is correctly registered by running:
 
 ```bash
+erst protocol:verify
+```
+
+For a concise pass/fail status check, you can also run:
+
+```bash
 erst protocol:status
 ```
 

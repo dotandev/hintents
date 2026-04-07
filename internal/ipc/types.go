@@ -99,11 +99,12 @@ type SimulationRequestSchema struct {
 }
 
 type SimulationResponseSchema struct {
-	Error     *Error  `json:"error,omitempty"`
-	RequestID string  `json:"request_id"`
-	Result    *Result `json:"result,omitempty"`
-	Success   bool    `json:"success"`
-	Version   string  `json:"version"`
+	Error     *Error            `json:"error,omitempty"`
+	RequestID string            `json:"request_id"`
+	Result    *Result           `json:"result,omitempty"`
+	Snapshots *SnapshotsPayload `json:"snapshots,omitempty"`
+	Success   bool              `json:"success"`
+	Version   string            `json:"version"`
 }
 
 type Error struct {
@@ -114,6 +115,27 @@ type Error struct {
 type Result struct {
 	// Fee charged in stroops
 	FeeCharged string `json:"fee_charged"`
+}
+
+// SnapshotsPayload carries optional simulator snapshot data alongside the
+// standard simulation response. Implementations may either embed snapshot data
+// directly in Inline or return IDs that can be resolved lazily out-of-band.
+// A response may include either representation or both.
+type SnapshotsPayload struct {
+	// Inline contains fully materialized snapshots keyed by snapshot ID.
+	Inline map[string]InlineSnapshot `json:"inline,omitempty"`
+	// IDs lists snapshot identifiers that can be resolved lazily by the caller.
+	IDs []string `json:"ids,omitempty"`
+}
+
+// InlineSnapshot mirrors the bridge-friendly subset of the on-disk snapshot
+// format so future bridge implementations can round-trip simulator state
+// without inferring field semantics from CLI-specific code paths.
+type InlineSnapshot struct {
+	// LedgerEntries is a list of key/value XDR pairs encoded as base64 strings.
+	LedgerEntries [][]string `json:"ledger_entries,omitempty"`
+	// LinearMemory is an optional base64-encoded Wasm memory dump.
+	LinearMemory string `json:"linear_memory,omitempty"`
 }
 
 type Network string

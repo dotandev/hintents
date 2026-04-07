@@ -74,12 +74,61 @@ export class FallbackRPCClient {
     }
 
     /**
-     * Register a middleware to intercept SDK requests.
+     * Fetch and stream decode a large batch of LedgerEntry XDRs from the server.
+     * Returns an async generator yielding each LedgerEntry as it is decoded.
+     * @param keys Array of ledger entry keys (base64 strings)
      */
-    use(mw: SDKMiddleware): this {
-        this.middlewares.push(mw);
-        return this;
-    }
+    async streamLedgerEntries(keys: string[]): Promise<AsyncGenerator<any, void, unknown>> {
+        // Fetch the batch as a stream or buffer
+        const response = await this.request<Buffer>('/rpc', {
+            method: 'POST',
+            data: {
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'getLedgerEntries',
+                params: { keys },
+            },
+        });
+
+        // If the response is a buffer or string, convert to stream
+        let input: Buffer | Readable;
+        const isBuffer = (val: any) => val && typeof val === 'object' && typeof val.length === 'number' && typeof val.toString === 'function' && !val.readable;
+        if (isBuffer(response)) {
+            input = response;
+        } else if (typeof response === 'string') {
+            input = Buffer.from(response, 'utf8');
+        } else if (response && typeof response === 'object' && 'data' in response) {
+            input = Buffer.from((response as any).data, 'utf8');
+        } else {
+            throw new Error('Unexpected response type for ledger entry batch');
+        }
+
+        // Use the streaming decoder
+        // Try to get a decode function for LedgerEntry
+        let decodeFn: (buf: Buffer) => any;
+        try {
+            // Dynamically require xdr.LedgerEntry if available
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { xdr } = require('@stellar/stellar-sdk');
+            if (xdr && xdr.LedgerEntry && typeof xdr.LedgerEntry.fromXDR === 'function') {
+                decodeFn = (buf: Buffer) => xdr.LedgerEntry.fromXDR(buf);
+            } else {
+                throw new Error('xdr.LedgerEntry.fromXDR not available');
+            }
+        } catch {
+            throw new Error('xdr.LedgerEntry.fromXDR not available in @stellar/stellar-sdk');
+        }
+        return XDRDecoder.streamLedgerEntries(input, decodeFn);
+
+        }
+
+        /**
+         * Register a middleware to intercept SDK requests.
+         */
+        use(mw: SDKMiddleware): this {
+            this.middlewares.push(mw);
+            return this;
+        }
 
     /**
      * Make RPC request with automatic fallback, executing middleware chain.

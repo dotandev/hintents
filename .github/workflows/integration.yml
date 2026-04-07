@@ -26,21 +26,25 @@ jobs:
             runner: ubuntu-24.04
             binary_suffix: ""
             go_arch: amd64
+            protocol_verify_script: scripts/verify_protocol_registration_linux.sh
 
           - os: macOS-Intel
             runner: macos-latest     # Intel runner (fallback to latest if 13 fails)
             binary_suffix: ""
             go_arch: amd64
+            protocol_verify_script: scripts/verify_protocol_registration_macos.sh
 
           - os: macOS-Apple-Silicon
             runner: macos-latest     # M-series ARM runner
             binary_suffix: ""
             go_arch: arm64
+            protocol_verify_script: scripts/verify_protocol_registration_macos.sh
 
           - os: Windows
             runner: windows-2022
             binary_suffix: ".exe"
             go_arch: amd64
+            protocol_verify_script: scripts/verify_protocol_registration_windows.ps1
 
     env:
       # Allow the test suite to find the compiled binary without hard-coding a path.
@@ -99,6 +103,8 @@ jobs:
           go test -v -race -timeout 120s ./integration/...
         env:
           ERST_BINARY: ${{ env.ERST_BINARY }}
+          ERST_RUN_PROTOCOL_REGISTRATION_TESTS: "1"
+          ERST_PROTOCOL_VERIFY_SCRIPT: ${{ github.workspace }}/${{ matrix.protocol_verify_script }}
 
       # ── Upload test results on failure ────────────────────────────────────
       - name: Upload test logs on failure

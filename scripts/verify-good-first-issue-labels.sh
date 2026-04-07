@@ -21,11 +21,11 @@ issues = [i for i in data if 'pull_request' not in i]
 print(len(issues))
 ")
 
-echo "Issues with label \"good first issue\": ${count} (required: ≥${REQUIRED})"
+echo "Issues with label \"good first issue\": ${count} (required: â‰¥${REQUIRED})"
 if [ "$count" -ge "$REQUIRED" ]; then
-  echo "OK – Success criteria met."
+  echo "OK â€“ Success criteria met."
   exit 0
 else
-  echo "Not yet – Apply the label to more issues (see docs/community/LABELS_AUDIT.md)."
+  echo "Not yet â€“ Apply the label to more issues (see docs/community/LABELS_AUDIT.md)."
   exit 1
 fi

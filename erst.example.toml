@@ -52,3 +52,18 @@ max_trace_depth = 50
 # Audit HSM Configuration
 # ERST_PKCS11_MODULE = "/usr/lib/softhsm/libsofthsm2.so"
 # ERST_PKCS11_MAX_RPM = 1000 # Max requests per minute to protect HSM
+
+# Mock HSM Configuration (for local testing and simulation)
+# The mock HSM simulates HSM behavior with configurable latency and failure rates.
+# Useful for testing contracts that interact with HSMs without actual hardware.
+#
+# [mock_hsm]
+# latency_ms = 50       # Simulated signing delay in milliseconds
+# failure_rate = 0.0    # Probability of signing failure (0.0 to 1.0)
+# seed_hex = ""         # Optional: 32-byte hex seed for deterministic key generation
+#
+# Environment variables:
+# ERST_SIGNER_TYPE=mock
+# ERST_MOCK_HSM_LATENCY_MS=50
+# ERST_MOCK_HSM_FAILURE_RATE=0.1
+# ERST_MOCK_HSM_SEED=0000000000000000000000000000000000000000000000000000000000000001

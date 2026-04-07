@@ -14,7 +14,7 @@ echo
 
 # Check if Go is installed
 if ! command -v go &> /dev/null; then
-    echo "❌ Go is not installed"
+    echo "âŒ Go is not installed"
     echo
     echo "Please install Go to fix the CI issues:"
     echo "  - Ubuntu/Debian: sudo apt install golang-go"
@@ -25,15 +25,15 @@ if ! command -v go &> /dev/null; then
     exit 1
 fi
 
-echo "✓ Go is installed: $(go version)"
+echo "âœ“ Go is installed: $(go version)"
 echo
 
 # Run go mod tidy
 echo "Running go mod tidy..."
 if go mod tidy; then
-    echo "✓ go mod tidy completed successfully"
+    echo "âœ“ go mod tidy completed successfully"
 else
-    echo "❌ go mod tidy failed"
+    echo "âŒ go mod tidy failed"
     exit 1
 fi
 echo
@@ -41,28 +41,28 @@ echo
 # Verify dependencies
 echo "Verifying dependencies..."
 if go mod verify; then
-    echo "✓ Dependencies verified successfully"
+    echo "âœ“ Dependencies verified successfully"
 else
-    echo "❌ Dependency verification failed"
+    echo "âŒ Dependency verification failed"
     exit 1
 fi
 echo
 
 # Check if go.sum was updated
 if git diff --quiet go.sum; then
-    echo "⚠️  go.sum was not modified"
+    echo "âš ï¸  go.sum was not modified"
     echo "   This might mean it was already up to date"
 else
-    echo "✓ go.sum was updated"
+    echo "âœ“ go.sum was updated"
 fi
 echo
 
 # Run tests
 echo "Running metrics package tests..."
 if go test ./internal/metrics -v; then
-    echo "✓ Tests passed"
+    echo "âœ“ Tests passed"
 else
-    echo "❌ Tests failed"
+    echo "âŒ Tests failed"
     exit 1
 fi
 echo
@@ -71,9 +71,9 @@ echo
 echo "Checking code formatting..."
 UNFORMATTED=$(gofmt -l internal/metrics/)
 if [ -z "$UNFORMATTED" ]; then
-    echo "✓ All files are properly formatted"
+    echo "âœ“ All files are properly formatted"
 else
-    echo "⚠️  The following files need formatting:"
+    echo "âš ï¸  The following files need formatting:"
     echo "$UNFORMATTED"
     echo
     echo "Run: gofmt -w internal/metrics/"
@@ -83,9 +83,9 @@ echo
 # Run go vet
 echo "Running go vet..."
 if go vet ./internal/metrics/...; then
-    echo "✓ go vet passed"
+    echo "âœ“ go vet passed"
 else
-    echo "❌ go vet found issues"
+    echo "âŒ go vet found issues"
     exit 1
 fi
 echo
@@ -100,11 +100,11 @@ echo
 # Show summary
 echo "=== Summary ==="
 echo
-echo "✓ go.mod and go.sum are now in sync"
-echo "✓ All dependencies verified"
-echo "✓ Tests pass"
-echo "✓ Code is properly formatted"
-echo "✓ No vet issues"
+echo "âœ“ go.mod and go.sum are now in sync"
+echo "âœ“ All dependencies verified"
+echo "âœ“ Tests pass"
+echo "âœ“ Code is properly formatted"
+echo "âœ“ No vet issues"
 echo
 echo "Next steps:"
 echo "1. Review the changes: git diff go.mod go.sum"
@@ -113,4 +113,4 @@ echo "   git add go.mod go.sum"
 echo "   git commit -m 'fix(deps): update go.sum for prometheus dependency'"
 echo "3. Push to trigger CI: git push"
 echo
-echo "The CI should now pass! ✨"
+echo "The CI should now pass! âœ¨"
