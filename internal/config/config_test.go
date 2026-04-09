@@ -46,22 +46,22 @@ func TestConfigValidation(t *testing.T) {
 	}{
 		{
 			"valid public network",
-			&Config{RpcUrl: "https://test.com", Network: NetworkPublic, RequestTimeout: 30},
+			&Config{RpcUrl: "https://test.com", Network: NetworkPublic, RequestTimeout: 30, MaxTraceDepth: 50},
 			false,
 		},
 		{
 			"valid testnet",
-			&Config{RpcUrl: "https://test.com", Network: NetworkTestnet, RequestTimeout: 30},
+			&Config{RpcUrl: "https://test.com", Network: NetworkTestnet, RequestTimeout: 30, MaxTraceDepth: 50},
 			false,
 		},
 		{
 			"valid futurenet",
-			&Config{RpcUrl: "https://test.com", Network: NetworkFuturenet, RequestTimeout: 30},
+			&Config{RpcUrl: "https://test.com", Network: NetworkFuturenet, RequestTimeout: 30, MaxTraceDepth: 50},
 			false,
 		},
 		{
 			"valid standalone",
-			&Config{RpcUrl: "https://test.com", Network: NetworkStandalone, RequestTimeout: 30},
+			&Config{RpcUrl: "https://test.com", Network: NetworkStandalone, RequestTimeout: 30, MaxTraceDepth: 50},
 			false,
 		},
 		{
@@ -620,5 +620,43 @@ func TestWithRequestTimeout(t *testing.T) {
 	cfg := NewConfig("https://test.com", NetworkTestnet).WithRequestTimeout(45)
 	if cfg.RequestTimeout != 45 {
 		t.Errorf("expected RequestTimeout=45, got %d", cfg.RequestTimeout)
+	}
+}
+
+// ---- MaxTraceDepth config --------------------------------------------------
+
+func TestDefaultConfig_MaxTraceDepth(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.MaxTraceDepth != 50 {
+		t.Errorf("expected default MaxTraceDepth=50, got %d", cfg.MaxTraceDepth)
+	}
+}
+
+func TestLoad_MaxTraceDepthFromEnv(t *testing.T) {
+	orig := os.Getenv("ERST_MAX_TRACE_DEPTH")
+	defer os.Setenv("ERST_MAX_TRACE_DEPTH", orig)
+
+	os.Setenv("ERST_MAX_TRACE_DEPTH", "100")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxTraceDepth != 100 {
+		t.Errorf("expected MaxTraceDepth=100 from env, got %d", cfg.MaxTraceDepth)
+	}
+}
+
+func TestParseTOML_MaxTraceDepth(t *testing.T) {
+	content := `rpc_url = "https://test.com"
+network = "testnet"
+max_trace_depth = 25`
+
+	cfg := &Config{}
+	if err := cfg.parseTOML(content); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxTraceDepth != 25 {
+		t.Errorf("expected MaxTraceDepth=25 from TOML, got %d", cfg.MaxTraceDepth)
 	}
 }

@@ -1,5 +1,9 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
+
+// verification_test.go validates the ledger entry verification logic used to
+// ensure RPC responses contain the exact entries the client requested. This
+// guards against data corruption, incomplete responses, and tampered results.
 package rpc
 
 import (
@@ -12,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestVerifyLedgerEntryHash_ValidKey verifies that hash verification succeeds
+// when sent and received keys are identical (happy path).
 func TestVerifyLedgerEntryHash_ValidKey(t *testing.T) {
 	// Create a valid LedgerKey for a contract data entry
 	contractID := xdr.ContractId([32]byte{
@@ -27,12 +33,13 @@ func TestVerifyLedgerEntryHash_ValidKey(t *testing.T) {
 		ContractId: &contractIDVal,
 	}
 
-	sym := xdr.ScSymbol("COUNTER")
+	sym := xdr.ScSymbol(fmt.Sprintf("COUNTER_%d", seed))
 	keyVal := xdr.ScVal{
 		Type: xdr.ScValTypeScvSymbol,
 		Sym:  &sym,
 	}
 
+	// Create the Key
 	ledgerKey := xdr.LedgerKey{
 		Type: xdr.LedgerEntryTypeContractData,
 		ContractData: &xdr.LedgerKeyContractData{
@@ -42,67 +49,115 @@ func TestVerifyLedgerEntryHash_ValidKey(t *testing.T) {
 		},
 	}
 
-	// Marshal to XDR and encode to base64
-	xdrBytes, err := ledgerKey.MarshalBinary()
+	keyBytes, err := ledgerKey.MarshalBinary()
 	require.NoError(t, err)
-	keyB64 := base64.StdEncoding.EncodeToString(xdrBytes)
+	keyB64 := base64.StdEncoding.EncodeToString(keyBytes)
 
-	// Verify the hash
-	err = VerifyLedgerEntryHash(keyB64, keyB64)
+	// Create the Entry
+	valSym := xdr.ScSymbol("VALUE")
+	valVal := xdr.ScVal{
+		Type: xdr.ScValTypeScvSymbol,
+		Sym:  &valSym,
+	}
+
+	ledgerEntry := xdr.LedgerEntry{
+		LastModifiedLedgerSeq: 12345,
+		Data: xdr.LedgerEntryData{
+			Type: xdr.LedgerEntryTypeContractData,
+			ContractData: &xdr.ContractDataEntry{
+				Contract:   contractAddr,
+				Key:        keyVal,
+				Durability: xdr.ContractDataDurability(xdr.ContractDataDurabilityPersistent),
+				Val:        valVal,
+			},
+		},
+		Ext: xdr.LedgerEntryExt{V: 0},
+	}
+
+	entryBytes, err := ledgerEntry.MarshalBinary()
+	require.NoError(t, err)
+	entryB64 := base64.StdEncoding.EncodeToString(entryBytes)
+
+	return keyB64, entryB64
+}
+
+func TestVerifyLedgerEntryHash_ValidKey(t *testing.T) {
+	keyB64, entryB64 := createTestLedgerData(t, 1)
+
+	result := LedgerEntryResult{
+		Key: keyB64,
+		Xdr: entryB64,
+	}
+
+	err := VerifyLedgerEntryHash(keyB64, result)
 	assert.NoError(t, err)
 }
 
+// TestVerifyLedgerEntryHash_KeyMismatch ensures verification detects when the
+// returned key differs from the requested key, catching tampered RPC responses.
 func TestVerifyLedgerEntryHash_KeyMismatch(t *testing.T) {
-	// Create two different keys
-	key1 := createTestLedgerKey(t, 1)
-	key2 := createTestLedgerKey(t, 2)
+	key1, _ := createTestLedgerData(t, 1)
+	key2, entry2 := createTestLedgerData(t, 2)
 
-	err := VerifyLedgerEntryHash(key1, key2)
+	result := LedgerEntryResult{
+		Key: key2,
+		Xdr: entry2,
+	}
+
+	err := VerifyLedgerEntryHash(key1, result)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "key mismatch")
 }
 
+// TestVerifyLedgerEntryHash_InvalidBase64 validates error handling when the
+// base64 encoding is malformed, protecting against garbage data in responses.
 func TestVerifyLedgerEntryHash_InvalidBase64(t *testing.T) {
 	invalidB64 := "not-valid-base64!!!"
 
-	err := VerifyLedgerEntryHash(invalidB64, invalidB64)
+	err := VerifyLedgerEntryHash("AAAA", LedgerEntryResult{Key: "AAAA", Xdr: invalidB64})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to decode")
 }
 
+// TestVerifyLedgerEntryHash_InvalidXDR ensures the function rejects data that
+// decodes from base64 but contains invalid XDR binary (corrupted ledger entries).
 func TestVerifyLedgerEntryHash_InvalidXDR(t *testing.T) {
-	// Valid base64 but invalid XDR content
 	invalidXDR := base64.StdEncoding.EncodeToString([]byte("invalid xdr data"))
+	key, _ := createTestLedgerData(t, 1)
 
-	err := VerifyLedgerEntryHash(invalidXDR, invalidXDR)
+	err := VerifyLedgerEntryHash(key, LedgerEntryResult{Key: key, Xdr: invalidXDR})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to unmarshal")
+	assert.Contains(t, err.Error(), "failed to unmarshal ledger entry")
 }
 
+// TestVerifyLedgerEntries_AllValid validates that batch verification succeeds
+// when all requested keys are present in the returned entries.
 func TestVerifyLedgerEntries_AllValid(t *testing.T) {
-	key1 := createTestLedgerKey(t, 1)
-	key2 := createTestLedgerKey(t, 2)
-	key3 := createTestLedgerKey(t, 3)
+	k1, e1 := createTestLedgerData(t, 1)
+	k2, e2 := createTestLedgerData(t, 2)
+	k3, e3 := createTestLedgerData(t, 3)
 
-	requestedKeys := []string{key1, key2, key3}
-	returnedEntries := map[string]string{
-		key1: "value1",
-		key2: "value2",
-		key3: "value3",
+	requestedKeys := []string{k1, k2, k3}
+	returnedEntries := []LedgerEntryResult{
+		{Key: k1, Xdr: e1},
+		{Key: k2, Xdr: e2},
+		{Key: k3, Xdr: e3},
 	}
 
 	err := VerifyLedgerEntries(requestedKeys, returnedEntries)
 	assert.NoError(t, err)
 }
 
+// TestVerifyLedgerEntries_MissingKey ensures verification fails when an RPC
+// response omits a requested entry, detecting incomplete responses.
 func TestVerifyLedgerEntries_MissingKey(t *testing.T) {
-	key1 := createTestLedgerKey(t, 1)
-	key2 := createTestLedgerKey(t, 2)
+	k1, e1 := createTestLedgerData(t, 1)
+	k2, _ := createTestLedgerData(t, 2)
 
-	requestedKeys := []string{key1, key2}
-	returnedEntries := map[string]string{
-		key1: "value1",
-		// key2 is missing
+	requestedKeys := []string{k1, k2}
+	returnedEntries := []LedgerEntryResult{
+		{Key: k1, Xdr: e1},
+		// k2 is missing
 	}
 
 	err := VerifyLedgerEntries(requestedKeys, returnedEntries)
@@ -110,11 +165,15 @@ func TestVerifyLedgerEntries_MissingKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found in response")
 }
 
+// TestVerifyLedgerEntries_EmptyRequest validates that requesting zero keys
+// succeeds without errors (edge case for empty batches).
 func TestVerifyLedgerEntries_EmptyRequest(t *testing.T) {
-	err := VerifyLedgerEntries([]string{}, map[string]string{})
+	err := VerifyLedgerEntries([]string{}, []LedgerEntryResult{})
 	assert.NoError(t, err)
 }
 
+// TestVerifyLedgerEntries_NilMap validates that a nil response map is rejected,
+// guarding against nil pointer dereferences.
 func TestVerifyLedgerEntries_NilMap(t *testing.T) {
 	key1 := createTestLedgerKey(t, 1)
 
@@ -122,80 +181,121 @@ func TestVerifyLedgerEntries_NilMap(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestVerifyLedgerEntryHash_DifferentKeyTypes validates that verification works
+// across different Stellar ledger key types (Account, ContractCode, etc.).
 func TestVerifyLedgerEntryHash_DifferentKeyTypes(t *testing.T) {
 	tests := []struct {
-		name      string
-		createKey func() xdr.LedgerKey
+		name       string
+		createData func() (string, string)
 	}{
 		{
 			name: "Account key",
-			createKey: func() xdr.LedgerKey {
+			createData: func() (string, string) {
 				accountID := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
-				return xdr.LedgerKey{
+				key := xdr.LedgerKey{
 					Type: xdr.LedgerEntryTypeAccount,
 					Account: &xdr.LedgerKeyAccount{
 						AccountId: accountID,
 					},
 				}
+
+				entry := xdr.LedgerEntry{
+					LastModifiedLedgerSeq: 123,
+					Data: xdr.LedgerEntryData{
+						Type: xdr.LedgerEntryTypeAccount,
+						Account: &xdr.AccountEntry{
+							AccountId: accountID,
+							Balance:   1000,
+						},
+					},
+				}
+
+				kb, _ := key.MarshalBinary()
+				eb, _ := entry.MarshalBinary()
+				return base64.StdEncoding.EncodeToString(kb), base64.StdEncoding.EncodeToString(eb)
 			},
 		},
 		{
 			name: "ContractCode key",
-			createKey: func() xdr.LedgerKey {
+			createData: func() (string, string) {
 				codeHash := xdr.Hash([32]byte{
 					0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8,
 					0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf, 0xe0,
 					0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8,
 					0xe9, 0xea, 0xeb, 0xec, 0xed, 0xee, 0xef, 0xf0,
 				})
-				return xdr.LedgerKey{
+				key := xdr.LedgerKey{
 					Type:         xdr.LedgerEntryTypeContractCode,
 					ContractCode: &xdr.LedgerKeyContractCode{Hash: codeHash},
 				}
+
+				entry := xdr.LedgerEntry{
+					LastModifiedLedgerSeq: 456,
+					Data: xdr.LedgerEntryData{
+						Type: xdr.LedgerEntryTypeContractCode,
+						ContractCode: &xdr.ContractCodeEntry{
+							Hash: codeHash,
+							Code: []byte{1, 2, 3, 4},
+						},
+					},
+				}
+
+				kb, _ := key.MarshalBinary()
+				eb, _ := entry.MarshalBinary()
+				return base64.StdEncoding.EncodeToString(kb), base64.StdEncoding.EncodeToString(eb)
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			key := tt.createKey()
-			xdrBytes, err := key.MarshalBinary()
-			require.NoError(t, err)
-			keyB64 := base64.StdEncoding.EncodeToString(xdrBytes)
+			key, entry := tt.createData()
 
-			err = VerifyLedgerEntryHash(keyB64, keyB64)
+			result := LedgerEntryResult{
+				Key: key,
+				Xdr: entry,
+			}
+
+			err := VerifyLedgerEntryHash(key, result)
 			assert.NoError(t, err)
 		})
 	}
 }
 
+// TestVerifyLedgerEntries_LargeSet tests batch verification with 100 entries to
+// ensure correctness at scale.
 func TestVerifyLedgerEntries_LargeSet(t *testing.T) {
 	const numKeys = 100
 
 	requestedKeys := make([]string, numKeys)
-	returnedEntries := make(map[string]string, numKeys)
+	returnedEntries := make([]LedgerEntryResult, numKeys)
 
 	for i := 0; i < numKeys; i++ {
-		key := createTestLedgerKey(t, i)
-		requestedKeys[i] = key
-		returnedEntries[key] = "value"
+		k, e := createTestLedgerData(t, i)
+		requestedKeys[i] = k
+		returnedEntries[i] = LedgerEntryResult{Key: k, Xdr: e}
 	}
 
 	err := VerifyLedgerEntries(requestedKeys, returnedEntries)
 	assert.NoError(t, err)
 }
 
+// TestVerifyLedgerEntryHash_EmptyKey validates that empty string keys are rejected.
 func TestVerifyLedgerEntryHash_EmptyKey(t *testing.T) {
-	err := VerifyLedgerEntryHash("", "")
+	err := VerifyLedgerEntryHash("", LedgerEntryResult{})
 	assert.Error(t, err)
 }
 
+// TestVerifyLedgerEntryHash_WhitespaceKey validates that whitespace-only keys
+// are rejected as invalid input.
 func TestVerifyLedgerEntryHash_WhitespaceKey(t *testing.T) {
-	err := VerifyLedgerEntryHash("   ", "   ")
+	err := VerifyLedgerEntryHash("   ", LedgerEntryResult{Key: "   "})
 	assert.Error(t, err)
 }
 
-// createTestLedgerKey creates a unique test ledger key with the given seed
+// createTestLedgerKey builds a deterministic, unique base64-encoded ContractData
+// ledger key from the given seed. Each seed produces a distinct contract ID,
+// making it suitable for testing verification logic with multiple entries.
 func createTestLedgerKey(t *testing.T, seed int) string {
 	t.Helper()
 
@@ -232,29 +332,33 @@ func createTestLedgerKey(t *testing.T, seed int) string {
 	return base64.StdEncoding.EncodeToString(xdrBytes)
 }
 
-// BenchmarkVerifyLedgerEntryHash benchmarks the hash verification performance
+// BenchmarkVerifyLedgerEntryHash measures single-key verification throughput.
+// Run with: go test -bench=BenchmarkVerifyLedgerEntryHash ./internal/rpc
 func BenchmarkVerifyLedgerEntryHash(b *testing.B) {
-	key := createTestLedgerKey(&testing.T{}, 1)
+	key, entry := createTestLedgerData(&testing.T{}, 1)
+	result := LedgerEntryResult{Key: key, Xdr: entry}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = VerifyLedgerEntryHash(key, key)
+		_ = VerifyLedgerEntryHash(key, result)
 	}
 }
 
-// BenchmarkVerifyLedgerEntries benchmarks verification of multiple entries
+// BenchmarkVerifyLedgerEntries measures batch verification across varying set
+// sizes (10, 50, 100, 500) to profile scaling behavior.
+// Run with: go test -bench=BenchmarkVerifyLedgerEntries ./internal/rpc
 func BenchmarkVerifyLedgerEntries(b *testing.B) {
 	sizes := []int{10, 50, 100, 500}
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("size_%d", size), func(b *testing.B) {
 			requestedKeys := make([]string, size)
-			returnedEntries := make(map[string]string, size)
+			returnedEntries := make([]LedgerEntryResult, size)
 
 			for i := 0; i < size; i++ {
-				key := createTestLedgerKey(&testing.T{}, i)
-				requestedKeys[i] = key
-				returnedEntries[key] = "value"
+				k, e := createTestLedgerData(&testing.T{}, i)
+				requestedKeys[i] = k
+				returnedEntries[i] = LedgerEntryResult{Key: k, Xdr: e}
 			}
 
 			b.ResetTimer()

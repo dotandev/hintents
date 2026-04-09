@@ -1,7 +1,9 @@
 // Copyright (c) Hintents Authors.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ContractID, PublicKeyPEM } from './sdk';
+import { ContractID } from './sdk';
+
+type PublicKeyPEM = string & { readonly __brand: 'PublicKeyPEM' };
 
 /**
  * Validates a raw string as a ContractID.

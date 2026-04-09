@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ type Checker struct {
 // GitHubRelease represents the GitHub API response for a release
 type GitHubRelease struct {
 	TagName string `json:"tag_name"`
+	Body    string `json:"body"`
 }
 
 // CacheData stores the last check timestamp and latest version
@@ -144,6 +146,50 @@ func (c *Checker) fetchLatestVersion(ctx context.Context) (string, error) {
 	return release.TagName, nil
 }
 
+// FetchReleaseInfo gets full information for a specific version or latest
+func (c *Checker) FetchReleaseInfo(ctx context.Context, version string) (*GitHubRelease, error) {
+	url := GitHubAPIURL
+	if version != "" && version != "latest" {
+		if !strings.HasPrefix(version, "v") {
+			version = "v" + version
+		}
+		url = fmt.Sprintf("https://api.github.com/repos/dotandev/hintents/releases/tags/%s", version)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("User-Agent", "erst-cli")
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	client := &http.Client{
+		Timeout: RequestTimeout,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("release %s not found", version)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code from GitHub: %d", resp.StatusCode)
+	}
+
+	var release GitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, err
+	}
+
+	return &release, nil
+}
+
 // compareVersions compares current vs latest version
 func (c *Checker) compareVersions(current, latest string) (bool, error) {
 	// Strip 'v' prefix if present
@@ -176,6 +222,39 @@ func (c *Checker) displayNotification(latestVersion string) {
 		latestVersion,
 	)
 	fmt.Fprint(os.Stderr, message)
+}
+
+func (c *Checker) PerformUpdate(ctx context.Context, version string) error {
+	// For idempotency, if the version requested is already what we have, skip
+	if version != "" && version != "latest" {
+		v := strings.TrimPrefix(version, "v")
+		cur := strings.TrimPrefix(c.currentVersion, "v")
+		if v == cur {
+			return nil // Already at version
+		}
+	}
+
+	target := "github.com/dotandev/hintents/cmd/erst@latest"
+	if version != "" && version != "latest" {
+		if !strings.HasPrefix(version, "v") {
+			version = "v" + version
+		}
+		target = fmt.Sprintf("github.com/dotandev/hintents/cmd/erst@%s", version)
+	}
+
+	fmt.Printf("Updating to %s via 'go install'...\n", target)
+
+	// Prepare go install command
+	cmd := exec.CommandContext(ctx, "go", "install", target)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("update failed: %w", err)
+	}
+
+	fmt.Println("Update successful. Please restart erst.")
+	return nil
 }
 
 // ShowBannerFromCache reads the last update check cache and, if a newer version

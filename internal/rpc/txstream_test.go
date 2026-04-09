@@ -614,3 +614,385 @@ func TestWsGenKey_AreUnique(t *testing.T) {
 
 // Verify that net.Conn is assignable to io.Writer for wsConn.raw usage.
 var _ io.Writer = (net.Conn)(nil)
+
+// ---------------------------------------------------------------------------
+// Unit tests — decodeTxStatus
+// ---------------------------------------------------------------------------
+
+func TestDecodeTxStatus_FullResponse(t *testing.T) {
+	resp := &jsonrpcResponse{
+		Result: &sorobanGetTxResult{
+			Status:           TxStatusSuccess,
+			Ledger:           1234,
+			EnvelopeXdr:      "ENVXDR==",
+			ResultXdr:        "RESXDR==",
+			ResultMetaXdr:    "METAXDR==",
+			ApplicationOrder: 2,
+			LatestLedger:     1240,
+			CreatedAt:        1700000000,
+		},
+	}
+	got := decodeTxStatus("abc123", resp)
+	if got.Hash != "abc123" {
+		t.Errorf("Hash = %q, want %q", got.Hash, "abc123")
+	}
+	if got.Status != TxStatusSuccess {
+		t.Errorf("Status = %q, want SUCCESS", got.Status)
+	}
+	if got.Ledger != 1234 {
+		t.Errorf("Ledger = %d, want 1234", got.Ledger)
+	}
+	if got.EnvelopeXdr != "ENVXDR==" {
+		t.Errorf("EnvelopeXdr = %q, want %q", got.EnvelopeXdr, "ENVXDR==")
+	}
+	if got.ResultXdr != "RESXDR==" {
+		t.Errorf("ResultXdr = %q, want %q", got.ResultXdr, "RESXDR==")
+	}
+	if got.ResultMetaXdr != "METAXDR==" {
+		t.Errorf("ResultMetaXdr = %q, want %q", got.ResultMetaXdr, "METAXDR==")
+	}
+	if got.ApplicationOrder != 2 {
+		t.Errorf("ApplicationOrder = %d, want 2", got.ApplicationOrder)
+	}
+	if got.LatestLedger != 1240 {
+		t.Errorf("LatestLedger = %d, want 1240", got.LatestLedger)
+	}
+	if got.CreatedAt != 1700000000 {
+		t.Errorf("CreatedAt = %d, want 1700000000", got.CreatedAt)
+	}
+}
+
+func TestDecodeTxStatus_RPCError(t *testing.T) {
+	resp := &jsonrpcResponse{
+		Error: &struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		}{Code: -32600, Message: "transaction not found"},
+	}
+	got := decodeTxStatus("deadbeef", resp)
+	if got.Status != TxStatusNotFound {
+		t.Errorf("Status = %q, want NOT_FOUND", got.Status)
+	}
+	if got.Error != "transaction not found" {
+		t.Errorf("Error = %q, want %q", got.Error, "transaction not found")
+	}
+}
+
+func TestDecodeTxStatus_NilResult(t *testing.T) {
+	resp := &jsonrpcResponse{Result: nil}
+	got := decodeTxStatus("xyz", resp)
+	if got.Status != TxStatusNotFound {
+		t.Errorf("nil result: Status = %q, want NOT_FOUND", got.Status)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests — wsReadMessage (fragmented frame reassembly)
+// ---------------------------------------------------------------------------
+
+// wsWriteFragmented splits payload into n unmasked frames.
+// The first frame uses opcode 0x1 (text) with FIN=0; subsequent frames use
+// opcode 0x0 (continuation); the last fragment has FIN=1.
+func wsWriteFragmented(w io.Writer, payload []byte, n int) error {
+	if n <= 0 {
+		n = 1
+	}
+	chunkSize := (len(payload) + n - 1) / n
+	for i := 0; i < n; i++ {
+		start := i * chunkSize
+		end := start + chunkSize
+		if end > len(payload) {
+			end = len(payload)
+		}
+		chunk := payload[start:end]
+
+		fin := byte(0x00)
+		if i == n-1 {
+			fin = 0x80
+		}
+		var opcode byte
+		if i == 0 {
+			opcode = 0x01 // text
+		} else {
+			opcode = 0x00 // continuation
+		}
+		header := []byte{fin | opcode, byte(len(chunk))}
+		if _, err := w.Write(header); err != nil {
+			return err
+		}
+		if _, err := w.Write(chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestWsReadMessage_ReassemblesFragments(t *testing.T) {
+	want := []byte(`{"jsonrpc":"2.0","id":1,"result":{"status":"SUCCESS","ledger":42}}`)
+
+	pr, pw := io.Pipe()
+	go func() {
+		if err := wsWriteFragmented(pw, want, 3); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
+	}()
+
+	br := bufio.NewReader(pr)
+	got, err := wsReadMessage(br)
+	if err != nil {
+		t.Fatalf("wsReadMessage: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("reassembled = %q, want %q", got, want)
+	}
+}
+
+func TestWsReadMessage_SingleFrame(t *testing.T) {
+	want := []byte(`{"status":"PENDING"}`)
+	pr, pw := io.Pipe()
+	go func() {
+		wsWriteFrameUnmasked(pw, want) //nolint:errcheck
+		pw.Close()
+	}()
+
+	br := bufio.NewReader(pr)
+	got, err := wsReadMessage(br)
+	if err != nil {
+		t.Fatalf("wsReadMessage single frame: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Integration tests — XDR field propagation through pollingStreamer
+// ---------------------------------------------------------------------------
+
+// serveGetTransactionFull returns a handler that serves a full getTransaction
+// response containing all XDR fields on the first SUCCESS response.
+func serveGetTransactionFull() http.HandlerFunc {
+	called := false
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "expected POST", http.StatusMethodNotAllowed)
+			return
+		}
+		var status string
+		if !called {
+			called = true
+			status = TxStatusPending
+			resp := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"result":{"status":%q,"ledger":0}}`, status)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, resp)
+			return
+		}
+		resp := `{"jsonrpc":"2.0","id":1,"result":{` +
+			`"status":"SUCCESS",` +
+			`"ledger":500,` +
+			`"envelopeXdr":"ENVXDR==",` +
+			`"resultXdr":"RESXDR==",` +
+			`"resultMetaXdr":"METAXDR==",` +
+			`"applicationOrder":3,` +
+			`"latestLedger":510,` +
+			`"createdAt":1700000001` +
+			`}}`
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, resp)
+	}
+}
+
+func TestPollingStreamer_DecodesFullResponse(t *testing.T) {
+	srv := httptest.NewServer(serveGetTransactionFull())
+	defer srv.Close()
+
+	client := &Client{
+		SorobanURL: srv.URL,
+		httpClient: srv.Client(),
+	}
+	streamer := &pollingStreamer{client: client}
+
+	origInterval := pollStreamInterval
+	pollStreamInterval = 20 * time.Millisecond
+	defer func() { pollStreamInterval = origInterval }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch, err := streamer.Stream(ctx, "fullhash")
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var final TxStatus
+	for s := range ch {
+		final = s
+	}
+
+	if final.Status != TxStatusSuccess {
+		t.Errorf("Status = %q, want SUCCESS", final.Status)
+	}
+	if final.EnvelopeXdr != "ENVXDR==" {
+		t.Errorf("EnvelopeXdr = %q, want ENVXDR==", final.EnvelopeXdr)
+	}
+	if final.ResultXdr != "RESXDR==" {
+		t.Errorf("ResultXdr = %q, want RESXDR==", final.ResultXdr)
+	}
+	if final.ResultMetaXdr != "METAXDR==" {
+		t.Errorf("ResultMetaXdr = %q, want METAXDR==", final.ResultMetaXdr)
+	}
+	if final.ApplicationOrder != 3 {
+		t.Errorf("ApplicationOrder = %d, want 3", final.ApplicationOrder)
+	}
+	if final.LatestLedger != 510 {
+		t.Errorf("LatestLedger = %d, want 510", final.LatestLedger)
+	}
+	if final.CreatedAt != 1700000001 {
+		t.Errorf("CreatedAt = %d, want 1700000001", final.CreatedAt)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Integration test — XDR field propagation through wsStreamer
+// ---------------------------------------------------------------------------
+
+// newMockWSServerFull is like newMockWSServer but the SUCCESS response
+// includes all XDR fields.
+func newMockWSServerFull(t *testing.T) *httptest.Server {
+	t.Helper()
+	callN := 0
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			http.Error(w, "not a websocket upgrade", http.StatusBadRequest)
+			return
+		}
+
+		key := r.Header.Get("Sec-Websocket-Key")
+		accept := wsAcceptKey(key)
+
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+			return
+		}
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		fmt.Fprintf(bufrw,
+			"HTTP/1.1 101 Switching Protocols\r\n"+
+				"Upgrade: websocket\r\n"+
+				"Connection: Upgrade\r\n"+
+				"Sec-WebSocket-Accept: %s\r\n"+
+				"\r\n",
+			accept,
+		)
+		if err := bufrw.Flush(); err != nil {
+			return
+		}
+
+		for {
+			conn.SetReadDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck
+			msg, err := wsReadFrame(bufrw.Reader)
+			if err != nil {
+				return
+			}
+			conn.SetReadDeadline(time.Time{}) //nolint:errcheck
+
+			var req jsonrpcRequest
+			if err := json.Unmarshal(msg, &req); err != nil {
+				return
+			}
+
+			callN++
+			var resp string
+			if callN < 2 {
+				resp = fmt.Sprintf(
+					`{"jsonrpc":"2.0","id":%d,"result":{"status":%q,"ledger":0}}`,
+					req.ID, TxStatusPending,
+				)
+			} else {
+				resp = fmt.Sprintf(
+					`{"jsonrpc":"2.0","id":%d,"result":{`+
+						`"status":"SUCCESS",`+
+						`"ledger":600,`+
+						`"envelopeXdr":"WSENV==",`+
+						`"resultXdr":"WSRES==",`+
+						`"resultMetaXdr":"WSMETA==",`+
+						`"applicationOrder":5,`+
+						`"latestLedger":605,`+
+						`"createdAt":1700000002`+
+						`}}`,
+					req.ID,
+				)
+			}
+
+			conn.SetWriteDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck
+			if err := wsWriteFrameUnmasked(conn, []byte(resp)); err != nil {
+				return
+			}
+			conn.SetWriteDeadline(time.Time{}) //nolint:errcheck
+
+			if callN >= 2 {
+				return
+			}
+		}
+	})
+
+	return httptest.NewServer(handler)
+}
+
+func TestWsStreamer_DecodesFullResponse(t *testing.T) {
+	srv := newMockWSServerFull(t)
+	defer srv.Close()
+
+	wsURL := "ws://" + srv.Listener.Addr().String()
+	client := &Client{
+		SorobanURL: "http://" + srv.Listener.Addr().String(),
+	}
+	streamer := &wsStreamer{client: client, wsURL: wsURL}
+
+	origInterval := wsStreamInterval
+	wsStreamInterval = 20 * time.Millisecond
+	defer func() { wsStreamInterval = origInterval }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch, err := streamer.Stream(ctx, "wshash")
+	if err != nil {
+		t.Fatalf("wsStreamer.Stream: %v", err)
+	}
+
+	var final TxStatus
+	for s := range ch {
+		final = s
+	}
+
+	if final.Status != TxStatusSuccess {
+		t.Errorf("Status = %q, want SUCCESS", final.Status)
+	}
+	if final.EnvelopeXdr != "WSENV==" {
+		t.Errorf("EnvelopeXdr = %q, want WSENV==", final.EnvelopeXdr)
+	}
+	if final.ResultXdr != "WSRES==" {
+		t.Errorf("ResultXdr = %q, want WSRES==", final.ResultXdr)
+	}
+	if final.ResultMetaXdr != "WSMETA==" {
+		t.Errorf("ResultMetaXdr = %q, want WSMETA==", final.ResultMetaXdr)
+	}
+	if final.ApplicationOrder != 5 {
+		t.Errorf("ApplicationOrder = %d, want 5", final.ApplicationOrder)
+	}
+	if final.LatestLedger != 605 {
+		t.Errorf("LatestLedger = %d, want 605", final.LatestLedger)
+	}
+	if final.CreatedAt != 1700000002 {
+		t.Errorf("CreatedAt = %d, want 1700000002", final.CreatedAt)
+	}
+}

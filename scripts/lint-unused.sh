@@ -1,25 +1,8 @@
-# Copyright (c) Hintents Authors.
-# SPDX-License-Identifier: Apache-2.0
-
-
 #!/bin/bash
 # Copyright 2026 Erst Users
 # SPDX-License-Identifier: Apache-2.0
 
-#!/bin/bash
-# Copyright (c) Hintents Authors.
-# SPDX-License-Identifier: Apache-2.0
-
-#!/bin/bash
-
-# Copyright (c) 2026 dotandev
-# SPDX-License-Identifier: MIT OR Apache-2.0
-
->>>>>>> Stashed changes
-
 # Script to run unused code detection and cleanup
-# This script should be run after resolving the Go toolchain version mismatch
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,7 +14,7 @@ echo "Running unused code detection..."
 # Check if golangci-lint is available
 if ! command -v golangci-lint &> /dev/null; then
     echo "golangci-lint not found. Installing..."
-    curl -sSfL https:#raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.54.2
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.54.2
 fi
 
 # Run golangci-lint with unused linter

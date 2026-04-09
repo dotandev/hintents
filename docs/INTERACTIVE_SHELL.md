@@ -236,13 +236,13 @@ sequenceDiagram
 
 ### Planned Features
 
-- ⏳ XDR envelope building for invocations
-- ⏳ State extraction from simulation results
-- ⏳ Command history and auto-completion
-- ⏳ Contract address book
-- ⏳ Batch command execution from files
-- ⏳ State diff visualization
-- ⏳ Transaction replay from history
+- [TIME-TRAVEL] XDR envelope building for invocations
+- [TIME-TRAVEL] State extraction from simulation results
+- [TIME-TRAVEL] Command history and auto-completion
+- [TIME-TRAVEL] Contract address book
+- [TIME-TRAVEL] Batch command execution from files
+- [TIME-TRAVEL] State diff visualization
+- [TIME-TRAVEL] Transaction replay from history
 
 ## Limitations
 

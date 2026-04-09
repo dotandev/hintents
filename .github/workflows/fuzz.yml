@@ -21,11 +21,19 @@ jobs:
       - name: Install Rust Nightly Toolchain
         uses: dtolnay/rust-toolchain@nightly
 
+      - name: Reclaim runner temp space before fuzz build
+        run: bash ./scripts/ci-clean-build-space.sh
+
       - name: Cache Cargo Registry
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ./simulator
+          cache-targets: false
 
       - name: Execute LLVM SanitizerCoverage Pass
         working-directory: ./simulator
         run: cargo rustc --bin simulator -- -C passes=sancov-module
+
+      - name: Reclaim runner temp space after fuzz build
+        if: always()
+        run: bash ./scripts/ci-clean-build-space.sh

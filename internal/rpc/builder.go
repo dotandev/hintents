@@ -24,9 +24,10 @@ type clientBuilder struct {
 	cacheEnabled    bool
 	methodTelemetry MethodTelemetry
 	config          *NetworkConfig
-	httpClient      *http.Client
+	httpClient      HTTPClient
 	requestTimeout  time.Duration
 	middlewares     []Middleware
+	loggingEnabled  bool
 }
 
 const defaultHTTPTimeout = 15 * time.Second
@@ -127,7 +128,7 @@ func WithRequestTimeout(d time.Duration) ClientOption {
 	}
 }
 
-func WithHTTPClient(client *http.Client) ClientOption {
+func WithHTTPClient(client HTTPClient) ClientOption {
 	return func(b *clientBuilder) error {
 		b.httpClient = client
 		return nil
@@ -149,6 +150,17 @@ func WithMethodTelemetry(telemetry MethodTelemetry) ClientOption {
 func WithMiddleware(middlewares ...Middleware) ClientOption {
 	return func(b *clientBuilder) error {
 		b.middlewares = append(b.middlewares, middlewares...)
+		return nil
+	}
+}
+
+// WithLoggingEnabled enables or disables the built-in LoggingMiddleware.
+// When enabled, every outbound HTTP request is logged at INFO level with its
+// method, URL, response status, and round-trip latency. The logging middleware
+// is always placed outermost so it observes the full logical request duration.
+func WithLoggingEnabled(enabled bool) ClientOption {
+	return func(b *clientBuilder) error {
+		b.loggingEnabled = enabled
 		return nil
 	}
 }
@@ -228,20 +240,22 @@ func (b *clientBuilder) build() (*Client, error) {
 		b.config = &cfg
 	}
 
-	if b.httpClient == nil {
-		b.httpClient = createHTTPClient(b.token, b.requestTimeout, b.middlewares...)
-	}
-
-	if len(b.altURLs) == 0 && b.horizonURL != "" {
-		b.altURLs = []string{b.horizonURL}
-	}
-
 	if b.horizonURL == "" {
 		b.horizonURL = b.config.HorizonURL
 	}
 
 	if len(b.altURLs) == 0 {
 		b.altURLs = []string{b.horizonURL}
+	}
+
+	if b.httpClient == nil {
+		mws := b.middlewares
+		if b.loggingEnabled {
+			// Prepend so the logging middleware is outermost in the chain,
+			// ensuring it captures the full round-trip including all user middlewares.
+			mws = append([]Middleware{NewLoggingMiddleware()}, mws...)
+		}
+		b.httpClient = createHTTPClient(b.token, b.requestTimeout, mws...)
 	}
 
 	return &Client{
@@ -261,5 +275,6 @@ func (b *clientBuilder) build() (*Client, error) {
 		failures:        make(map[string]int),
 		lastFailure:     make(map[string]time.Time),
 		middlewares:     b.middlewares,
+		healthCollector: NewHealthCollector(),
 	}, nil
 }

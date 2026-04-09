@@ -4,9 +4,13 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/dotandev/hintents/internal/authtrace"
+	"github.com/dotandev/hintents/internal/config"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/rpc"
@@ -32,6 +36,21 @@ Examples:
   erst auth-debug --json <tx-hash>`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if !cmd.Flags().Changed("network") {
+			token := "" // auth_debug doesn't have a token flag, check env/config
+			token = os.Getenv("ERST_RPC_TOKEN")
+			if token == "" {
+				if cfg, err := config.LoadConfig(); err == nil && cfg.RPCToken != "" {
+					token = cfg.RPCToken
+				}
+			}
+			probeCtx, probeCancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+			defer probeCancel()
+			if resolved, err := rpc.ResolveNetwork(probeCtx, args[0], token); err == nil {
+				authNetworkFlag = string(resolved)
+				fmt.Printf("Resolved network: %s\n", authNetworkFlag)
+			}
+		}
 		switch rpc.Network(authNetworkFlag) {
 		case rpc.Testnet, rpc.Mainnet, rpc.Futurenet:
 		default:

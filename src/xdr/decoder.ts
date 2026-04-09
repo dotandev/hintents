@@ -1,7 +1,12 @@
 // Copyright (c) Hintents Authors.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Readable } from 'stream';
+// Copyright (c) Hintents Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { xdr } from '@stellar/stellar-sdk';
+import { Buffer } from './buffer-shim';
 import * as crypto from 'crypto';
 
 export enum TransactionMetaVersion {
@@ -11,6 +16,40 @@ export enum TransactionMetaVersion {
 }
 
 export class XDRDecoder {
+    /**
+     * Streaming decode for large batches of LedgerEntry XDRs.
+     * Accepts a Readable stream or Buffer containing concatenated base64 XDRs.
+     * Yields each LedgerEntry as it is decoded, reducing peak memory usage.
+     */
+    static async *streamLedgerEntries(
+        input: any,
+        decodeFn: (buf: Buffer) => any
+    ): AsyncGenerator<any, void, unknown> {
+        let stream: Readable;
+        // Robust type check for Buffer (works for both Node and polyfill)
+        const isBuffer = (val: any) => val && typeof val === 'object' && typeof val.length === 'number' && typeof val.toString === 'function' && !val.readable;
+        if (isBuffer(input)) {
+            stream = Readable.from(input.toString().split('\n'));
+        } else if (input && typeof input.read === 'function') {
+            stream = input;
+        } else {
+            // Fallback: treat as string
+            stream = Readable.from(String(input).split('\n'));
+        }
+
+        for await (const chunk of stream) {
+            const line = chunk.toString().trim();
+            if (!line) continue;
+            try {
+                const buffer = Buffer.from(line, 'base64');
+                const entry = decodeFn(buffer);
+                yield entry;
+            } catch (error: any) {
+                // Optionally log or handle decode errors per entry
+                continue;
+            }
+        }
+    }
     /**
      * Decode TransactionMeta from base64 XDR
      */

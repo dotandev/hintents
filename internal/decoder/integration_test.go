@@ -58,6 +58,9 @@ func TestIntegration_SuggestionEngineWithDecoder(t *testing.T) {
 		if !strings.Contains(output, "Potential Fixes") {
 			t.Error("Expected formatted output to contain 'Potential Fixes'")
 		}
+		if !strings.Contains(output, "🟢") && !strings.Contains(output, "🟡") && !strings.Contains(output, "🔴") {
+			t.Error("Expected formatted output to contain a confidence indicator")
+		}
 	})
 
 	// Scenario 2: Multiple errors in nested calls
@@ -269,6 +272,9 @@ func TestIntegration_RealWorldScenario(t *testing.T) {
 	}
 	if !strings.Contains(output, "Confidence") {
 		t.Error("Output should show confidence levels")
+	}
+	if !strings.Contains(output, "🟡") {
+		t.Error("Output should include the medium-confidence indicator for this match set")
 	}
 	if !strings.Contains(output, "initialize()") {
 		t.Error("Should suggest calling initialize()")

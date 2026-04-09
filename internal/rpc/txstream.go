@@ -58,6 +58,14 @@ type TxStatus struct {
 	Status string // one of TxStatus{Pending,Success,Failed,NotFound}
 	Ledger int64
 	Error  string
+
+	// XDR payload fields — populated only on SUCCESS or FAILED terminal states.
+	EnvelopeXdr      string
+	ResultXdr        string
+	ResultMetaXdr    string
+	ApplicationOrder int64
+	LatestLedger     int64
+	CreatedAt        int64
 }
 
 // IsFinal reports whether this status is a terminal state (no further
@@ -175,10 +183,10 @@ func (s *wsStreamer) poll(ctx context.Context, conn *wsConn, hash string, id int
 	}
 
 	conn.raw.SetReadDeadline(time.Now().Add(15 * time.Second)) //nolint:errcheck
-	data, err := wsReadFrame(conn.br)
+	data, err := wsReadMessage(conn.br)
 	conn.raw.SetDeadline(time.Time{}) //nolint:errcheck
 	if err != nil {
-		logger.Logger.Warn("ws streamer: read frame", "error", err)
+		logger.Logger.Warn("ws streamer: read message", "error", err)
 		return true
 	}
 
@@ -188,14 +196,7 @@ func (s *wsStreamer) poll(ctx context.Context, conn *wsConn, hash string, id int
 		return false // malformed message — try again next tick
 	}
 
-	status := TxStatus{Hash: hash}
-	if resp.Error != nil {
-		status.Status = TxStatusNotFound
-		status.Error = resp.Error.Message
-	} else {
-		status.Status = resp.Result.Status
-		status.Ledger = resp.Result.Ledger
-	}
+	status := decodeTxStatus(hash, &resp)
 
 	select {
 	case ch <- status:
@@ -310,15 +311,7 @@ func (s *pollingStreamer) queryTxStatus(ctx context.Context, hash string) (TxSta
 		return TxStatus{}, fmt.Errorf("poll: unmarshal: %w", err)
 	}
 
-	if rpcResp.Error != nil {
-		return TxStatus{Hash: hash, Status: TxStatusNotFound, Error: rpcResp.Error.Message}, nil
-	}
-
-	return TxStatus{
-		Hash:   hash,
-		Status: rpcResp.Result.Status,
-		Ledger: rpcResp.Result.Ledger,
-	}, nil
+	return decodeTxStatus(hash, &rpcResp), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -521,47 +514,48 @@ func wsWriteFrame(w io.Writer, payload []byte) error {
 	return nil
 }
 
-// wsReadFrame reads one data frame from r. Control frames (ping, pong) are
-// handled silently. A close frame is returned as io.EOF.
-func wsReadFrame(r *bufio.Reader) ([]byte, error) {
-	b0, err := r.ReadByte()
-	if err != nil {
-		return nil, fmt.Errorf("ws: read header[0]: %w", err)
+// wsReadRawFrame reads one RFC 6455 frame from r and returns its components.
+// It does not interpret the opcode — callers must dispatch accordingly.
+func wsReadRawFrame(r *bufio.Reader) (fin bool, opcode byte, payload []byte, err error) {
+	b0, e := r.ReadByte()
+	if e != nil {
+		return false, 0, nil, fmt.Errorf("ws: read header[0]: %w", e)
 	}
-	b1, err := r.ReadByte()
-	if err != nil {
-		return nil, fmt.Errorf("ws: read header[1]: %w", err)
+	b1, e := r.ReadByte()
+	if e != nil {
+		return false, 0, nil, fmt.Errorf("ws: read header[1]: %w", e)
 	}
 
-	opcode := b0 & 0x0F
+	fin = (b0 & 0x80) != 0
+	opcode = b0 & 0x0F
 	masked := (b1 & 0x80) != 0
 
 	rawLen := int64(b1 & 0x7F)
 	switch rawLen {
 	case 126:
 		var ext [2]byte
-		if _, err := io.ReadFull(r, ext[:]); err != nil {
-			return nil, fmt.Errorf("ws: read 16-bit length: %w", err)
+		if _, e := io.ReadFull(r, ext[:]); e != nil {
+			return false, 0, nil, fmt.Errorf("ws: read 16-bit length: %w", e)
 		}
 		rawLen = int64(binary.BigEndian.Uint16(ext[:]))
 	case 127:
 		var ext [8]byte
-		if _, err := io.ReadFull(r, ext[:]); err != nil {
-			return nil, fmt.Errorf("ws: read 64-bit length: %w", err)
+		if _, e := io.ReadFull(r, ext[:]); e != nil {
+			return false, 0, nil, fmt.Errorf("ws: read 64-bit length: %w", e)
 		}
 		rawLen = int64(binary.BigEndian.Uint64(ext[:]))
 	}
 
 	var maskKey [4]byte
 	if masked {
-		if _, err := io.ReadFull(r, maskKey[:]); err != nil {
-			return nil, fmt.Errorf("ws: read mask key: %w", err)
+		if _, e := io.ReadFull(r, maskKey[:]); e != nil {
+			return false, 0, nil, fmt.Errorf("ws: read mask key: %w", e)
 		}
 	}
 
-	payload := make([]byte, rawLen)
-	if _, err := io.ReadFull(r, payload); err != nil {
-		return nil, fmt.Errorf("ws: read payload: %w", err)
+	payload = make([]byte, rawLen)
+	if _, e := io.ReadFull(r, payload); e != nil {
+		return false, 0, nil, fmt.Errorf("ws: read payload: %w", e)
 	}
 
 	if masked {
@@ -570,15 +564,54 @@ func wsReadFrame(r *bufio.Reader) ([]byte, error) {
 		}
 	}
 
-	switch opcode {
-	case 0x8: // close
-		return nil, io.EOF
-	case 0x9, 0xA: // ping or pong — discard and recurse
-		return wsReadFrame(r)
-	case 0x0, 0x1, 0x2: // continuation, text, binary — all valid data frames
-		return payload, nil
-	default:
-		return nil, fmt.Errorf("ws: unexpected opcode 0x%x", opcode)
+	return fin, opcode, payload, nil
+}
+
+// wsReadFrame reads one complete (non-fragmented) data frame from r.
+// Control frames (ping, pong) are discarded silently. A close frame
+// returns io.EOF. For fragmented messages use wsReadMessage instead.
+func wsReadFrame(r *bufio.Reader) ([]byte, error) {
+	for {
+		_, opcode, payload, err := wsReadRawFrame(r)
+		if err != nil {
+			return nil, err
+		}
+		switch opcode {
+		case 0x8: // close
+			return nil, io.EOF
+		case 0x9, 0xA: // ping or pong — discard
+			continue
+		case 0x0, 0x1, 0x2: // continuation, text, binary
+			return payload, nil
+		default:
+			return nil, fmt.Errorf("ws: unexpected opcode 0x%x", opcode)
+		}
+	}
+}
+
+// wsReadMessage reassembles a (possibly fragmented) WebSocket message per
+// RFC 6455 §5.4. Control frames interleaved with fragments are handled
+// silently. A close frame returns io.EOF.
+func wsReadMessage(r *bufio.Reader) ([]byte, error) {
+	var buf bytes.Buffer
+	for {
+		fin, opcode, payload, err := wsReadRawFrame(r)
+		if err != nil {
+			return nil, err
+		}
+		switch opcode {
+		case 0x8: // close
+			return nil, io.EOF
+		case 0x9, 0xA: // ping/pong interleaved with fragments — discard
+			continue
+		case 0x0, 0x1, 0x2: // continuation, text, binary
+			buf.Write(payload)
+			if fin {
+				return buf.Bytes(), nil
+			}
+		default:
+			return nil, fmt.Errorf("ws: unexpected opcode 0x%x", opcode)
+		}
 	}
 }
 
@@ -668,15 +701,46 @@ type rpcGetTxParams struct {
 	Hash string `json:"hash"`
 }
 
+// sorobanGetTxResult maps the full Soroban RPC getTransaction result object.
+type sorobanGetTxResult struct {
+	Status           string `json:"status"`
+	Ledger           int64  `json:"ledger,omitempty"`
+	EnvelopeXdr      string `json:"envelopeXdr,omitempty"`
+	ResultXdr        string `json:"resultXdr,omitempty"`
+	ResultMetaXdr    string `json:"resultMetaXdr,omitempty"`
+	ApplicationOrder int64  `json:"applicationOrder,omitempty"`
+	LatestLedger     int64  `json:"latestLedger,omitempty"`
+	CreatedAt        int64  `json:"createdAt,omitempty"`
+}
+
 type jsonrpcResponse struct {
-	Jsonrpc string `json:"jsonrpc"`
-	ID      int64  `json:"id"`
-	Result  struct {
-		Status string `json:"status"`
-		Ledger int64  `json:"ledger,omitempty"`
-	} `json:"result"`
-	Error *struct {
+	Jsonrpc string              `json:"jsonrpc"`
+	ID      int64               `json:"id"`
+	Result  *sorobanGetTxResult `json:"result,omitempty"`
+	Error   *struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+// decodeTxStatus converts a JSON-RPC getTransaction response into a TxStatus,
+// mapping RPC errors to NOT_FOUND and propagating all XDR fields on success.
+func decodeTxStatus(hash string, resp *jsonrpcResponse) TxStatus {
+	if resp.Error != nil {
+		return TxStatus{Hash: hash, Status: TxStatusNotFound, Error: resp.Error.Message}
+	}
+	if resp.Result == nil {
+		return TxStatus{Hash: hash, Status: TxStatusNotFound}
+	}
+	return TxStatus{
+		Hash:             hash,
+		Status:           resp.Result.Status,
+		Ledger:           resp.Result.Ledger,
+		EnvelopeXdr:      resp.Result.EnvelopeXdr,
+		ResultXdr:        resp.Result.ResultXdr,
+		ResultMetaXdr:    resp.Result.ResultMetaXdr,
+		ApplicationOrder: resp.Result.ApplicationOrder,
+		LatestLedger:     resp.Result.LatestLedger,
+		CreatedAt:        resp.Result.CreatedAt,
+	}
 }

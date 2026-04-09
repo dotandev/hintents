@@ -31,7 +31,8 @@ const (
 	// Rate limiting
 	ErstRateLimitExceeded ErstErrorCode = "RATE_LIMIT_EXCEEDED"
 	// Auth
-	ErstUnauthorized ErstErrorCode = "UNAUTHORIZED"
+	ErstTransactionNotFound ErstErrorCode = "TRANSACTION_NOT_FOUND"
+	ErstUnauthorized        ErstErrorCode = "UNAUTHORIZED"
 )
 
 // ErstError wraps an error with a standardized code and preserves the original error string.
@@ -72,7 +73,7 @@ func (e *ErstError) Is(target error) bool {
 
 // Registry mapping Go errors to ErstErrorCode
 var errorCodeRegistry = map[error]ErstErrorCode{
-	ErrTransactionNotFound:  ErstLedgerNotFound,
+	ErrTransactionNotFound:  ErstTransactionNotFound,
 	ErrRPCConnectionFailed:  ErstRPCConnectionFailed,
 	ErrRPCTimeout:           ErstRPCTimeout,
 	ErrAllRPCFailed:         ErstAllRPCFailed,

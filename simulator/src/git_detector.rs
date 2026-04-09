@@ -3,6 +3,25 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
+
+/// Configuration for the `.git` directory search.
+///
+/// Controls the maximum wall-clock time spent walking up the directory tree.
+/// Use [`SearchConfig::default`] for a sensible 5-second limit.
+#[derive(Debug, Clone)]
+pub struct SearchConfig {
+    /// Maximum time to spend searching for a `.git` directory.
+    pub timeout: Duration,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(5),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -14,8 +33,16 @@ pub struct GitRepository {
 }
 
 impl GitRepository {
+    /// Detect the git repository containing `start_path`, using default search
+    /// configuration (5-second timeout).
     pub fn detect(start_path: &Path) -> Option<Self> {
-        let root_path = Self::find_git_root(start_path)?;
+        Self::detect_with_config(start_path, &SearchConfig::default())
+    }
+
+    /// Detect the git repository containing `start_path` with a custom
+    /// [`SearchConfig`].
+    pub fn detect_with_config(start_path: &Path, cfg: &SearchConfig) -> Option<Self> {
+        let root_path = Self::find_git_root(start_path, cfg)?;
         let remote_url = Self::get_remote_url(&root_path)?;
         let branch = Self::get_current_branch(&root_path).unwrap_or_else(|| "main".to_string());
         let commit_hash = Self::get_commit_hash(&root_path)?;
@@ -28,13 +55,37 @@ impl GitRepository {
         })
     }
 
-    fn find_git_root(start_path: &Path) -> Option<PathBuf> {
+    /// Walk up the directory tree from `start_path` looking for a `.git` entry.
+    ///
+    /// The search respects the timeout in `cfg`; if the deadline is exceeded
+    /// before a `.git` directory is found, `None` is returned.  Symlinked
+    /// `.git` entries are accepted.  Any directory that cannot be read due to
+    /// permission errors or other I/O failures is skipped silently.
+    fn find_git_root(start_path: &Path, cfg: &SearchConfig) -> Option<PathBuf> {
+        let deadline = Instant::now() + cfg.timeout;
         let mut current = start_path.to_path_buf();
 
         loop {
+            // Abort the search if we have exceeded the allowed time.
+            if Instant::now() >= deadline {
+                return None;
+            }
+
             let git_dir = current.join(".git");
-            if git_dir.exists() {
-                return Some(current);
+
+            // `symlink_metadata` does not follow symlinks, so we can inspect
+            // both real directories and symbolic links without dereferencing
+            // them.  An `Err` here normally means a permission problem or a
+            // non-existent path — either way we continue climbing.
+            match std::fs::symlink_metadata(&git_dir) {
+                Ok(meta) => {
+                    if meta.is_dir() || meta.file_type().is_symlink() {
+                        return Some(current);
+                    }
+                }
+                Err(_) => {
+                    // Inaccessible or absent — keep walking up.
+                }
             }
 
             if !current.pop() {
@@ -140,6 +191,24 @@ impl GitRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    /// Create a fresh temporary directory and return its handle.
+    fn tmp() -> TempDir {
+        TempDir::new().expect("failed to create temp dir")
+    }
+
+    /// Build a `SearchConfig` with the given timeout in milliseconds.
+    fn cfg_ms(ms: u64) -> SearchConfig {
+        SearchConfig {
+            timeout: Duration::from_millis(ms),
+        }
+    }
+
+    // ── existing tests ───────────────────────────────────────────────────────
 
     #[test]
     fn test_normalize_git_url_ssh() {
@@ -183,5 +252,68 @@ mod tests {
                     .to_string()
             )
         );
+    }
+
+    // ── new find_git_root tests ────────────────────────────────────────────
+
+    /// `.git` is present in the start directory itself.
+    #[test]
+    fn test_find_git_root_in_current_dir() {
+        let root = tmp();
+        fs::create_dir(root.path().join(".git")).unwrap();
+
+        let found = GitRepository::find_git_root(root.path(), &SearchConfig::default());
+        assert_eq!(found.as_deref(), Some(root.path()));
+    }
+
+    /// `.git` is present two levels above the start directory (nested repo).
+    #[test]
+    fn test_find_git_root_in_parent() {
+        let root = tmp();
+        fs::create_dir(root.path().join(".git")).unwrap();
+
+        let nested = root.path().join("a").join("b");
+        fs::create_dir_all(&nested).unwrap();
+
+        let found = GitRepository::find_git_root(&nested, &SearchConfig::default());
+        assert_eq!(found.as_deref(), Some(root.path()));
+    }
+
+    /// No `.git` directory exists anywhere in the tree — should return `None`.
+    #[test]
+    fn test_find_git_root_no_repo() {
+        let root = tmp();
+        let deep = root.path().join("x").join("y").join("z");
+        fs::create_dir_all(&deep).unwrap();
+
+        // Start from a deeply nested directory with no .git anywhere.
+        let found = GitRepository::find_git_root(&deep, &SearchConfig::default());
+        assert!(found.is_none());
+    }
+
+    /// A zero-millisecond timeout always yields `None` regardless of layout.
+    #[test]
+    fn test_find_git_root_timeout() {
+        let root = tmp();
+        fs::create_dir(root.path().join(".git")).unwrap();
+
+        // Immediate deadline — the search must never succeed.
+        let found = GitRepository::find_git_root(root.path(), &cfg_ms(0));
+        assert!(found.is_none());
+    }
+
+    /// A symlinked `.git` directory is detected correctly.
+    #[cfg(unix)]
+    #[test]
+    fn test_find_git_root_symlink() {
+        let root = tmp();
+        let real_git = root.path().join("actual_git_dir");
+        fs::create_dir(&real_git).unwrap();
+
+        let git_link = root.path().join(".git");
+        std::os::unix::fs::symlink(&real_git, &git_link).unwrap();
+
+        let found = GitRepository::find_git_root(root.path(), &SearchConfig::default());
+        assert_eq!(found.as_deref(), Some(root.path()));
     }
 }

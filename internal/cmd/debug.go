@@ -4,10 +4,12 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -16,10 +18,12 @@ import (
 	"time"
 
 	"github.com/dotandev/hintents/internal/config"
+	"github.com/dotandev/hintents/internal/debug"
 	"github.com/dotandev/hintents/internal/decenstorage"
 	"github.com/dotandev/hintents/internal/decoder"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
+	"github.com/dotandev/hintents/internal/lto"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/security"
 	"github.com/dotandev/hintents/internal/session"
@@ -27,6 +31,7 @@ import (
 	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/dotandev/hintents/internal/tokenflow"
+	simtypes "github.com/dotandev/hintents/internal/types"
 	"github.com/dotandev/hintents/internal/visualizer"
 	"github.com/dotandev/hintents/internal/wat"
 	"github.com/dotandev/hintents/internal/watch"
@@ -55,6 +60,9 @@ var (
 	demoMode            bool
 	watchFlag           bool
 	watchTimeoutFlag    int
+	hotReloadFlag       bool
+	hotReloadInterval   time.Duration
+	snapshotsFlag       bool
 	protocolVersionFlag uint32
 	auditKeyFlag        string
 	publishIPFSFlag     bool
@@ -67,6 +75,7 @@ var (
 	mockGasPriceFlag    uint64
 	asyncFlag           bool
 	asyncTimeoutFlag    int
+	exportSVGFlag       string
 )
 
 // DebugCommand holds dependencies for the debug command
@@ -106,6 +115,7 @@ Example:
 	cmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
 	cmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
 	cmd.Flags().StringVar(&rpcTokenFlag, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
+	cmd.Flags().BoolVar(&snapshotsFlag, "snapshots", false, "Enable simulator snapshot capture (default: disabled)")
 
 	return cmd
 }
@@ -118,7 +128,7 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
 		token = os.Getenv("ERST_RPC_TOKEN")
 	}
 	if token == "" {
-		cfg, err := config.LoadConfig()
+		cfg, err := config.Load()
 		if err == nil && cfg.RPCToken != "" {
 			token = cfg.RPCToken
 		}
@@ -199,8 +209,13 @@ Local WASM Replay Mode:
   erst debug --demo`,
 	Args: cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		// Demo mode or local WASM replay don't need transaction hash
-		if demoMode || wasmPath != "" {
+		if hotReloadFlag && wasmPath == "" {
+			return errors.WrapValidationError("--hot-reload requires --wasm")
+		}
+
+		// Demo mode, local WASM replay, and offline registry load don't need a
+		// transaction hash or network connectivity.
+		if demoMode || wasmPath != "" || loadSnapshotsFlag != "" {
 			return nil
 		}
 
@@ -261,6 +276,11 @@ Local WASM Replay Mode:
 		// Demo mode: print sample output for testing color detection (no network)
 		if demoMode {
 			return runDemoMode(cmdArgs)
+		}
+
+		// Offline replay from a saved snapshot registry
+		if loadSnapshotsFlag != "" {
+			return runFromRegistry(cmd.Context(), loadSnapshotsFlag)
 		}
 
 		// Local WASM replay mode
@@ -355,6 +375,8 @@ Local WASM Replay Mode:
 			fmt.Println("🚫 Cache disabled by --no-cache flag")
 		}
 
+		_ = client.CheckStaleness(ctx, networkFlag)
+
 		fmt.Printf("Debugging transaction: %s\n", txHash)
 		fmt.Printf("Primary Network: %s\n", networkFlag)
 		if compareNetworkFlag != "" {
@@ -425,6 +447,13 @@ Local WASM Replay Mode:
 
 		var lastSimResp *simulator.SimulationResponse
 
+		// Collected per-timestamp states written to disk when --save-snapshots is set.
+		type snapshotEntry struct {
+			ts      int64
+			entries map[string]string
+		}
+		var collectedEntries []snapshotEntry
+
 		for _, ts := range timestamps {
 			if len(timestamps) > 1 {
 				fmt.Printf("\n--- Simulating at Timestamp: %d ---\n", ts)
@@ -456,6 +485,10 @@ Local WASM Replay Mode:
 					}
 				}
 
+				if saveSnapshotsFlag != "" {
+					collectedEntries = append(collectedEntries, snapshotEntry{ts: ts, entries: ledgerEntries})
+				}
+
 				fmt.Printf("Running simulation on %s...\n", networkFlag)
 				simReq := &simulator.SimulationRequest{
 					EnvelopeXdr:     resp.EnvelopeXdr,
@@ -463,6 +496,7 @@ Local WASM Replay Mode:
 					LedgerEntries:   ledgerEntries,
 					Timestamp:       ts,
 					ProtocolVersion: nil,
+					EnableSnapshots: snapshotsFlag,
 				}
 
 				// Apply protocol version override if specified
@@ -480,6 +514,13 @@ Local WASM Replay Mode:
 					return errors.WrapSimulationFailed(err, "")
 				}
 				printSimulationResult(networkFlag, simResp)
+				// Print simulation budget usage if present
+				if simResp != nil && simResp.BudgetUsage != nil {
+					fmt.Printf("\nSimulation Budget Usage:\n")
+					fmt.Printf("  CPU Instructions: %d / %d (%.2f%%)\n", simResp.BudgetUsage.CPUInstructions, simResp.BudgetUsage.CPULimit, simResp.BudgetUsage.CPUUsagePercent)
+					fmt.Printf("  Memory Bytes: %d / %d (%.2f%%)\n", simResp.BudgetUsage.MemoryBytes, simResp.BudgetUsage.MemoryLimit, simResp.BudgetUsage.MemoryUsagePercent)
+					fmt.Printf("  Operations: %d\n", simResp.BudgetUsage.OperationsCount)
+				}
 				// Fetch contract bytecode on demand for any contract calls in the trace; cache via RPC client
 				if client != nil && simResp != nil && len(simResp.DiagnosticEvents) > 0 {
 					contractIDs := collectContractIDsFromDiagnosticEvents(simResp.DiagnosticEvents)
@@ -507,10 +548,11 @@ Local WASM Replay Mode:
 						}
 					}
 					primaryReq := &simulator.SimulationRequest{
-						EnvelopeXdr:   resp.EnvelopeXdr,
-						ResultMetaXdr: resp.ResultMetaXdr,
-						LedgerEntries: entries,
-						Timestamp:     ts,
+						EnvelopeXdr:     resp.EnvelopeXdr,
+						ResultMetaXdr:   resp.ResultMetaXdr,
+						LedgerEntries:   entries,
+						Timestamp:       ts,
+						EnableSnapshots: snapshotsFlag,
 					}
 					applySimulationFeeMocks(primaryReq)
 					primaryResult, primaryErr = runner.Run(ctx, primaryReq)
@@ -547,10 +589,11 @@ Local WASM Replay Mode:
 					}
 
 					compareReq := &simulator.SimulationRequest{
-						EnvelopeXdr:   resp.EnvelopeXdr,
-						ResultMetaXdr: compareResp.ResultMetaXdr,
-						LedgerEntries: entries,
-						Timestamp:     ts,
+						EnvelopeXdr:     resp.EnvelopeXdr,
+						ResultMetaXdr:   compareResp.ResultMetaXdr,
+						LedgerEntries:   entries,
+						Timestamp:       ts,
+						EnableSnapshots: snapshotsFlag,
 					}
 					applySimulationFeeMocks(compareReq)
 					compareResult, compareErr = runner.Run(ctx, compareReq)
@@ -573,22 +616,70 @@ Local WASM Replay Mode:
 
 				simResp = primaryResult // Use primary for further analysis
 				printSimulationResult(networkFlag, primaryResult)
+				if primaryResult != nil && primaryResult.BudgetUsage != nil {
+					fmt.Printf("\nSimulation Budget Usage (%s):\n", networkFlag)
+					fmt.Printf("  CPU Instructions: %d / %d (%.2f%%)\n", primaryResult.BudgetUsage.CPUInstructions, primaryResult.BudgetUsage.CPULimit, primaryResult.BudgetUsage.CPUUsagePercent)
+					fmt.Printf("  Memory Bytes: %d / %d (%.2f%%)\n", primaryResult.BudgetUsage.MemoryBytes, primaryResult.BudgetUsage.MemoryLimit, primaryResult.BudgetUsage.MemoryUsagePercent)
+					fmt.Printf("  Operations: %d\n", primaryResult.BudgetUsage.OperationsCount)
+				}
 				printSimulationResult(compareNetworkFlag, compareResult)
+				if compareResult != nil && compareResult.BudgetUsage != nil {
+					fmt.Printf("\nSimulation Budget Usage (%s):\n", compareNetworkFlag)
+					fmt.Printf("  CPU Instructions: %d / %d (%.2f%%)\n", compareResult.BudgetUsage.CPUInstructions, compareResult.BudgetUsage.CPULimit, compareResult.BudgetUsage.CPUUsagePercent)
+					fmt.Printf("  Memory Bytes: %d / %d (%.2f%%)\n", compareResult.BudgetUsage.MemoryBytes, compareResult.BudgetUsage.MemoryLimit, compareResult.BudgetUsage.MemoryUsagePercent)
+					fmt.Printf("  Operations: %d\n", compareResult.BudgetUsage.OperationsCount)
+				}
 				diffResults(primaryResult, compareResult, networkFlag, compareNetworkFlag)
 			}
 			lastSimResp = simResp
+
+			if exportSVGFlag != "" && simResp != nil && len(simResp.DiagnosticEvents) > 0 {
+				callTree, err := decoder.DecodeDiagnosticEvents(simResp.DiagnosticEvents)
+				if err != nil {
+					fmt.Printf("%s Error building call tree for SVG: %v\n", visualizer.Symbol("error"), err)
+				} else {
+					svg := visualizer.GenerateCallGraphSVG(callTree)
+					err := os.WriteFile(exportSVGFlag, []byte(svg), 0644)
+					if err != nil {
+						fmt.Printf("%s Error saving SVG: %v\n", visualizer.Symbol("error"), err)
+					} else {
+						fmt.Printf("%s Call graph exported to: %s\n", visualizer.Symbol("success"), exportSVGFlag)
+					}
+				}
+			}
 		}
 
 		if lastSimResp == nil {
 			return errors.WrapSimulationLogicError("no simulation results generated")
 		}
 
+		// Persist snapshot registry to disk when --save-snapshots is set.
+		if saveSnapshotsFlag != "" && len(collectedEntries) > 0 {
+			reg := debug.New(Version, txHash, networkFlag, resp.EnvelopeXdr, resp.ResultMetaXdr)
+			for _, ce := range collectedEntries {
+				reg.Add(ce.ts, snapshot.FromMap(ce.entries))
+			}
+			if err := reg.SaveToFile(saveSnapshotsFlag); err != nil {
+				fmt.Printf("Warning: failed to save snapshot registry: %v\n", err)
+			} else {
+				fmt.Printf("Snapshot registry saved: %s (%d entr%s)\n",
+					saveSnapshotsFlag, len(reg.Entries), pluralIes(len(reg.Entries)))
+			}
+		}
+
 		// Analysis: Error Suggestions (Heuristic-based)
 		if len(lastSimResp.Events) > 0 {
 			suggestionEngine := decoder.NewSuggestionEngine()
 
+			// Load config to get MaxTraceDepth
+			cfg, _ := config.Load()
+			maxDepth := 50
+			if cfg != nil {
+				maxDepth = cfg.MaxTraceDepth
+			}
+
 			// Decode events for analysis
-			callTree, err := decoder.DecodeEvents(lastSimResp.Events)
+			callTree, err := decoder.DecodeEvents(lastSimResp.Events, maxDepth)
 			if err == nil && callTree != nil {
 				suggestions := suggestionEngine.AnalyzeCallTree(callTree)
 				if len(suggestions) > 0 {
@@ -655,8 +746,9 @@ Local WASM Replay Mode:
 
 		// Session Management
 		simReq := &simulator.SimulationRequest{
-			EnvelopeXdr:   resp.EnvelopeXdr,
-			ResultMetaXdr: resp.ResultMetaXdr,
+			EnvelopeXdr:     resp.EnvelopeXdr,
+			ResultMetaXdr:   resp.ResultMetaXdr,
+			EnableSnapshots: snapshotsFlag,
 		}
 		applySimulationFeeMocks(simReq)
 		simReqJSON, err := json.Marshal(simReq)
@@ -772,34 +864,61 @@ func runLocalWasmReplay() error {
 	fmt.Println()
 
 	// Verify WASM file exists
-	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
-		return errors.WrapValidationError(fmt.Sprintf("WASM file not found: %s", wasmPath))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("WASM file not found or unreadable: %s", wasmPath))
 	}
+	wasmBase64 := base64.StdEncoding.EncodeToString(wasmBytes)
 
 	fmt.Printf("%s Local WASM Replay Mode\n", visualizer.Symbol("wrench"))
 	fmt.Printf("WASM File: %s\n", wasmPath)
 	fmt.Printf("Arguments: %v\n", args)
 	fmt.Println()
 
+	// Check for LTO in the project that produced the WASM
+	checkLTOWarning(wasmPath)
+
 	// Create simulator runner
 	runner, err := simulator.NewRunner("", tracingEnabled)
 	if err != nil {
 		return errors.WrapSimulatorNotFound(err.Error())
 	}
+	defer runner.Close()
 
-	// Create simulation request with local WASM
+	ctx := context.Background()
+	if hotReloadFlag {
+		return runLocalWasmReplaySession(ctx, runner, os.Stdin, os.Stdout)
+	}
+	return runLocalWasmReplayOnce(ctx, runner, false)
+}
+
+func newLocalWasmSimulationRequest(forceNoCache bool) *simulator.SimulationRequest {
 	req := &simulator.SimulationRequest{
 		EnvelopeXdr:   "",  // Empty for local replay
 		ResultMetaXdr: "",  // Empty for local replay
 		LedgerEntries: nil, // Mock state will be generated
 		WasmPath:      &wasmPath,
+		NoCache:       noCacheFlag || forceNoCache,
 		MockArgs:      &args,
+		ContractWasm:  &wasmBase64, // Pass the WASM binary for source mapping
+		EnvelopeXdr:     "",  // Empty for local replay
+		ResultMetaXdr:   "",  // Empty for local replay
+		LedgerEntries:   nil, // Mock state will be generated
+		WasmPath:        &wasmPath,
+		NoCache:         noCacheFlag || forceNoCache,
+		MockArgs:        &args,
+		EnableSnapshots: snapshotsFlag,
 	}
 	applySimulationFeeMocks(req)
+	return req
+}
+
+func runLocalWasmReplayOnce(ctx context.Context, runner simulator.RunnerInterface, forceNoCache bool) error {
+	req := newLocalWasmSimulationRequest(forceNoCache)
 
 	// Run simulation
 	fmt.Printf("%s Executing contract locally...\n", visualizer.Symbol("play"))
-	resp, err := runner.Run(context.Background(), req)
+	resp, err := runner.Run(ctx, req)
 	if err != nil {
 		fmt.Printf("%s Technical failure: %v\n", visualizer.Error(), err)
 		return err
@@ -813,8 +932,17 @@ func runLocalWasmReplay() error {
 			fmt.Printf("Error: %s\n", resp.Error)
 		}
 
+		if resp.StackTrace != nil {
+			printWasmBacktrace(resp.StackTrace)
+		}
+
+		if resp.SourceLocation != nil {
+			fmt.Printf("%s Top-level Location: %s:%d\n", visualizer.Symbol("location"), resp.SourceLocation.File, resp.SourceLocation.Line)
+			displaySourceLocation(resp.SourceLocation)
+		}
+
 		// Fallback to WAT disassembly if source mapping is unavailable but we have an offset
-		if resp.SourceLocation == "" && resp.WasmOffset != nil {
+		if resp.SourceLocation == nil && resp.WasmOffset != nil {
 			fmt.Println()
 			wasmBytes, err := os.ReadFile(wasmPath)
 			if err == nil {
@@ -854,6 +982,117 @@ func runLocalWasmReplay() error {
 	}
 
 	return nil
+}
+
+func runLocalWasmReplaySession(ctx context.Context, runner simulator.RunnerInterface, in io.Reader, out io.Writer) error {
+	fmt.Println("[watcher] Hot reload enabled")
+	if err := runLocalWasmReplayOnce(ctx, runner, false); err != nil {
+		return err
+	}
+
+	initialFP, err := watch.ComputeWasmFingerprint(wasmPath, 5, 50*time.Millisecond)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("failed to fingerprint initial wasm: %v", err))
+	}
+	lastAppliedHash := initialFP.Hash
+
+	cfg := watch.DefaultWasmReloaderConfig(wasmPath, hotReloadInterval)
+	reloadEvents, reloadErrors, err := watch.StartWasmReloader(ctx, cfg)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("failed to start wasm watcher: %v", err))
+	}
+	fmt.Println("[watcher] Watching for WASM changes")
+
+	reader := bufio.NewReader(in)
+	var pending *watch.ReloadEvent
+
+	for {
+		if pending != nil {
+			choice, promptErr := promptHotReloadChoice(reader, out)
+			if promptErr != nil {
+				return promptErr
+			}
+
+			switch choice {
+			case 'r':
+				fmt.Println("[watcher] Re-running simulation with updated WASM")
+				if err := runLocalWasmReplayOnce(ctx, runner, true); err != nil {
+					fmt.Printf("[watcher] Re-run failed: %v\n", err)
+				} else {
+					lastAppliedHash = pending.Hash
+				}
+			case 's':
+				fmt.Println("[watcher] Reload skipped")
+			case 'q':
+				fmt.Println("[watcher] Exiting hot reload session")
+				return nil
+			}
+			pending = drainLatestReloadEvent(reloadEvents, lastAppliedHash)
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case watchErr, ok := <-reloadErrors:
+			if !ok {
+				reloadErrors = nil
+				continue
+			}
+			fmt.Printf("[watcher] Warning: %v\n", watchErr)
+		case event, ok := <-reloadEvents:
+			if !ok {
+				return nil
+			}
+			if event.Hash == lastAppliedHash {
+				continue
+			}
+			fmt.Println("[watcher] WASM updated (hash changed)")
+			fmt.Println("[watcher] Reload available")
+			pending = &event
+		}
+	}
+}
+
+func promptHotReloadChoice(reader *bufio.Reader, out io.Writer) (byte, error) {
+	for {
+		fmt.Fprint(out, "Re-run simulation? (r = reload, s = skip, q = quit): ")
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF && strings.TrimSpace(line) != "" {
+				// Accept final line without trailing newline.
+			} else {
+				return 0, err
+			}
+		}
+
+		choice := strings.ToLower(strings.TrimSpace(line))
+		switch choice {
+		case "r", "s", "q":
+			return choice[0], nil
+		default:
+			fmt.Fprintln(out, "Invalid choice. Please enter r, s, or q.")
+		}
+	}
+}
+
+func drainLatestReloadEvent(events <-chan watch.ReloadEvent, lastAppliedHash string) *watch.ReloadEvent {
+	var latest *watch.ReloadEvent
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				return latest
+			}
+			if event.Hash == lastAppliedHash {
+				continue
+			}
+			ev := event
+			latest = &ev
+		default:
+			return latest
+		}
+	}
 }
 
 func extractLedgerKeys(metaXdr string) ([]string, error) {
@@ -960,8 +1199,31 @@ func collectContractIDsFromDiagnosticEvents(events []simulator.DiagnosticEvent) 
 func printSimulationResult(network string, res *simulator.SimulationResponse) {
 	fmt.Printf("\n--- Result for %s ---\n", network)
 	fmt.Printf("Status: %s\n", res.Status)
+
+	// Determine and display snapshot status
+	hasOOM := res.BudgetUsage != nil && res.BudgetUsage.MemoryUsagePercent >= 99.0
+	snapshotStatus := simtypes.DetermineSnapshotStatus(
+		len(res.Events)+len(res.DiagnosticEvents),
+		len(res.DiagnosticEvents),
+		hasOOM,
+	)
+	fmt.Printf("Snapshot Status: %s\n", snapshotStatus)
+	if !snapshotStatus.IsHealthy() {
+		fmt.Printf("  %s\n", snapshotStatus.StatusMessage())
+	}
 	if res.Error != "" {
 		fmt.Printf("Error: %s\n", res.Error)
+	}
+
+	// Display stack trace with resolved source locations when available.
+	if res.StackTrace != nil && len(res.StackTrace.Frames) > 0 {
+		printWasmBacktrace(res.StackTrace)
+	}
+
+	// Preserve top-level source location display for compatibility.
+	if res.SourceLocation != nil {
+		fmt.Printf("%s Location: %s:%d\n", visualizer.Symbol("location"), res.SourceLocation.File, res.SourceLocation.Line)
+		displaySourceLocation(res.SourceLocation)
 	}
 
 	// Display budget usage if available
@@ -1122,6 +1384,106 @@ func collectVisibleSections(resp *simulator.SimulationResponse, findings []secur
 	return sections
 }
 
+func applySimulationFeeMocks(req *simulator.SimulationRequest) {
+	if req == nil {
+		return
+	}
+
+	if mockBaseFeeFlag > 0 {
+		baseFee := mockBaseFeeFlag
+		req.MockBaseFee = &baseFee
+	}
+	if mockGasPriceFlag > 0 {
+		gasPrice := mockGasPriceFlag
+		req.MockGasPrice = &gasPrice
+	}
+}
+
+var deprecatedSorobanHostFunctions = []string{
+	"bytes_copy_from_linear_memory",
+	"bytes_copy_to_linear_memory",
+	"bytes_new_from_linear_memory",
+	"map_new_from_linear_memory",
+	"map_unpack_to_linear_memory",
+	"symbol_new_from_linear_memory",
+	"string_new_from_linear_memory",
+	"vec_new_from_linear_memory",
+	"vec_unpack_to_linear_memory",
+}
+
+func deprecatedHostFunctionInDiagnosticEvent(event simulator.DiagnosticEvent) (string, bool) {
+	if name, ok := findDeprecatedHostFunction(strings.Join(event.Topics, " ")); ok {
+		return name, true
+	}
+	return findDeprecatedHostFunction(event.Data)
+}
+
+func findDeprecatedHostFunction(input string) (string, bool) {
+	lower := strings.ToLower(input)
+	for _, fn := range deprecatedSorobanHostFunctions {
+		if strings.Contains(lower, strings.ToLower(fn)) {
+			return fn, true
+		}
+	}
+	return "", false
+}
+
+// runFromRegistry replays a saved time-travel session from a snapshot registry
+// file without any network connectivity.
+func runFromRegistry(ctx context.Context, path string) error {
+	reg, err := debug.LoadFromFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to load snapshot registry: %w", err)
+	}
+
+	if len(reg.Entries) == 0 {
+		return errors.WrapValidationError("snapshot registry contains no entries")
+	}
+
+	for _, w := range reg.VerifyIntegrity() {
+		fmt.Fprintf(os.Stderr, "Warning: integrity check failed: %s\n", w.Error())
+	}
+
+	fmt.Printf("Offline replay: %s\n", reg.TxHash)
+	fmt.Printf("Network: %s | Created: %s | Entries: %d\n",
+		reg.Network, reg.CreatedAt.Format(time.RFC3339), len(reg.Entries))
+
+	runner, err := simulator.NewRunnerWithMockTime("", tracingEnabled, mockTimeFlag)
+	if err != nil {
+		return errors.WrapSimulatorNotFound(err.Error())
+	}
+	defer runner.Close()
+
+	for _, entry := range reg.Entries {
+		if len(reg.Entries) > 1 {
+			fmt.Printf("\n--- Simulating at Timestamp: %d ---\n", entry.Timestamp)
+		}
+
+		simReq := &simulator.SimulationRequest{
+			EnvelopeXdr:   reg.EnvelopeXdr,
+			ResultMetaXdr: reg.ResultMetaXdr,
+			LedgerEntries: entry.Snapshot.ToMap(),
+			Timestamp:     entry.Timestamp,
+		}
+		applySimulationFeeMocks(simReq)
+
+		simResp, err := runner.Run(ctx, simReq)
+		if err != nil {
+			return errors.WrapSimulationFailed(err, "")
+		}
+		printSimulationResult(reg.Network, simResp)
+	}
+
+	return nil
+}
+
+func pluralIes(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
+}
+
 func init() {
 	debugCmd.Flags().StringVarP(&networkFlag, "network", "n", "mainnet", "Stellar network (auto-detected when omitted; testnet, mainnet, futurenet)")
 	debugCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom RPC URL")
@@ -1139,13 +1501,75 @@ func init() {
 	debugCmd.Flags().BoolVar(&demoMode, "demo", false, "Print sample output (no network) - for testing color detection")
 	debugCmd.Flags().BoolVar(&watchFlag, "watch", false, "Poll for transaction on-chain before debugging")
 	debugCmd.Flags().IntVar(&watchTimeoutFlag, "watch-timeout", 30, "Timeout in seconds for watch mode")
+	debugCmd.Flags().BoolVar(&hotReloadFlag, "hot-reload", false, "Hot reload local WASM changes during debug session (requires --wasm)")
+	debugCmd.Flags().DurationVar(&hotReloadInterval, "hot-reload-interval", 500*time.Millisecond, "Polling interval fallback for hot reload (e.g. 500ms)")
+	debugCmd.Flags().BoolVar(&snapshotsFlag, "snapshots", false, "Enable simulator snapshot capture (default: disabled)")
 	debugCmd.Flags().Uint32Var(&mockBaseFeeFlag, "mock-base-fee", 0, "Override base fee (stroops) for local fee sufficiency checks")
 	debugCmd.Flags().Uint64Var(&mockGasPriceFlag, "mock-gas-price", 0, "Override gas price multiplier for local fee sufficiency checks")
 	debugCmd.Flags().StringVar(&themeFlag, "theme", "", "Color theme override (dark, light, none)")
 	debugCmd.Flags().Int64Var(&mockTimeFlag, "mock-time", 0, "Override ledger timestamp for simulation (Unix seconds)")
 	debugCmd.Flags().Uint32Var(&protocolVersionFlag, "protocol-version", 0, "Override protocol version for simulation")
+	debugCmd.Flags().StringVar(&exportSVGFlag, "export-svg", "", "Export call graph as SVG to specified file")
 
 	rootCmd.AddCommand(debugCmd)
+}
+
+func printWasmBacktrace(trace *simulator.WasmStackTrace) {
+	fmt.Printf("\nBacktrace (%d frames):\n", len(trace.Frames))
+	for _, frame := range trace.Frames {
+		name := "<unknown>"
+		if frame.FuncName != nil {
+			name = *frame.FuncName
+		} else if frame.FuncIndex != nil {
+			name = fmt.Sprintf("func[%d]", *frame.FuncIndex)
+		}
+
+		location := ""
+		if frame.SourceLocation != nil {
+			if frame.SourceLocation.Column > 0 {
+				location = fmt.Sprintf(" %s:%d:%d", frame.SourceLocation.File, frame.SourceLocation.Line, frame.SourceLocation.Column)
+			} else {
+				location = fmt.Sprintf(" %s:%d", frame.SourceLocation.File, frame.SourceLocation.Line)
+			}
+		} else if frame.WasmOffset != nil {
+			location = fmt.Sprintf(" @ 0x%x", *frame.WasmOffset)
+		}
+
+		fmt.Printf("  #%d %s%s\n", frame.Index, name, location)
+	}
+
+	// Show inline source context for the trap-site frame (index 0).
+	if len(trace.Frames) > 0 && trace.Frames[0].SourceLocation != nil {
+		displaySourceLocation(trace.Frames[0].SourceLocation)
+	}
+
+	fmt.Println()
+}
+
+// checkLTOWarning searches the directory tree around a WASM file for
+// Cargo.toml files with LTO settings and prints a warning if found.
+// It searches the WASM file's parent directory and up to two levels up
+// to find the project root.
+func checkLTOWarning(wasmFilePath string) {
+	dir := filepath.Dir(wasmFilePath)
+
+	// Walk up to 3 levels to find Cargo.toml files
+	for i := 0; i < 3; i++ {
+		results, err := lto.CheckProjectDir(dir)
+		if err != nil {
+			logger.Logger.Debug("LTO check failed", "dir", dir, "error", err)
+			break
+		}
+		if lto.HasLTO(results) {
+			fmt.Fprintf(os.Stderr, "\n%s\n", lto.FormatWarnings(results))
+			return
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
 }
 func displaySourceLocation(loc *simulator.SourceLocation) {
 	fmt.Printf("%s Location: %s:%d:%d\n", visualizer.Symbol("location"), loc.File, loc.Line, loc.Column)

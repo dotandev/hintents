@@ -33,10 +33,10 @@ echo -e "${YELLOW}1. Setting up Docker buildx...${NC}"
 # Create builder if it doesn't exist
 if ! docker buildx ls | grep -q multiarch; then
     docker buildx create --name multiarch --use
-    echo -e "${GREEN}✓ Created multiarch builder${NC}"
+    echo -e "${GREEN}âœ“ Created multiarch builder${NC}"
 else
     docker buildx use multiarch
-    echo -e "${GREEN}✓ Using existing multiarch builder${NC}"
+    echo -e "${GREEN}âœ“ Using existing multiarch builder${NC}"
 fi
 
 # Bootstrap the builder
@@ -45,31 +45,31 @@ echo ""
 
 echo -e "${YELLOW}2. Building for current platform...${NC}"
 docker build -t erst:test .
-echo -e "${GREEN}✓ Single-platform build successful${NC}"
+echo -e "${GREEN}âœ“ Single-platform build successful${NC}"
 echo ""
 
 echo -e "${YELLOW}3. Testing single-platform image...${NC}"
 # Test version command
 if docker run --rm erst:test --version; then
-    echo -e "${GREEN}✓ Version command works${NC}"
+    echo -e "${GREEN}âœ“ Version command works${NC}"
 else
-    echo -e "${RED}✗ Version command failed${NC}"
+    echo -e "${RED}âœ— Version command failed${NC}"
     exit 1
 fi
 
 # Test help command
 if docker run --rm erst:test --help > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ Help command works${NC}"
+    echo -e "${GREEN}âœ“ Help command works${NC}"
 else
-    echo -e "${RED}✗ Help command failed${NC}"
+    echo -e "${RED}âœ— Help command failed${NC}"
     exit 1
 fi
 
 # Check simulator binary exists
 if docker run --rm erst:test sh -c "test -f /app/simulator/target/release/erst-sim"; then
-    echo -e "${GREEN}✓ Simulator binary exists${NC}"
+    echo -e "${GREEN}âœ“ Simulator binary exists${NC}"
 else
-    echo -e "${RED}✗ Simulator binary not found${NC}"
+    echo -e "${RED}âœ— Simulator binary not found${NC}"
     exit 1
 fi
 echo ""
@@ -85,7 +85,7 @@ docker buildx build \
     --load \
     . 2>&1 | grep -E "(Building|exporting|writing|naming)" || true
 
-echo -e "${GREEN}✓ Multi-architecture build successful${NC}"
+echo -e "${GREEN}âœ“ Multi-architecture build successful${NC}"
 echo ""
 
 echo -e "${YELLOW}5. Inspecting image...${NC}"
@@ -99,16 +99,16 @@ echo ""
 
 echo -e "${YELLOW}7. Verifying static linking...${NC}"
 if docker run --rm --entrypoint ldd erst:test /app/erst 2>&1 | grep -q "not a dynamic executable"; then
-    echo -e "${GREEN}✓ Go binary is statically linked${NC}"
+    echo -e "${GREEN}âœ“ Go binary is statically linked${NC}"
 else
-    echo -e "${YELLOW}⚠ Go binary has dynamic dependencies${NC}"
+    echo -e "${YELLOW}âš  Go binary has dynamic dependencies${NC}"
     docker run --rm --entrypoint ldd erst:test /app/erst
 fi
 
 if docker run --rm --entrypoint ldd erst:test /app/simulator/target/release/erst-sim 2>&1 | grep -q "not a dynamic executable"; then
-    echo -e "${GREEN}✓ Rust binary is statically linked${NC}"
+    echo -e "${GREEN}âœ“ Rust binary is statically linked${NC}"
 else
-    echo -e "${YELLOW}⚠ Rust binary has dynamic dependencies${NC}"
+    echo -e "${YELLOW}âš  Rust binary has dynamic dependencies${NC}"
     docker run --rm --entrypoint ldd erst:test /app/simulator/target/release/erst-sim
 fi
 echo ""
@@ -122,9 +122,9 @@ if command -v docker-compose &> /dev/null || docker compose version &> /dev/null
     fi
 
     $COMPOSE_CMD build erst
-    echo -e "${GREEN}✓ Docker Compose build successful${NC}"
+    echo -e "${GREEN}âœ“ Docker Compose build successful${NC}"
 else
-    echo -e "${YELLOW}⚠ Docker Compose not available, skipping${NC}"
+    echo -e "${YELLOW}âš  Docker Compose not available, skipping${NC}"
 fi
 echo ""
 
@@ -132,9 +132,9 @@ echo -e "${YELLOW}9. Checking image size...${NC}"
 SIZE=$(docker image inspect erst:test --format='{{.Size}}' | awk '{print $1/1024/1024}')
 echo "Image size: ${SIZE} MB"
 if (( $(echo "$SIZE < 200" | bc -l) )); then
-    echo -e "${GREEN}✓ Image size is reasonable${NC}"
+    echo -e "${GREEN}âœ“ Image size is reasonable${NC}"
 else
-    echo -e "${YELLOW}⚠ Image size is larger than expected${NC}"
+    echo -e "${YELLOW}âš  Image size is larger than expected${NC}"
 fi
 echo ""
 
