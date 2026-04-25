@@ -324,7 +324,7 @@ fn categorize_events(
             };
 
             let wasm_instruction = extract_wasm_instruction(&topics, &data);
-            let metadata = events::build_snapshot_metadata(0, topics.len() as u32);
+            let metadata = events::build_snapshot_metadata(0, topics.len() as u32, cpu.unwrap_or(0), mem.unwrap_or(0));
             let snapshot_id = Some(metadata.id.clone());
             CategorizedEvent {
                 category,
@@ -681,7 +681,7 @@ fn main() {
 
                                 let wasm_instruction = extract_wasm_instruction(&topics, &data);
                                 let metadata =
-                                    events::build_snapshot_metadata(cpu_insns, topics.len() as u32);
+                                    events::build_snapshot_metadata(cpu_insns, topics.len() as u32, cpu_insns, mem_bytes);
                                 raw_events
                                     .push(format!("{:?} [snapshot_id={}]", event, metadata.id));
                                 DiagnosticEvent {

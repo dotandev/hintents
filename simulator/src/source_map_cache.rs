@@ -62,11 +62,69 @@ mod flock {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 mod flock {
     use std::fs::File;
     use std::io;
-    // On non-Unix platforms we fall back to no-op locks.
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::Storage::FileSystem::{
+        LockFileEx, UnlockFileEx, LOCKFILE_EXCLUSIVE_LOCK,
+    };
+    use windows_sys::Win32::System::IO::OVERLAPPED;
+
+    /// Acquires a shared (read) lock on `file`, blocking until it succeeds.
+    pub fn lock_shared(file: &File) -> io::Result<()> {
+        let handle = file.as_raw_handle() as HANDLE;
+        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+        // On Windows, LockFileEx without LOCKFILE_EXCLUSIVE_LOCK is a shared lock.
+        let rc = unsafe { LockFileEx(handle, 0, 0, u32::MAX, u32::MAX, &mut overlapped) };
+        if rc != 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+
+    /// Acquires an exclusive (write) lock on `file`, blocking until it succeeds.
+    pub fn lock_exclusive(file: &File) -> io::Result<()> {
+        let handle = file.as_raw_handle() as HANDLE;
+        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            LockFileEx(
+                handle,
+                LOCKFILE_EXCLUSIVE_LOCK,
+                0,
+                u32::MAX,
+                u32::MAX,
+                &mut overlapped,
+            )
+        };
+        if rc != 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+
+    /// Releases any lock held on `file`.
+    pub fn unlock(file: &File) -> io::Result<()> {
+        let handle = file.as_raw_handle() as HANDLE;
+        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+        let rc = unsafe { UnlockFileEx(handle, 0, u32::MAX, u32::MAX, &mut overlapped) };
+        if rc != 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+mod flock {
+    use std::fs::File;
+    use std::io;
+    // On non-Unix, non-Windows platforms we fall back to no-op locks.
     pub fn lock_shared(_: &File) -> io::Result<()> {
         Ok(())
     }
@@ -821,5 +879,58 @@ mod tests {
             3,
             "No eviction should occur without max_size set"
         );
+    }
+
+    #[test]
+    fn test_concurrent_writes() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let (cache, _temp) = create_test_cache();
+        let cache = Arc::new(cache);
+        let wasm_hash = "test_concurrent_hash".to_string();
+        let num_threads = 4;
+        let iterations = 5;
+
+        let mut handles = Vec::new();
+
+        for t in 0..num_threads {
+            let cache_clone = Arc::clone(&cache);
+            let hash_clone = wasm_hash.clone();
+            let handle = thread::spawn(move || {
+                for i in 0..iterations {
+                    let mut mappings = HashMap::new();
+                    mappings.insert(
+                        (t * 100 + i) as u64,
+                        SourceLocation {
+                            file: format!("thread_{}_iter_{}.rs", t, i),
+                            line: i as u32,
+                            column: None,
+                            column_end: None,
+                            github_link: None,
+                        },
+                    );
+
+                    let entry = SourceMapCacheEntry {
+                        wasm_hash: hash_clone.clone(),
+                        has_symbols: true,
+                        mappings,
+                        created_at: 1000 + i as u64,
+                    };
+
+                    // This should not panic or fail due to file locking
+                    let _ = cache_clone.store(entry);
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify we can still read the cache
+        let retrieved = cache.get(&wasm_hash, false).unwrap();
+        assert_eq!(retrieved.wasm_hash, wasm_hash);
     }
 }

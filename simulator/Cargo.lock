@@ -2408,6 +2408,7 @@ dependencies = [
  "tracing-subscriber",
  "wasmparser 0.245.1",
  "wat",
+ "windows-sys 0.52.0",
  "zstd",
 ]
 
