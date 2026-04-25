@@ -16,10 +16,16 @@ pub fn generate_snapshot_id() -> String {
     format!("snap-{ts_micros:016x}-{counter:08x}")
 }
 
-pub fn build_snapshot_metadata(gas_consumed: u64, call_stack_depth: u32) -> SnapshotMetadata {
+pub fn build_snapshot_metadata(
+    gas_consumed: u64,
+    call_stack_depth: u32,
+    cpu: u64,
+    memory: u64,
+) -> SnapshotMetadata {
     SnapshotMetadata {
         id: generate_snapshot_id(),
         gas_consumed,
         call_stack_depth,
+        resource_usage: crate::types::ResourceUsage { cpu, memory },
     }
 }

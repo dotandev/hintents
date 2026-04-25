@@ -66,10 +66,17 @@ pub struct ResourceCalibration {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ResourceUsage {
+    pub cpu: u64,
+    pub memory: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SnapshotMetadata {
     pub id: String,
     pub gas_consumed: u64,
     pub call_stack_depth: u32,
+    pub resource_usage: ResourceUsage,
 }
 
 #[derive(Debug, Serialize)]

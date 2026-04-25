@@ -53,6 +53,10 @@ pub struct CapturedSnapshot {
     pub before_id: Option<SnapshotId>,
     /// Whether the host function trapped (only meaningful for After snapshots).
     pub trapped: bool,
+    /// CPU instructions consumed during this step.
+    pub cpu: u64,
+    /// Memory bytes consumed during this step.
+    pub memory: u64,
 }
 
 /// Manages snapshot capture around host function calls.
@@ -84,7 +88,13 @@ impl HostSnapshotTracker {
     ///
     /// Takes a snapshot of the current ledger state and stores it as
     /// the pending "before" snapshot.
-    pub fn take_before_snapshot(&mut self, host_fn_name: &str, state: LedgerSnapshot) {
+    pub fn take_before_snapshot(
+        &mut self,
+        host_fn_name: &str,
+        state: LedgerSnapshot,
+        cpu: u64,
+        memory: u64,
+    ) {
         let id = self.next_snapshot_id();
         self.pending_before = Some(CapturedSnapshot {
             id,
@@ -92,6 +102,8 @@ impl HostSnapshotTracker {
             state,
             before_id: None,
             trapped: false,
+            cpu,
+            memory,
         });
     }
 
@@ -108,10 +120,16 @@ impl HostSnapshotTracker {
         &mut self,
         state: LedgerSnapshot,
         trapped: bool,
+        cpu: u64,
+        memory: u64,
     ) -> Option<&SnapshotPair> {
         let before = self.pending_before.take()?;
         let before_id = before.id;
         let after_id = self.next_snapshot_id();
+
+        // Compute deltas: after - before
+        let cpu_delta = cpu.saturating_sub(before.cpu);
+        let mem_delta = memory.saturating_sub(before.memory);
 
         let after = CapturedSnapshot {
             id: after_id,
@@ -119,6 +137,8 @@ impl HostSnapshotTracker {
             state,
             before_id: Some(before_id),
             trapped,
+            cpu: cpu_delta,
+            memory: mem_delta,
         };
 
         let pair = SnapshotPair { before, after };
@@ -167,11 +187,11 @@ mod tests {
     fn test_basic_before_after_pair() {
         let mut tracker = HostSnapshotTracker::new();
 
-        tracker.take_before_snapshot("storage_put", empty_snapshot());
+        tracker.take_before_snapshot("storage_put", empty_snapshot(), 0, 0);
         assert!(tracker.has_pending());
 
         let pair = tracker
-            .take_after_snapshot(empty_snapshot(), false)
+            .take_after_snapshot(empty_snapshot(), false, 100, 50)
             .expect("should produce a pair");
 
         assert_eq!(pair.before.host_fn_name, "storage_put");
@@ -185,9 +205,9 @@ mod tests {
     fn test_trapped_host_function() {
         let mut tracker = HostSnapshotTracker::new();
 
-        tracker.take_before_snapshot("storage_get", empty_snapshot());
+        tracker.take_before_snapshot("storage_get", empty_snapshot(), 100, 50);
         let pair = tracker
-            .take_after_snapshot(empty_snapshot(), true)
+            .take_after_snapshot(empty_snapshot(), true, 150, 60)
             .expect("should produce a pair");
 
         assert!(pair.after.trapped);
@@ -197,7 +217,7 @@ mod tests {
     #[test]
     fn test_after_without_before_is_noop() {
         let mut tracker = HostSnapshotTracker::new();
-        let result = tracker.take_after_snapshot(empty_snapshot(), false);
+        let result = tracker.take_after_snapshot(empty_snapshot(), false, 100, 50);
         assert!(result.is_none());
     }
 
@@ -205,14 +225,14 @@ mod tests {
     fn test_multiple_pairs() {
         let mut tracker = HostSnapshotTracker::new();
 
-        tracker.take_before_snapshot("storage_put", empty_snapshot());
-        tracker.take_after_snapshot(empty_snapshot(), false);
+        tracker.take_before_snapshot("storage_put", empty_snapshot(), 0, 0);
+        tracker.take_after_snapshot(empty_snapshot(), false, 10, 5);
 
-        tracker.take_before_snapshot("storage_get", empty_snapshot());
-        tracker.take_after_snapshot(empty_snapshot(), false);
+        tracker.take_before_snapshot("storage_get", empty_snapshot(), 10, 5);
+        tracker.take_after_snapshot(empty_snapshot(), false, 20, 10);
 
-        tracker.take_before_snapshot("storage_del", empty_snapshot());
-        tracker.take_after_snapshot(empty_snapshot(), true);
+        tracker.take_before_snapshot("storage_del", empty_snapshot(), 20, 10);
+        tracker.take_after_snapshot(empty_snapshot(), true, 30, 15);
 
         assert_eq!(tracker.pair_count(), 3);
 
@@ -227,11 +247,11 @@ mod tests {
     fn test_snapshot_ids_are_unique() {
         let mut tracker = HostSnapshotTracker::new();
 
-        tracker.take_before_snapshot("fn_a", empty_snapshot());
-        tracker.take_after_snapshot(empty_snapshot(), false);
+        tracker.take_before_snapshot("fn_a", empty_snapshot(), 0, 0);
+        tracker.take_after_snapshot(empty_snapshot(), false, 10, 5);
 
-        tracker.take_before_snapshot("fn_b", empty_snapshot());
-        tracker.take_after_snapshot(empty_snapshot(), false);
+        tracker.take_before_snapshot("fn_b", empty_snapshot(), 10, 5);
+        tracker.take_after_snapshot(empty_snapshot(), false, 20, 10);
 
         let pairs = tracker.pairs();
         let all_ids: Vec<SnapshotId> = pairs
@@ -251,7 +271,7 @@ mod tests {
     fn test_discard_pending() {
         let mut tracker = HostSnapshotTracker::new();
 
-        tracker.take_before_snapshot("cancelled_fn", empty_snapshot());
+        tracker.take_before_snapshot("cancelled_fn", empty_snapshot(), 0, 0);
         assert!(tracker.has_pending());
 
         let discarded = tracker.discard_pending();

@@ -48,6 +48,9 @@ tokio = { version = "1.49.0", features = ["time"] }
 libc = "0.2"
 zstd = "0.13"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
+
 [dev-dependencies]
 tempfile = "3.26.0"
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }

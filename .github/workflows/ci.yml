@@ -209,12 +209,13 @@ jobs:
   # Rust Simulator - Lint, Build & Test
   # ============================================
   rust:
-    name: Rust CI (${{ matrix.rust-version }})
-    runs-on: ubuntu-latest
+    name: Rust CI (${{ matrix.rust-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     needs: [license-headers, changes]
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'push'
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest]
         rust-version: [stable, "1.87"]
     defaults:
       run:
@@ -606,12 +607,13 @@ jobs:
   # Rust Simulator - Lint, Build & Test
   # ============================================
   rust:
-    name: Rust CI (${{ matrix.rust-version }})
-    runs-on: ubuntu-latest
+    name: Rust CI (${{ matrix.rust-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     needs: [license-headers, changes]
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'push'
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest]
         rust-version: [stable, "1.87"]
     defaults:
       run:
