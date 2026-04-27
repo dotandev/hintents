@@ -4,6 +4,7 @@
 package visualizer
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -38,6 +39,9 @@ func TestGenerateEventTree(t *testing.T) {
 	}
 
 	output := GenerateEventTree(root)
+
+	// 🔍 Debug output (correct placement)
+	fmt.Println("OUTPUT:\n" + output)
 
 	// Basic check for expected content
 	if !strings.Contains(output, "main_fn") {
