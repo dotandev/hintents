@@ -114,6 +114,13 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 	.node-title { font-weight: 600; font-size: 14px; fill: var(--text-main); }
 	.node-sub { font-size: 11px; fill: var(--text-mute); }
 	.node-metric { font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+	.gas-low { fill: var(--node-bg); }
+	.gas-medium { fill: #fff4e6; }
+	.gas-high { fill: #ffeef0; }
+	@media (prefers-color-scheme: dark) {
+		.gas-medium { fill: #2d2315; }
+		.gas-high { fill: #351a1d; }
+	}
 </style>
 <rect width="100%" height="100%" fill="var(--bg)" />`)
 
@@ -144,13 +151,13 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 
 		fmt.Fprintf(&sb, `
 	<g transform="translate(%d, %d)">
-		<rect width="%d" height="%d" rx="8" fill="var(--node-bg)" stroke="var(--node-border)" />
+		<rect width="%d" height="%d" rx="8" class="gas-%s" stroke="var(--node-border)" />
 		<text x="12" y="24" class="node-title">%s</text>
 		<text x="12" y="40" class="node-sub">%s</text>
 		<text x="12" y="60" class="node-metric" fill="var(--cpu)">CPU: %s</text>
 		<text x="100" y="60" class="node-metric" fill="var(--mem)">Mem: %s</text>
 		<text x="12" y="78" class="node-metric" fill="var(--text-mute)">Elapsed: %s</text>
-	</g>`, x, y, nodeWidth, nodeHeight, node.Function, contractShort, formatGas(int64(node.CPUInstructions), humanGas), formatBytes(node.MemoryBytes), formatElapsedPerCall(node))
+	</g>`, x, y, nodeWidth, nodeHeight, gasLevel(node.CPUInstructions), node.Function, contractShort, formatGas(int64(node.CPUInstructions), humanGas), formatBytes(node.MemoryBytes), formatElapsedPerCall(node))
 	}
 
 	sb.WriteString("</svg>")
@@ -206,4 +213,14 @@ func formatGas(value int64, human bool) string {
 		return strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0") + " kGas"
 	}
 	return fmt.Sprintf("%d", value)
+}
+
+func gasLevel(gas uint64) string {
+	if gas >= 10_000_000 {
+		return "high"
+	}
+	if gas >= 1_000_000 {
+		return "medium"
+	}
+	return "low"
 }
