@@ -6,12 +6,16 @@ package authtrace
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
 type DetailedReporter struct {
 	trace *AuthTrace
 }
+
+var expirationLedgerPattern = regexp.MustCompile(`(?i)expiration(?:[_\s]+ledger)?\D*(\d+)`)
 
 func NewDetailedReporter(trace *AuthTrace) *DetailedReporter {
 	return &DetailedReporter{trace: trace}
@@ -30,6 +34,9 @@ func (r *DetailedReporter) GenerateReport() string {
 	fmt.Fprintf(&sb, "Account: %s\n", r.trace.AccountID)
 	fmt.Fprintf(&sb, "Total Signers: %d\n", r.trace.SignerCount)
 	fmt.Fprintf(&sb, "Valid Signatures: %d\n\n", r.trace.ValidSignatures)
+	if expirationLedger, ok := r.findExpirationLedger(); ok {
+		fmt.Fprintf(&sb, "  Expiration Ledger: %d\n\n", expirationLedger)
+	}
 
 	if len(r.trace.Failures) > 0 {
 		r.writeFailures(&sb)
@@ -44,6 +51,27 @@ func (r *DetailedReporter) GenerateReport() string {
 	}
 
 	return sb.String()
+}
+
+func (r *DetailedReporter) findExpirationLedger() (uint32, bool) {
+	for _, event := range r.trace.AuthEvents {
+		if event.Details == "" {
+			continue
+		}
+		match := expirationLedgerPattern.FindStringSubmatch(event.Details)
+		if len(match) < 2 {
+			continue
+		}
+		ledger, err := strconv.ParseUint(match[1], 10, 32)
+		if err != nil {
+			continue
+		}
+		if ledger == 0 {
+			return 0, false
+		}
+		return uint32(ledger), true
+	}
+	return 0, false
 }
 
 func (r *DetailedReporter) writeFailures(sb *strings.Builder) {

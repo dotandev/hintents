@@ -128,7 +128,16 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: latest
-          args: --config=.golangci.yml --timeout=5m --max-issues-per-linter=0 --max-same-issues=0
+          args: --config=.golangci.yml --timeout=5m
+
+      - name: Run gosec
+        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.23'
+        uses: securego/gosec@master
+        with:
+          args: "-severity high ./..."
+
+      - name: Run tests
+        run: go test -v -race ./...
 
       - name: Build
         run: go build -v ./...
@@ -308,22 +317,42 @@ jobs:
     needs: [go, rust, cli-integration, docs-spellcheck, perf-regression]
     steps:
       - name: Check job results
+        shell: bash
         run: |
-          echo "go: ${{ needs.go.result }}"
-          echo "rust: ${{ needs.rust.result }}"
-          echo "cli-integration: ${{ needs.cli-integration.result }}"
-          echo "docs-spellcheck: ${{ needs.docs-spellcheck.result }}"
-          echo "perf-regression: ${{ needs.perf-regression.result }}"
+          set -euo pipefail
 
-          for result in \
-            "${{ needs.go.result }}" \
-            "${{ needs.rust.result }}" \
-            "${{ needs.cli-integration.result }}" \
-            "${{ needs.docs-spellcheck.result }}" \
-            "${{ needs.perf-regression.result }}"; do
-            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
-              echo "CI gate failed: a required job did not pass."
-              exit 1
-            fi
+          declare -A results=(
+            [go]="${{ needs.go.result }}"
+            [rust]="${{ needs.rust.result }}"
+            [cli-integration]="${{ needs.cli-integration.result }}"
+            [docs-spellcheck]="${{ needs.docs-spellcheck.result }}"
+            [perf-regression]="${{ needs.perf-regression.result }}"
+          )
+
+          echo "=== Job results ==="
+          for job in "${!results[@]}"; do
+            echo "$job: ${results[$job]}"
           done
+
+          failed=0
+          echo "=== Failures / cancellations ==="
+          for job in go rust cli-integration docs-spellcheck perf-regression; do
+            case "${results[$job]}" in
+              failure|cancelled)
+                echo "[BLOCKING] $job is ${results[$job]}"
+                failed=1
+                ;;
+              skipped|success)
+                ;;
+              *)
+                echo "[WARN] $job has unexpected result: ${results[$job]}"
+                ;;
+            esac
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "CI gate failed: one or more required jobs did not pass."
+            exit 1
+          fi
+
           echo "All CI checks passed or were correctly skipped."

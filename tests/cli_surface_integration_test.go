@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -75,7 +76,16 @@ func TestErstBinaryFullCLISurface(t *testing.T) {
 	binPath := buildErstBinary(t, repoRoot)
 
 	homeDir := t.TempDir()
-	env := append(os.Environ(),
+
+	var cleanEnv []string
+	for _, e := range os.Environ() {
+		// handle case-insensitive checks for windows
+		upperE := strings.ToUpper(e)
+		if !strings.HasPrefix(upperE, "HOME=") && !strings.HasPrefix(upperE, "USERPROFILE=") {
+			cleanEnv = append(cleanEnv, e)
+		}
+	}
+	env := append(cleanEnv,
 		"HOME="+homeDir,
 		"USERPROFILE="+homeDir,
 		"ERST_SIM_COVERAGE_LCOV_PATH=",
