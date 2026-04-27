@@ -56,7 +56,7 @@ type Client struct {
 }
 
 // attempts returns the number of retry attempts for failover loops (at least 1)
-func (c *Client) attempts() int { //nolint:unused
+func (c *Client) attempts() int { //nolint:unused // planned for use in future failover logic
 	if len(c.AltURLs) == 0 {
 		return 1
 	}

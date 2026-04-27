@@ -489,7 +489,7 @@ func CrossReferenceEvents(wasmBytes []byte, events []DiagnosticEventSource) ([]E
 
 // decodeOpcode returns the WAT mnemonic, operand string, and number of
 // additional bytes consumed for operands.
-func decodeOpcode(opcode byte, rest []byte) (string, string, int) { //nolint:gocyclo
+func decodeOpcode(opcode byte, rest []byte) (string, string, int) { //nolint:gocyclo // complex opcode decoding logic is inherently branching
 	switch opcode {
 	// Control flow
 	case 0x00:
