@@ -283,7 +283,7 @@ func TestAPIIntegration(t *testing.T) {
 				TagName: "v1.2.3",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response) //nolint:errcheck
+			_ = json.NewEncoder(w).Encode(response) //nolint:errcheck // mock server errors are caught by test infrastructure
 		}))
 		defer server.Close()
 

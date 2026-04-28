@@ -46,13 +46,13 @@ func (tv *TreeViewerWithMouse) StartWithMouse() error {
 	if err := tv.enableRawMode(); err != nil {
 		return fmt.Errorf("failed to enable raw mode: %w", err)
 	}
-	defer func() { _ = tv.restoreTerminalState(initialTermState) }() //nolint:errcheck
+	defer func() { _ = tv.restoreTerminalState(initialTermState) }() //nolint:errcheck // terminal state restoration failure is non-critical during shutdown
 
 	// Enable mouse tracking
 	if err := tv.mouseTracker.Enable(); err != nil {
 		return fmt.Errorf("failed to enable mouse tracking: %w", err)
 	}
-	defer func() { _ = tv.mouseTracker.Disable() }() //nolint:errcheck
+	defer func() { _ = tv.mouseTracker.Disable() }() //nolint:errcheck // disabling mouse tracking failure is non-critical during shutdown
 
 	// Build initial tree
 	nodes := make([]*TraceNode, 0)
@@ -218,20 +218,20 @@ func (tv *TreeViewerWithMouse) getTraceRoot() *TraceNode {
 // renderView clears and renders the current view
 func (tv *TreeViewerWithMouse) renderView() {
 	// Clear screen
-	_, _ = fmt.Print("\x1b[2J\x1b[H") //nolint:errcheck
+	_, _ = fmt.Print("\x1b[2J\x1b[H") //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
 
 	// Render header
-	_, _ = fmt.Printf("ERST Interactive Trace Tree Viewer (Mouse Support Enabled)\n")                  //nolint:errcheck
-	_, _ = fmt.Printf("Transaction: %s | Steps: %d\n", tv.trace.TransactionHash, len(tv.trace.States)) //nolint:errcheck
-	_, _ = fmt.Print("─────────────────────────────────────────────────────────\n")                    //nolint:errcheck
+	_, _ = fmt.Printf("ERST Interactive Trace Tree Viewer (Mouse Support Enabled)\n")                  //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
+	_, _ = fmt.Printf("Transaction: %s | Steps: %d\n", tv.trace.TransactionHash, len(tv.trace.States)) //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
+	_, _ = fmt.Print("─────────────────────────────────────────────────────────\n")                    //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
 
 	// Render tree
-	_, _ = fmt.Print(tv.renderer.Render()) //nolint:errcheck
+	_, _ = fmt.Print(tv.renderer.Render()) //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
 
 	// Render footer
-	_, _ = fmt.Print("\n─────────────────────────────────────────────────────────\n")                                                   //nolint:errcheck
-	_, _ = fmt.Print("Controls: n=next-step | ↑↓/kj=navigate | Space/Enter=expand | e=expand-all | c=collapse-all | h=help | q=quit\n") //nolint:errcheck
-	_, _ = fmt.Print(tv.renderCurrentStateView())                                                                                       //nolint:errcheck
+	_, _ = fmt.Print("\n─────────────────────────────────────────────────────────\n")                                                   //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
+	_, _ = fmt.Print("Controls: n=next-step | ↑↓/kj=navigate | Space/Enter=expand | e=expand-all | c=collapse-all | h=help | q=quit\n") //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
+	_, _ = fmt.Print(tv.renderCurrentStateView())                                                                                       //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
 }
 
 // showHelp displays help information
@@ -263,11 +263,11 @@ symbols with your mouse, or use keyboard shortcuts to navigate.
 
 Press any key to continue...
 `
-	_, _ = fmt.Print(helpText) //nolint:errcheck
+	_, _ = fmt.Print(helpText) //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
 
 	// Wait for input
 	buf := make([]byte, 1)
-	_, _ = syscall.Read(0, buf) //nolint:errcheck
+	_, _ = syscall.Read(0, buf) //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
 
 	tv.renderView()
 }
@@ -339,6 +339,6 @@ func (tv *TreeViewerWithMouse) restoreTerminalState(state string) error {
 func (tv *TreeViewerWithMouse) enableRawMode() error {
 	// Enable raw mode using stty-like behavior
 	// Hide cursor
-	_, _ = fmt.Print("\x1b[?25l") //nolint:errcheck
+	_, _ = fmt.Print("\x1b[?25l") //nolint:errcheck // terminal I/O errors are ignored in interactive CLI viewer
 	return nil
 }

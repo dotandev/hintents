@@ -14,20 +14,20 @@ import (
 
 // PKCS#11 constants matching the Cryptoki specification.
 const (
-	ckfSerialSession = 0x04 //nolint:unused
-	ckuUser          = 1    //nolint:unused
+	ckfSerialSession = 0x04 //nolint:unused // PKCS#11 API surface included for future compatibility
+	ckuUser          = 1    //nolint:unused // PKCS#11 API surface included for future compatibility
 
-	ckoPrivateKey = 0x03 //nolint:unused
-	ckoPublicKey  = 0x02 //nolint:unused
+	ckoPrivateKey = 0x03 //nolint:unused // PKCS#11 API surface included for future compatibility
+	ckoPublicKey  = 0x02 //nolint:unused // PKCS#11 API surface included for future compatibility
 
-	ckaClass   = 0x00  //nolint:unused
-	ckaKeyType = 0x100 //nolint:unused
-	ckaLabel   = 0x03  //nolint:unused
-	ckaID      = 0x102 //nolint:unused
-	ckaECPoint = 0x181 //nolint:unused
+	ckaClass   = 0x00  //nolint:unused // PKCS#11 API surface included for future compatibility
+	ckaKeyType = 0x100 //nolint:unused // PKCS#11 API surface included for future compatibility
+	ckaLabel   = 0x03  //nolint:unused // PKCS#11 API surface included for future compatibility
+	ckaID      = 0x102 //nolint:unused // PKCS#11 API surface included for future compatibility
+	ckaECPoint = 0x181 //nolint:unused // PKCS#11 API surface included for future compatibility
 
 	ckmEDDSA = 0x1050
-	ckkEDDSA = 0x42 //nolint:unused
+	ckkEDDSA = 0x42 //nolint:unused // PKCS#11 API surface included for future compatibility
 
 	ckrOK = 0x00
 )
@@ -77,7 +77,7 @@ func Pkcs11ConfigFromEnv() (*Pkcs11Config, error) {
 }
 
 // pkcs11Attribute mirrors CK_ATTRIBUTE.
-type pkcs11Attribute struct { //nolint:unused
+type pkcs11Attribute struct { //nolint:unused // PKCS#11 API surface included for future compatibility
 	typ    uint64
 	pValue unsafe.Pointer
 	ulLen  uint64
@@ -102,18 +102,19 @@ type Pkcs11Signer struct {
 	pubKey    []byte
 
 	// C_* function pointers resolved from the loaded library.
-	fnInitialize      func(unsafe.Pointer) uint64                                          //nolint:unused
-	fnGetSlotList     func(bool, unsafe.Pointer, *uint64) uint64                           //nolint:unused
-	fnGetTokenInfo    func(uint64, unsafe.Pointer) uint64                                  //nolint:unused
-	fnOpenSession     func(uint64, uint64, unsafe.Pointer, unsafe.Pointer, *uint64) uint64 //nolint:unused
+	fnInitialize      func(unsafe.Pointer) uint64                                          //nolint:unused // PKCS#11 API surface included for future compatibility
+	fnGetSlotList     func(bool, unsafe.Pointer, *uint64) uint64                           //nolint:unused // PKCS#11 API surface included for future compatibility
+	fnGetTokenInfo    func(uint64, unsafe.Pointer) uint64                                  //nolint:unused // PKCS#11 API surface included for future compatibility
+	fnOpenSession     func(uint64, uint64, unsafe.Pointer, unsafe.Pointer, *uint64) uint64 //nolint:unused // PKCS#11 API surface included for future compatibility
 	fnCloseSession    func(uint64) uint64
-	fnLogin           func(uint64, uint64, unsafe.Pointer, uint64) uint64 //nolint:unused
-	fnFindObjectsInit func(uint64, unsafe.Pointer, uint64) uint64         //nolint:unused
-	fnFindObjects     func(uint64, *uint64, uint64, *uint64) uint64       //nolint:unused
-	fnFindObjectsFin  func(uint64) uint64                                 //nolint:unused
-	fnSignInit        func(uint64, unsafe.Pointer, uint64) uint64
+	fnLogin           func(uint64, uint64, unsafe.Pointer, uint64) uint64 //nolint:unused // PKCS#11 API surface included for future compatibility
+	fnFindObjectsInit func(uint64, unsafe.Pointer, uint64) uint64         //nolint:unused // PKCS#11 API surface included for future compatibility
+	fnFindObjects     func(uint64, *uint64, uint64, *uint64) uint64       //nolint:unused // PKCS#11 API surface included for future compatibility
+	fnFindObjectsFin  func(uint64) uint64                                 //nolint:unused // PKCS#11 API surface included for future compatibility
+	fnSignInit        func(uint64, *pkcs11Mechanism, uint64) uint64
 	fnSign            func(uint64, unsafe.Pointer, uint64, unsafe.Pointer, *uint64) uint64
-	fnGetAttrValue    func(uint64, uint64, unsafe.Pointer, uint64) uint64 //nolint:unused
+	fnGetAttrValue    func(uint64, uint64, unsafe.Pointer, uint64) uint64 //nolint:unused // PKCS#11 API surface included for future compatibility
+	fnGetMechanism    func(uint64, uint64, unsafe.Pointer) uint64
 	fnFinalize        func(unsafe.Pointer) uint64
 }
 
@@ -253,7 +254,7 @@ func (s *Pkcs11Signer) Close() error {
 }
 
 // buildKeyTemplate constructs PKCS#11 search attributes from the config.
-func (s *Pkcs11Signer) buildKeyTemplate() ([]pkcs11Attribute, error) { //nolint:unused
+func (s *Pkcs11Signer) buildKeyTemplate() ([]pkcs11Attribute, error) { //nolint:unused // PKCS#11 API surface included for future compatibility
 	classVal := uint64(ckoPrivateKey)
 	keyTypeVal := uint64(ckkEDDSA)
 

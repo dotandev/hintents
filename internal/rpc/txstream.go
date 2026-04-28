@@ -241,15 +241,15 @@ func (s *wsStreamer) poll(ctx context.Context, conn *wsConn, hash string, id int
 		return true
 	}
 
-	_ = conn.raw.SetWriteDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck
+	_ = conn.raw.SetWriteDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck // timeout errors are handled by the next iteration of the stream loop
 	if err := wsWriteFrame(conn.raw, reqBytes); err != nil {
 		logger.Logger.Warn("ws streamer: write frame", "error", err)
 		return true
 	}
 
-	_ = conn.raw.SetReadDeadline(time.Now().Add(15 * time.Second)) //nolint:errcheck
+	_ = conn.raw.SetReadDeadline(time.Now().Add(15 * time.Second)) //nolint:errcheck // timeout errors are handled by the next iteration of the stream loop
 	data, err := wsReadMessage(conn.br)
-	_ = conn.raw.SetDeadline(time.Time{}) //nolint:errcheck
+	_ = conn.raw.SetDeadline(time.Time{}) //nolint:errcheck // timeout errors are handled by the next iteration of the stream loop
 	if err != nil {
 		logger.Logger.Warn("ws streamer: read message", "error", err)
 		return true
@@ -426,7 +426,7 @@ type wsConn struct {
 
 func (c *wsConn) close() {
 	// Send a close frame before closing the underlying connection.
-	_ = c.raw.SetWriteDeadline(time.Now().Add(1 * time.Second)) //nolint:errcheck
+	_ = c.raw.SetWriteDeadline(time.Now().Add(1 * time.Second)) //nolint:errcheck // error during connection close is non-critical
 	_ = wsWriteFrame(c.raw, nil)                                // best-effort
 	_ = c.raw.Close()
 }

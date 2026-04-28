@@ -78,7 +78,7 @@ func (s *StreamingRunner) RunStreaming(ctx context.Context, reqJSON []byte) (*St
 	}
 
 	// exec.CommandContext cancels the process when ctx expires.
-	cmd := exec.CommandContext(ctx, s.BinaryPath) //nolint:gosec // path is caller-supplied trusted binary
+	cmd := exec.CommandContext(ctx, s.BinaryPath) //nolint:gosec // BinaryPath is a trusted caller-supplied path
 	cmd.Stdin = bytes.NewReader(reqJSON)
 
 	stdoutPipe, err := cmd.StdoutPipe()
