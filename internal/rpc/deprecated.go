@@ -61,12 +61,14 @@ func NewCustomClient(config NetworkConfig) (*Client, error) {
 	}
 
 	return &Client{
-		Horizon:         horizonClient,
-		Network:         "custom",
-		SorobanURL:      sorobanURL,
-		Config:          config,
-		CacheEnabled:    true,
-		httpClient:      httpClient,
-		healthCollector: NewHealthCollector(),
+		Horizon:          horizonClient,
+		Network:          "custom",
+		SorobanURL:       sorobanURL,
+		Config:           config,
+		CacheEnabled:     true,
+		httpClient:       httpClient,
+		healthCollector:  NewHealthCollector(),
+		FailureThreshold: 5,
+		RetryTimeout:     60,
 	}, nil
 }

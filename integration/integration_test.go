@@ -44,11 +44,24 @@ func binaryPath(t *testing.T) string {
 		}
 	}
 
-	t.Fatalf(
-		"could not find the erst binary; build it first with `go build -o %s ./cmd/erst` or set $ERST_BINARY",
-		binaryName(),
-	)
-	return ""
+	// Automate build if missing
+	t.Log("erst binary not found; building it now...")
+	binPath := filepath.Join(root, binaryName())
+	buildErstBinary(t, root, binPath)
+	return binPath
+}
+
+func buildErstBinary(t *testing.T, repoRoot, binPath string) {
+	t.Helper()
+	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/erst")
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to build erst binary: %v\nstderr:\n%s", err, stderr.String())
+	}
 }
 
 func repoRoot(t *testing.T) string {

@@ -20,28 +20,32 @@ import (
 type ClientOption func(*clientBuilder)
 
 type clientBuilder struct {
-	network         Network
-	token           string
-	horizonURL      string
-	sorobanURL      string
-	altURLs         []string
-	cacheEnabled    bool
-	methodTelemetry MethodTelemetry
-	config          *NetworkConfig
-	httpClient      HTTPClient
-	requestTimeout  time.Duration
-	middlewares     []Middleware
-	loggingEnabled  bool
+	network          Network
+	token            string
+	horizonURL       string
+	sorobanURL       string
+	altURLs          []string
+	cacheEnabled     bool
+	methodTelemetry  MethodTelemetry
+	config           *NetworkConfig
+	httpClient       HTTPClient
+	requestTimeout   time.Duration
+	middlewares      []Middleware
+	loggingEnabled   bool
+	failureThreshold int
+	retryTimeout     int
 }
 
 const defaultHTTPTimeout = 15 * time.Second
 
 func newBuilder() *clientBuilder {
 	return &clientBuilder{
-		network:         Mainnet,
-		cacheEnabled:    true,
-		methodTelemetry: defaultMethodTelemetry(),
-		requestTimeout:  defaultHTTPTimeout,
+		network:          Mainnet,
+		cacheEnabled:     true,
+		methodTelemetry:  defaultMethodTelemetry(),
+		requestTimeout:   defaultHTTPTimeout,
+		failureThreshold: 5,
+		retryTimeout:     60,
 	}
 }
 
@@ -136,6 +140,24 @@ func WithMiddleware(middlewares ...Middleware) ClientOption {
 func WithLoggingEnabled(enabled bool) ClientOption {
 	return func(b *clientBuilder) {
 		b.loggingEnabled = enabled
+	}
+}
+
+// WithCircuitBreakerThreshold sets the number of failures before the circuit breaker opens.
+func WithCircuitBreakerThreshold(threshold int) ClientOption {
+	return func(b *clientBuilder) {
+		if threshold > 0 {
+			b.failureThreshold = threshold
+		}
+	}
+}
+
+// WithCircuitBreakerTimeout sets the duration in seconds to wait before retrying a failed endpoint.
+func WithCircuitBreakerTimeout(timeout int) ClientOption {
+	return func(b *clientBuilder) {
+		if timeout > 0 {
+			b.retryTimeout = timeout
+		}
 	}
 }
 
@@ -258,17 +280,19 @@ func (b *clientBuilder) build() (*Client, error) {
 			HorizonURL: b.horizonURL,
 			HTTP:       b.httpClient,
 		},
-		Network:         b.network,
-		SorobanURL:      b.sorobanURL,
-		AltURLs:         b.altURLs,
-		httpClient:      b.httpClient,
-		token:           b.token,
-		Config:          *b.config,
-		CacheEnabled:    b.cacheEnabled,
-		methodTelemetry: b.methodTelemetry,
-		failures:        make(map[string]int),
-		lastFailure:     make(map[string]time.Time),
-		middlewares:     b.middlewares,
-		healthCollector: NewHealthCollector(),
+		Network:          b.network,
+		SorobanURL:       b.sorobanURL,
+		AltURLs:          b.altURLs,
+		httpClient:       b.httpClient,
+		token:            b.token,
+		Config:           *b.config,
+		CacheEnabled:     b.cacheEnabled,
+		methodTelemetry:  b.methodTelemetry,
+		failures:         make(map[string]int),
+		lastFailure:      make(map[string]time.Time),
+		FailureThreshold: b.failureThreshold,
+		RetryTimeout:     b.retryTimeout,
+		middlewares:      b.middlewares,
+		healthCollector:  NewHealthCollector(),
 	}, nil
 }

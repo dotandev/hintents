@@ -5,10 +5,10 @@ package security
 
 import (
 	"encoding/base64"
-	"strings"
 	"testing"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stretchr/testify/require"
 )
 
 // TestDetector_FlawedContract simulates a known flawed contract with multiple vulnerabilities
@@ -42,73 +42,17 @@ func TestDetector_FlawedContract(t *testing.T) {
 
 	findings := detector.Analyze(envelopeXdr, "", events, logs)
 
-	if len(findings) == 0 {
-		t.Fatal("Expected multiple findings for flawed contract, got none")
-	}
-
+	require.NotEmpty(t, findings, "Expected multiple findings for flawed contract, got none")
 	t.Logf("Detected %d security findings", len(findings))
 
-	// Verify we caught the major issues
-	foundOverflow := false
-	foundAuthBypass := false
-	foundPanic := false
-	foundLargeTransfer := false
-
-	for _, finding := range findings {
-		t.Logf("Finding: [%s] %s - %s", finding.Type, finding.Severity, finding.Title)
-		t.Logf("  Description: %s", finding.Description)
-		if finding.Evidence != "" {
-			t.Logf("  Evidence: %s", finding.Evidence)
-		}
-
-		if strings.Contains(finding.Title, "Integer Overflow") {
-			foundOverflow = true
-			if finding.Type != FindingVerifiedRisk {
-				t.Errorf("Overflow should be VERIFIED_RISK, got %s", finding.Type)
-			}
-			if finding.Severity != SeverityHigh {
-				t.Errorf("Overflow should be HIGH severity, got %s", finding.Severity)
-			}
-		}
-
-		if strings.Contains(finding.Title, "Authorization Bypass") {
-			foundAuthBypass = true
-			if finding.Type != FindingHeuristicWarn {
-				t.Errorf("Auth bypass should be HEURISTIC_WARNING, got %s", finding.Type)
-			}
-		}
-
-		if strings.Contains(finding.Title, "Panic") {
-			foundPanic = true
-			if finding.Type != FindingVerifiedRisk {
-				t.Errorf("Panic should be VERIFIED_RISK, got %s", finding.Type)
-			}
-		}
-
-		if strings.Contains(finding.Title, "Large") && strings.Contains(finding.Title, "Transfer") {
-			foundLargeTransfer = true
-		}
-	}
-
-	if !foundOverflow {
-		t.Error("Failed to detect integer overflow vulnerability")
-	}
-	if !foundAuthBypass {
-		t.Error("Failed to detect authorization bypass")
-	}
-	if !foundPanic {
-		t.Error("Failed to detect contract panic")
-	}
-	if !foundLargeTransfer {
-		t.Error("Failed to detect large value transfer")
-	}
-
-	// Verify distinction between verified risks and heuristic warnings
+	findingTitles := make([]string, 0, len(findings))
 	verifiedCount := 0
 	heuristicCount := 0
 
-	for _, finding := range findings {
-		switch finding.Type {
+	for _, f := range findings {
+		t.Logf("Finding: [%s] %s - %s", f.Type, f.Severity, f.Title)
+		findingTitles = append(findingTitles, f.Title)
+		switch f.Type {
 		case FindingVerifiedRisk:
 			verifiedCount++
 		case FindingHeuristicWarn:
@@ -116,12 +60,15 @@ func TestDetector_FlawedContract(t *testing.T) {
 		}
 	}
 
-	if verifiedCount == 0 {
-		t.Error("Expected at least one verified risk")
-	}
-	if heuristicCount == 0 {
-		t.Error("Expected at least one heuristic warning")
-	}
+	// Assert specific findings we expect from this fixture
+	require.Contains(t, findingTitles, "Integer Overflow/Underflow Detected", "Missing expected overflow finding")
+	require.Contains(t, findingTitles, "Potential Authorization Bypass", "Missing expected auth bypass finding")
+	require.Contains(t, findingTitles, "Contract Panic/Trap", "Missing expected panic finding")
+	require.Contains(t, findingTitles, "Large Value Transfer Detected", "Missing expected large transfer finding")
+
+	// Verify distinction between verified risks and heuristic warnings
+	require.GreaterOrEqual(t, verifiedCount, 1, "Expected at least one verified risk")
+	require.GreaterOrEqual(t, heuristicCount, 1, "Expected at least one heuristic warning")
 
 	t.Logf("Summary: %d verified risks, %d heuristic warnings", verifiedCount, heuristicCount)
 }

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
@@ -226,8 +227,8 @@ func newTestClient(mock horizonclient.ClientInterface) *testClient {
 	return &testClient{
 		&Client{
 			Horizon:    mock.(*mockHorizonClient),
-			HorizonURL: "https://horizon-testnet.stellar.org",
-			AltURLs:    []string{"https://horizon-testnet.stellar.org"},
+			HorizonURL: endpoints.HorizonTestnet,
+			AltURLs:    []string{endpoints.HorizonTestnet},
 		},
 	}
 }

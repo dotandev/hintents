@@ -183,6 +183,12 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 			} else if cfg.RpcUrl != "" {
 				clientOpts = append(clientOpts, rpc.WithHorizonURL(cfg.RpcUrl))
 			}
+			if cfg.FailureThreshold > 0 {
+				clientOpts = append(clientOpts, rpc.WithCircuitBreakerThreshold(cfg.FailureThreshold))
+			}
+			if cfg.RetryTimeout > 0 {
+				clientOpts = append(clientOpts, rpc.WithCircuitBreakerTimeout(cfg.RetryTimeout))
+			}
 		}
 	}
 

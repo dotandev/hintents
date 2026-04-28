@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dotandev/hintents/internal/abi"
+	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
@@ -391,11 +392,11 @@ func (g *Generator) generateClient() string {
 	b.WriteString("  private getDefaultRpcUrl(network: string): string {\n")
 	b.WriteString("    switch (network) {\n")
 	b.WriteString("      case 'testnet':\n")
-	b.WriteString("        return 'https://soroban-testnet.stellar.org';\n")
+	fmt.Fprintf(&b, "        return '%s';\n", endpoints.SorobanTestnet)
 	b.WriteString("      case 'mainnet':\n")
-	b.WriteString("        return 'https://soroban-mainnet.stellar.org';\n")
+	fmt.Fprintf(&b, "        return '%s';\n", endpoints.SorobanMainnet)
 	b.WriteString("      case 'futurenet':\n")
-	b.WriteString("        return 'https://rpc-futurenet.stellar.org';\n")
+	fmt.Fprintf(&b, "        return '%s';\n", endpoints.SorobanFuturenet)
 	b.WriteString("      default:\n")
 	b.WriteString("        throw new Error(`Unknown network: ${network}`);\n")
 	b.WriteString("    }\n")

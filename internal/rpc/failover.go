@@ -60,13 +60,22 @@ func (c *Client) isHealthy(url string) bool {
 }
 
 func (c *Client) isHealthyLocked(url string) bool {
+	threshold := c.FailureThreshold
+	if threshold == 0 {
+		threshold = 5 // default fallback
+	}
+	timeout := c.RetryTimeout
+	if timeout == 0 {
+		timeout = 60 // default fallback
+	}
+
 	fails := c.failures[url]
-	if fails < 5 {
+	if fails < threshold {
 		return true
 	}
 	last := c.lastFailure[url]
-	// Circuit opens for 60 seconds
-	if time.Since(last) > 60*time.Second {
+	// Circuit opens for configured timeout
+	if time.Since(last) > time.Duration(timeout)*time.Second {
 		return true
 	}
 	return false

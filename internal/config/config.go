@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/dotandev/hintents/internal/errors"
 )
 
@@ -75,11 +76,17 @@ type Config struct {
 	RequestTimeout int `json:"request_timeout,omitempty"`
 	// MaxTraceDepth is the maximum depth of the call tree before it is truncated.
 	MaxTraceDepth int `json:"max_trace_depth,omitempty"`
+	// FailureThreshold is the number of failures before the circuit breaker opens.
+	FailureThreshold int `json:"failure_threshold,omitempty"`
+	// RetryTimeout is the duration in seconds to wait before retrying a failed endpoint.
+	RetryTimeout int `json:"retry_timeout,omitempty"`
 }
 
 // -- Constants & Defaults --
 
 const defaultRequestTimeout = 15
+const defaultFailureThreshold = 5
+const defaultRetryTimeout = 60
 
 var validLogLevels = map[string]bool{
 	"trace": true,
@@ -90,14 +97,16 @@ var validLogLevels = map[string]bool{
 }
 
 var defaultConfig = &Config{
-	RpcUrl:         "https://soroban-testnet.stellar.org",
-	Network:        NetworkTestnet,
-	SimulatorPath:  "",
-	LogLevel:       "info",
-	CachePath:      joinPath(os.ExpandEnv("$HOME"), ".erst", "cache"),
-	RequestTimeout: defaultRequestTimeout,
-	MaxCacheSize:   0,
-	MaxTraceDepth:  50,
+	RpcUrl:           endpoints.SorobanTestnet,
+	Network:          NetworkTestnet,
+	SimulatorPath:    "",
+	LogLevel:         "info",
+	CachePath:        joinPath(os.ExpandEnv("$HOME"), ".erst", "cache"),
+	RequestTimeout:   defaultRequestTimeout,
+	MaxCacheSize:     0,
+	MaxTraceDepth:    50,
+	FailureThreshold: defaultFailureThreshold,
+	RetryTimeout:     defaultRetryTimeout,
 }
 
 // -- Core Functions --
@@ -122,27 +131,16 @@ func Load() (*Config, error) {
 
 func DefaultConfig() *Config {
 	return &Config{
-		RpcUrl:         defaultConfig.RpcUrl,
-		Network:        defaultConfig.Network,
-		SimulatorPath:  defaultConfig.SimulatorPath,
-		LogLevel:       defaultConfig.LogLevel,
-		CachePath:      defaultConfig.CachePath,
-		RequestTimeout: defaultConfig.RequestTimeout,
-		MaxCacheSize:   defaultConfig.MaxCacheSize,
-		MaxTraceDepth:  defaultConfig.MaxTraceDepth,
-	}
-}
-
-func NewConfig(rpcUrl string, network Network) *Config {
-	return &Config{
-		RpcUrl:         rpcUrl,
-		Network:        network,
-		SimulatorPath:  defaultConfig.SimulatorPath,
-		LogLevel:       defaultConfig.LogLevel,
-		CachePath:      defaultConfig.CachePath,
-		RequestTimeout: defaultConfig.RequestTimeout,
-		MaxCacheSize:   defaultConfig.MaxCacheSize,
-		MaxTraceDepth:  defaultConfig.MaxTraceDepth,
+		RpcUrl:           defaultConfig.RpcUrl,
+		Network:          defaultConfig.Network,
+		SimulatorPath:    defaultConfig.SimulatorPath,
+		LogLevel:         defaultConfig.LogLevel,
+		CachePath:        defaultConfig.CachePath,
+		RequestTimeout:   defaultConfig.RequestTimeout,
+		MaxCacheSize:     defaultConfig.MaxCacheSize,
+		MaxTraceDepth:    defaultConfig.MaxTraceDepth,
+		FailureThreshold: defaultConfig.FailureThreshold,
+		RetryTimeout:     defaultConfig.RetryTimeout,
 	}
 }
 
@@ -150,6 +148,21 @@ func NewConfig(rpcUrl string, network Network) *Config {
 
 func (c *Config) MergeDefaults() {
 	configDefaultsAssigner{}.Apply(c)
+}
+
+func NewConfig(rpcUrl string, network Network) *Config {
+	return &Config{
+		RpcUrl:           rpcUrl,
+		Network:          network,
+		SimulatorPath:    defaultConfig.SimulatorPath,
+		LogLevel:         defaultConfig.LogLevel,
+		CachePath:        defaultConfig.CachePath,
+		RequestTimeout:   defaultConfig.RequestTimeout,
+		MaxCacheSize:     defaultConfig.MaxCacheSize,
+		MaxTraceDepth:    defaultConfig.MaxTraceDepth,
+		FailureThreshold: defaultConfig.FailureThreshold,
+		RetryTimeout:     defaultConfig.RetryTimeout,
+	}
 }
 
 func (c *Config) WithSimulatorPath(path string) *Config {
@@ -193,11 +206,11 @@ func (c *Config) Validate() error {
 func (c *Config) NetworkURL() string {
 	switch c.Network {
 	case NetworkPublic:
-		return "https://soroban.stellar.org"
+		return endpoints.SorobanMainnet
 	case NetworkTestnet:
-		return "https://soroban-testnet.stellar.org"
+		return endpoints.SorobanTestnet
 	case NetworkFuturenet:
-		return "https://soroban-futurenet.stellar.org"
+		return endpoints.SorobanFuturenet
 	case NetworkStandalone:
 		return "http://localhost:8000"
 	default:
@@ -315,6 +328,16 @@ func (envParser) Parse(cfg *Config) error {
 	if v := os.Getenv("ERST_RPC_URLS"); v != "" {
 		cfg.RpcUrls = splitAndTrim(v)
 	}
+	if v := os.Getenv("ERST_FAILURE_THRESHOLD"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.FailureThreshold = n
+		}
+	}
+	if v := os.Getenv("ERST_RETRY_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.RetryTimeout = n
+		}
+	}
 	return nil
 }
 
@@ -348,5 +371,11 @@ func (configDefaultsAssigner) Apply(cfg *Config) {
 	}
 	if cfg.MaxTraceDepth == 0 {
 		cfg.MaxTraceDepth = 50
+	}
+	if cfg.FailureThreshold == 0 {
+		cfg.FailureThreshold = defaultFailureThreshold
+	}
+	if cfg.RetryTimeout == 0 {
+		cfg.RetryTimeout = defaultRetryTimeout
 	}
 }

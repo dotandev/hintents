@@ -3,6 +3,10 @@
 
 package rpc
 
+import (
+	"github.com/dotandev/hintents/internal/endpoints"
+)
+
 // Network types for Stellar
 type Network string
 
@@ -14,16 +18,16 @@ const (
 
 // Horizon URLs for each network
 const (
-	TestnetHorizonURL   = "https://horizon-testnet.stellar.org/"
-	MainnetHorizonURL   = "https://horizon.stellar.org/"
-	FuturenetHorizonURL = "https://horizon-futurenet.stellar.org/"
+	TestnetHorizonURL   = endpoints.HorizonTestnet
+	MainnetHorizonURL   = endpoints.HorizonMainnet
+	FuturenetHorizonURL = endpoints.HorizonFuturenet
 )
 
 // Soroban RPC URLs
 const (
-	TestnetSorobanURL   = "https://soroban-testnet.stellar.org"
-	MainnetSorobanURL   = "https://mainnet.stellar.validationcloud.io/v1/soroban-rpc-demo" // Public demo endpoint
-	FuturenetSorobanURL = "https://rpc-futurenet.stellar.org"
+	TestnetSorobanURL   = endpoints.SorobanTestnet
+	MainnetSorobanURL   = endpoints.ValidationCloudMainnet // Public demo endpoint
+	FuturenetSorobanURL = endpoints.FuturenetAlt
 )
 
 // NetworkConfig represents a Stellar network configuration

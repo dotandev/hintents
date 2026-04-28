@@ -27,6 +27,15 @@ log_level = "info"
 # Default is 50.
 max_trace_depth = 50
 
+# Circuit Breaker Configuration
+# failure_threshold: number of failures before the circuit breaker opens.
+# Default is 5.
+# failure_threshold = 5
+
+# retry_timeout: duration in seconds to wait before retrying a failed endpoint.
+# Default is 60.
+# retry_timeout = 60
+
 # Maximum source map cache size (e.g., 500MB, 1GB)
 # When exceeded, oldest entries are automatically evicted.
 # Examples: "500MB", "1GB", 524288000 (bytes)

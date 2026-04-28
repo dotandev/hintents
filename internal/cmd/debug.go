@@ -357,6 +357,12 @@ Local WASM Replay Mode:
 					opts = append(opts, rpc.WithHorizonURL(cfg.RpcUrl))
 					horizonURL = cfg.RpcUrl
 				}
+				if cfg.FailureThreshold > 0 {
+					opts = append(opts, rpc.WithCircuitBreakerThreshold(cfg.FailureThreshold))
+				}
+				if cfg.RetryTimeout > 0 {
+					opts = append(opts, rpc.WithCircuitBreakerTimeout(cfg.RetryTimeout))
+				}
 			}
 		}
 
@@ -648,7 +654,7 @@ Local WASM Replay Mode:
 				if err != nil {
 					fmt.Printf("%s Error building call tree for SVG: %v\n", visualizer.Symbol("error"), err)
 				} else {
-					svg := visualizer.GenerateCallGraphSVG(callTree)
+					svg := visualizer.GenerateCallGraphSVG(callTree, maxDepth)
 					err := os.WriteFile(exportSVGFlag, []byte(svg), 0644)
 					if err != nil {
 						fmt.Printf("%s Error saving SVG: %v\n", visualizer.Symbol("error"), err)

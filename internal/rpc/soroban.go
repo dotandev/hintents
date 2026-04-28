@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/metrics"
@@ -720,9 +721,9 @@ func (c *Client) CheckStaleness(ctx context.Context, network string) error {
 	var referenceURL string
 	switch strings.ToLower(network) {
 	case "testnet":
-		referenceURL = "https://soroban-testnet.stellar.org"
+		referenceURL = endpoints.SorobanTestnet
 	case "mainnet", "public":
-		referenceURL = "https://soroban.stellar.org"
+		referenceURL = endpoints.SorobanMainnet
 	default:
 		// Skip check for 'standalone' or unknown networks
 		return nil

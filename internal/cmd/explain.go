@@ -119,6 +119,14 @@ func explainFromNetwork(cmd *cobra.Command, txHash string) error {
 		rpc.WithNetwork(rpc.Network(explainNetworkFlag)),
 		rpc.WithToken(token),
 	}
+	if cfg, err := config.Load(); err == nil {
+		if cfg.FailureThreshold > 0 {
+			opts = append(opts, rpc.WithCircuitBreakerThreshold(cfg.FailureThreshold))
+		}
+		if cfg.RetryTimeout > 0 {
+			opts = append(opts, rpc.WithCircuitBreakerTimeout(cfg.RetryTimeout))
+		}
+	}
 	if explainRPCURLFlag != "" {
 		opts = append(opts, rpc.WithHorizonURL(explainRPCURLFlag))
 	}
