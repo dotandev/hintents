@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/dotandev/hintents/internal/simulator"
-	"github.com/dotandev/hintents/internal/visualizer"
+	"github.com/dotandev/hintents/internal/visualizer/style"
 )
 
 const (
@@ -67,20 +67,20 @@ func Render(result *DiffResult) {
 func printHeader() {
 	sep := strings.Repeat("─", colWidth*2+len(columnSep))
 	fmt.Println()
-	fmt.Println(visualizer.Colorize("╔"+strings.Repeat("═", len(sep))+"╗", "cyan"))
+	fmt.Println(style.Colorize("╔"+strings.Repeat("═", len(sep))+"╗", "cyan"))
 	title := "  COMPARE REPLAY  ─  Local WASM  vs  On-Chain WASM  "
 	pad := len(sep) - len(title)
 	if pad < 0 {
 		pad = 0
 	}
-	fmt.Printf(visualizer.Colorize("║", "cyan")+"%s"+strings.Repeat(" ", pad)+visualizer.Colorize("║", "cyan")+"\n", title)
-	fmt.Println(visualizer.Colorize("╚"+strings.Repeat("═", len(sep))+"╝", "cyan"))
+	fmt.Printf(style.Colorize("║", "cyan")+"%s"+strings.Repeat(" ", pad)+style.Colorize("║", "cyan")+"\n", title)
+	fmt.Println(style.Colorize("╚"+strings.Repeat("═", len(sep))+"╝", "cyan"))
 	fmt.Println()
 }
 
 func sectionTitle(title string) string {
 	line := "── " + title + " " + strings.Repeat("─", max(0, 60-len(title)))
-	return visualizer.Colorize(line, "bold")
+	return style.Colorize(line, "bold")
 }
 
 func renderStatus(sd StatusDiff) {
@@ -95,11 +95,11 @@ func renderStatus(sd StatusDiff) {
 	if sd.Match {
 		fmt.Printf("  %-*s%s%-*s  %s\n",
 			colWidth, localStatus, columnSep, colWidth, onChainStatus,
-			visualizer.Colorize("[MATCH]", "green"))
+			style.Colorize("[MATCH]", "green"))
 	} else {
 		fmt.Printf("  %-*s%s%-*s  %s\n",
 			colWidth, localStatus, columnSep, colWidth, onChainStatus,
-			visualizer.Colorize("[DIFF]", "red"))
+			style.Colorize("[DIFF]", "red"))
 	}
 }
 
@@ -136,9 +136,9 @@ func renderEventDiffs(diffs []EventDiff) {
 		onChainEvt := truncate(d.OnChainEvent, colWidth)
 		var marker string
 		if d.Divergent {
-			marker = visualizer.Colorize("[!]", "yellow") + " "
+			marker = style.Colorize("[!]", "yellow") + " "
 		} else {
-			marker = visualizer.Colorize("[=]", "dim") + " "
+			marker = style.Colorize("[=]", "dim") + " "
 		}
 		fmt.Printf("%s[%3d]  %-*s%s%-*s\n",
 			marker, d.Index+1, colWidth, localEvt, columnSep, colWidth, onChainEvt)
@@ -156,11 +156,11 @@ func renderDiagnosticDiffs(diffs []DiagnosticDiff) {
 		var marker string
 		switch {
 		case d.DivergentPath:
-			marker = visualizer.Colorize("[PATH]", "red") + " "
+			marker = style.Colorize("[PATH]", "red") + " "
 		case d.Divergent:
-			marker = visualizer.Colorize("[DIFF]", "yellow") + " "
+			marker = style.Colorize("[DIFF]", "yellow") + " "
 		default:
-			marker = visualizer.Colorize("[=]   ", "dim") + " "
+			marker = style.Colorize("[=]   ", "dim") + " "
 		}
 
 		fmt.Printf("%s[%3d]  %-*s%s%-*s\n",
@@ -189,7 +189,7 @@ func renderTopicDiff(local, onChain []string) {
 		}
 		if lt != ot {
 			fmt.Printf("        %s topic[%d]: %q  →  %q\n",
-				visualizer.Colorize("↳", "yellow"), i, lt, ot)
+				style.Colorize("↳", "yellow"), i, lt, ot)
 		}
 	}
 }
@@ -197,10 +197,10 @@ func renderTopicDiff(local, onChain []string) {
 func renderCallPaths(divs []CallPathDivergence) {
 	for i, div := range divs {
 		fmt.Printf("  %s  Divergence #%d at event [%d]\n",
-			visualizer.Colorize("[PATH]", "red"), i+1, div.EventIndex+1)
+			style.Colorize("[PATH]", "red"), i+1, div.EventIndex+1)
 		fmt.Printf("       Reason    : %s\n", div.Reason)
-		fmt.Printf("       Local     : %s\n", visualizer.Colorize(div.LocalSummary, "cyan"))
-		fmt.Printf("       On-Chain  : %s\n", visualizer.Colorize(div.OnChainSummary, "magenta"))
+		fmt.Printf("       Local     : %s\n", style.Colorize(div.LocalSummary, "cyan"))
+		fmt.Printf("       On-Chain  : %s\n", style.Colorize(div.OnChainSummary, "magenta"))
 		fmt.Println()
 	}
 }
@@ -210,15 +210,15 @@ func renderSummary(result *DiffResult) {
 	fmt.Println()
 
 	if !result.HasDivergence {
-		fmt.Printf("  %s  Local and on-chain execution are IDENTICAL\n", visualizer.Success())
+		fmt.Printf("  %s  Local and on-chain execution are IDENTICAL\n", style.Success())
 	} else {
-		fmt.Printf("  %s  Divergence detected between local and on-chain execution\n", visualizer.Warning())
+		fmt.Printf("  %s  Divergence detected between local and on-chain execution\n", style.Warning())
 	}
 
 	fmt.Println()
 	fmt.Printf("  %-30s  %d\n", "Total events compared:", result.TotalEvents)
 	fmt.Printf("  %-30s  %s\n", "Identical events:",
-		visualizer.Colorize(fmt.Sprintf("%d", result.IdenticalEvents), "green"))
+		style.Colorize(fmt.Sprintf("%d", result.IdenticalEvents), "green"))
 	fmt.Printf("  %-30s  %s\n", "Divergent events:",
 		colorizeDivergentCount(result.DivergentEvents))
 	fmt.Printf("  %-30s  %s\n", "Call-path divergences:",
@@ -234,7 +234,7 @@ func renderSummary(result *DiffResult) {
 
 	fmt.Println()
 	sep := strings.Repeat("─", colWidth*2+len(columnSep))
-	fmt.Println(visualizer.Colorize(sep, "dim"))
+	fmt.Println(style.Colorize(sep, "dim"))
 }
 
 // ─── formatting helpers ───────────────────────────────────────────────────────
@@ -281,19 +281,19 @@ func formatDeltaInt(v int) string {
 func colorizeDelta(s string, v int64) string {
 	switch {
 	case v > 0:
-		return visualizer.Colorize(s, "yellow")
+		return style.Colorize(s, "yellow")
 	case v < 0:
-		return visualizer.Colorize(s, "green")
+		return style.Colorize(s, "green")
 	default:
-		return visualizer.Colorize(s, "dim")
+		return style.Colorize(s, "dim")
 	}
 }
 
 func colorizeDivergentCount(n int) string {
 	if n == 0 {
-		return visualizer.Colorize("0", "green")
+		return style.Colorize("0", "green")
 	}
-	return visualizer.Colorize(fmt.Sprintf("%d", n), "red")
+	return style.Colorize(fmt.Sprintf("%d", n), "red")
 }
 
 func budgetDeltaPct(delta int64, base uint64) float64 {
@@ -307,13 +307,13 @@ func colorizePct(pct float64) string {
 	s := fmt.Sprintf("%.2f%%", pct)
 	switch {
 	case pct > 10:
-		return visualizer.Colorize(s, "red")
+		return style.Colorize(s, "red")
 	case pct > 0:
-		return visualizer.Colorize(s, "yellow")
+		return style.Colorize(s, "yellow")
 	case pct < 0:
-		return visualizer.Colorize(s, "green")
+		return style.Colorize(s, "green")
 	default:
-		return visualizer.Colorize(s, "dim")
+		return style.Colorize(s, "dim")
 	}
 }
 

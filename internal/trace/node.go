@@ -5,21 +5,29 @@ package trace
 
 import "fmt"
 
+// StateChange represents a modification to the ledger state
+type StateChange struct {
+	Type  string // "put", "del"
+	Key   string // Hex-encoded ledger key
+	Value string // Hex-encoded ledger entry (for "put")
+}
+
 // TraceNode represents a single node in the execution trace tree
 type TraceNode struct {
-	ID          string       // Unique identifier for this node
-	Type        string       // Type of event: "contract_call", "host_fn", "error", "event"
-	ContractID  string       // Contract ID if applicable
-	Function    string       // Function name being called
-	Error       string       // Error message if this is an error node
-	EventData   string       // Event data/payload
-	Depth       int          // Depth in the call tree (0 = root)
-	Children    []*TraceNode // Child nodes in the execution tree
-	Parent      *TraceNode   // Parent node (nil for root)
-	Expanded    bool         // Whether this node is expanded in the UI
-	SourceRef   *SourceRef   // Optional source mapping from WASM debug info; nil if unknown
-	CPUDelta    *uint64      // CPU instructions consumed by this node (nil if not tracked)
-	MemoryDelta *uint64      // Memory bytes consumed by this node (nil if not tracked)
+	ID           string        // Unique identifier for this node
+	Type         string        // Type of event: "contract_call", "host_fn", "error", "event"
+	ContractID   string        // Contract ID if applicable
+	Function     string        // Function name being called
+	Error        string        // Error message if this is an error node
+	EventData    string        // Event data/payload
+	Depth        int           // Depth in the call tree (0 = root)
+	Children     []*TraceNode  // Child nodes in the execution tree
+	Parent       *TraceNode    // Parent node (nil for root)
+	Expanded     bool          // Whether this node is expanded in the UI
+	SourceRef    *SourceRef    // Optional source mapping from WASM debug info; nil if unknown
+	CPUDelta     *uint64       // CPU instructions consumed by this node (nil if not tracked)
+	MemoryDelta  *uint64       // Memory bytes consumed by this node (nil if not tracked)
+	StateChanges []StateChange // Ledger state modifications made in this node
 }
 
 // NewTraceNode creates a new trace node

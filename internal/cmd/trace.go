@@ -9,7 +9,7 @@ import (
 
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/trace"
-	"github.com/dotandev/hintents/internal/visualizer"
+	"github.com/dotandev/hintents/internal/visualizer/style"
 	"github.com/spf13/cobra"
 )
 
@@ -37,9 +37,9 @@ Example:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Apply theme if specified, otherwise auto-detect
 		if traceThemeFlag != "" {
-			visualizer.SetTheme(visualizer.Theme(traceThemeFlag))
+			style.SetTheme(style.Theme(traceThemeFlag))
 		} else {
-			visualizer.SetTheme(visualizer.DetectTheme())
+			style.SetTheme(style.DetectTheme())
 		}
 
 		var filename string

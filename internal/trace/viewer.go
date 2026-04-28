@@ -13,7 +13,7 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/dotandev/hintents/internal/dwarf"
-	"github.com/dotandev/hintents/internal/visualizer"
+	"github.com/dotandev/hintents/internal/visualizer/style"
 )
 
 // InteractiveViewer provides a terminal-based interactive trace navigation interface
@@ -72,14 +72,14 @@ func NewInteractiveViewerWithWASM(trace *ExecutionTrace, wasmData []byte) *Inter
 // strings reflow correctly whenever the window size changes.
 func (v *InteractiveViewer) Start() error {
 	termW := getTermWidth()
-	fmt.Printf("%s ERST Interactive Trace Viewer\n", visualizer.Symbol("magnify"))
+	fmt.Printf("%s ERST Interactive Trace Viewer\n", style.Symbol("magnify"))
 	fmt.Println(separator(termW))
 	fmt.Printf("Transaction: %s\n", v.trace.TransactionHash)
 	fmt.Printf("Total Steps: %d\n\n", len(v.trace.States))
 
 	// Show trap info at startup if detected
 	if v.trap != nil {
-		fmt.Printf("%s Memory Trap Detected!\n", visualizer.Symbol("warn"))
+		fmt.Printf("%s Memory Trap Detected!\n", style.Symbol("warn"))
 		fmt.Printf("Type: %s\n", v.trap.Type)
 		if v.trap.SourceLocation != nil {
 			fmt.Printf("Location: %s:%d\n", v.trap.SourceLocation.File, v.trap.SourceLocation.Line)
@@ -149,7 +149,7 @@ func (v *InteractiveViewer) handleCommand(command string) bool {
 		if v.hideStdLib {
 			status = "hidden"
 		}
-		fmt.Printf("%s Rust core::* traces are now %s\n", visualizer.Symbol("eye"), status)
+		fmt.Printf("%s Rust core::* traces are now %s\n", style.Symbol("eye"), status)
 		return false
 	}
 
@@ -189,7 +189,7 @@ func (v *InteractiveViewer) handleCommand(command string) bool {
 	case "?", "h", "help":
 		v.showHelp()
 	case "q", "quit", "exit":
-		fmt.Printf("Goodbye! %s\n", visualizer.Symbol("wave"))
+		fmt.Printf("Goodbye! %s\n", style.Symbol("wave"))
 		return true
 	case "y", "yank", "copy":
 		if len(parts) > 1 {
@@ -215,7 +215,7 @@ func (v *InteractiveViewer) stepForward() {
 			state, err = v.trace.StepForward()
 		}
 		if err != nil {
-			fmt.Printf("%s %s\n", visualizer.Error(), err)
+			fmt.Printf("%s %s\n", style.Error(), err)
 			return
 		}
 
@@ -223,7 +223,7 @@ func (v *InteractiveViewer) stepForward() {
 			continue
 		}
 
-		fmt.Printf("%s  Stepped forward to step %d\n", visualizer.Symbol("arrow_r"), state.Step)
+		fmt.Printf("%s  Stepped forward to step %d\n", style.Symbol("arrow_r"), state.Step)
 		v.displayCurrentState()
 		return
 	}
@@ -240,7 +240,7 @@ func (v *InteractiveViewer) stepBackward() {
 			state, err = v.trace.StepBackward()
 		}
 		if err != nil {
-			fmt.Printf("%s %s\n", visualizer.Error(), err)
+			fmt.Printf("%s %s\n", style.Error(), err)
 			return
 		}
 
@@ -248,7 +248,7 @@ func (v *InteractiveViewer) stepBackward() {
 			continue
 		}
 
-		fmt.Printf("%s  Stepped backward to step %d\n", visualizer.Symbol("arrow_l"), state.Step)
+		fmt.Printf("%s  Stepped backward to step %d\n", style.Symbol("arrow_l"), state.Step)
 		v.displayCurrentState()
 		return
 	}
@@ -275,17 +275,17 @@ func (v *InteractiveViewer) cycleEventFilter() {
 func (v *InteractiveViewer) jumpToStep(stepStr string) {
 	step, err := strconv.Atoi(stepStr)
 	if err != nil {
-		fmt.Printf("%s Invalid step number: %s\n", visualizer.Error(), stepStr)
+		fmt.Printf("%s Invalid step number: %s\n", style.Error(), stepStr)
 		return
 	}
 
 	state, err := v.trace.JumpToStep(step)
 	if err != nil {
-		fmt.Printf("%s %s\n", visualizer.Error(), err)
+		fmt.Printf("%s %s\n", style.Error(), err)
 		return
 	}
 
-	fmt.Printf("%s Jumped to step %d\n", visualizer.Symbol("target"), state.Step)
+	fmt.Printf("%s Jumped to step %d\n", style.Symbol("target"), state.Step)
 	v.displayCurrentState()
 }
 
@@ -294,12 +294,12 @@ func (v *InteractiveViewer) jumpToStep(stepStr string) {
 func (v *InteractiveViewer) displayCurrentState() {
 	state, err := v.trace.GetCurrentState()
 	if err != nil {
-		fmt.Printf("%s %s\n", visualizer.Error(), err)
+		fmt.Printf("%s %s\n", style.Error(), err)
 		return
 	}
 
 	termW := getTermWidth()
-	fmt.Printf("\n%s Current State\n", visualizer.Symbol("pin"))
+	fmt.Printf("\n%s Current State\n", style.Symbol("pin"))
 	fmt.Println(separator(termW))
 
 	if v.eventFilter != "" {
@@ -321,7 +321,7 @@ func (v *InteractiveViewer) displayCurrentState() {
 	if state.Step > 0 && state.ContractID != "" {
 		prev := &v.trace.States[state.Step-1]
 		if prev.ContractID != "" && prev.ContractID != state.ContractID {
-			fmt.Printf("%s\n", visualizer.ContractBoundary(prev.ContractID, state.ContractID))
+			fmt.Printf("%s\n", style.ContractBoundary(prev.ContractID, state.ContractID))
 		}
 	}
 	if state.Function != "" {
@@ -337,7 +337,7 @@ func (v *InteractiveViewer) displayCurrentState() {
 		fmt.Printf("WASM Instruction: %s\n", state.WasmInstruction)
 	}
 	if state.Error != "" {
-		indicator := visualizer.Error() + " "
+		indicator := style.Error() + " "
 		fmt.Printf("%s%s\n", indicator, wrapField("Error", state.Error, termW-len(indicator)))
 		if v.trap != nil && IsMemoryTrap(v.trap) {
 			fmt.Println("\n  Use 't' or 'trap' to see local variables at this point")
@@ -356,12 +356,12 @@ func (v *InteractiveViewer) displayCurrentState() {
 func (v *InteractiveViewer) reconstructCurrentState() {
 	state, err := v.trace.ReconstructStateAt(v.trace.CurrentStep)
 	if err != nil {
-		fmt.Printf("%s Failed to reconstruct state: %s\n", visualizer.Error(), err)
+		fmt.Printf("%s Failed to reconstruct state: %s\n", style.Error(), err)
 		return
 	}
 
 	termW := getTermWidth()
-	fmt.Printf("\n%s Reconstructed State\n", visualizer.Symbol("wrench"))
+	fmt.Printf("\n%s Reconstructed State\n", style.Symbol("wrench"))
 	fmt.Println(separator(termW))
 	v.displayState(state)
 }
@@ -370,18 +370,18 @@ func (v *InteractiveViewer) reconstructCurrentState() {
 func (v *InteractiveViewer) reconstructState(stepStr string) {
 	step, err := strconv.Atoi(stepStr)
 	if err != nil {
-		fmt.Printf("%s Invalid step number: %s\n", visualizer.Error(), stepStr)
+		fmt.Printf("%s Invalid step number: %s\n", style.Error(), stepStr)
 		return
 	}
 
 	state, err := v.trace.ReconstructStateAt(step)
 	if err != nil {
-		fmt.Printf("%s Failed to reconstruct state: %s\n", visualizer.Error(), err)
+		fmt.Printf("%s Failed to reconstruct state: %s\n", style.Error(), err)
 		return
 	}
 
 	termW := getTermWidth()
-	fmt.Printf("\n%s Reconstructed State at Step %d\n", visualizer.Symbol("wrench"), step)
+	fmt.Printf("\n%s Reconstructed State at Step %d\n", style.Symbol("wrench"), step)
 	fmt.Println(separator(termW))
 	v.displayState(state)
 }
@@ -421,7 +421,7 @@ func (v *InteractiveViewer) showNavigationInfo() {
 	info := v.trace.GetNavigationInfo()
 
 	termW := getTermWidth()
-	fmt.Printf("\n%s Navigation Info\n", visualizer.Symbol("chart"))
+	fmt.Printf("\n%s Navigation Info\n", style.Symbol("chart"))
 	fmt.Println(separator(termW))
 	fmt.Printf("Total Steps: %d\n", info["total_steps"])
 	fmt.Printf("Current Step: %d\n", info["current_step"])
@@ -436,7 +436,7 @@ func (v *InteractiveViewer) showNavigationInfo() {
 	fmt.Printf("Snapshots: %d\n", info["snapshots_count"])
 
 	if v.trap != nil {
-		fmt.Printf("\n%s Trap Detected: %s\n", visualizer.Error(), v.trap.Type)
+		fmt.Printf("\n%s Trap Detected: %s\n", style.Error(), v.trap.Type)
 		fmt.Println("  Type 't' or 'trap' to see details with local variables")
 	}
 }
@@ -444,7 +444,7 @@ func (v *InteractiveViewer) showNavigationInfo() {
 // displayTrapInfo displays trap information including local variables
 func (v *InteractiveViewer) displayTrapInfo() {
 	if v.trap == nil {
-		fmt.Printf("%s No trap detected in this trace\n", visualizer.Symbol("check"))
+		fmt.Printf("%s No trap detected in this trace\n", style.Symbol("check"))
 		return
 	}
 
@@ -464,7 +464,7 @@ func (v *InteractiveViewer) listSteps(countStr string) {
 	start := max(0, current-count/2)
 	end := min(len(v.trace.States)-1, start+count-1)
 
-	fmt.Printf("\n%s Steps %d-%d\n", visualizer.Symbol("list"), start, end)
+	fmt.Printf("\n%s Steps %d-%d\n", style.Symbol("list"), start, end)
 	if v.eventFilter != "" {
 		fmt.Printf("Filter: %s\n", v.eventFilter)
 	}
@@ -483,7 +483,7 @@ func (v *InteractiveViewer) listSteps(countStr string) {
 
 		// Highlight cross-contract call boundary
 		if state.ContractID != "" && prevContractID != "" && state.ContractID != prevContractID {
-			fmt.Printf("     %s\n", visualizer.ContractBoundary(prevContractID, state.ContractID))
+			fmt.Printf("     %s\n", style.ContractBoundary(prevContractID, state.ContractID))
 		}
 		if state.ContractID != "" {
 			prevContractID = state.ContractID
@@ -495,7 +495,7 @@ func (v *InteractiveViewer) listSteps(countStr string) {
 
 		marker := "  "
 		if i == current {
-			marker = visualizer.Symbol("play")
+			marker = style.Symbol("play")
 		}
 
 		typeTag := ""
@@ -510,7 +510,7 @@ func (v *InteractiveViewer) listSteps(countStr string) {
 			line += fmt.Sprintf(" (%s)", state.Function)
 		}
 		if state.Error != "" {
-			line += fmt.Sprintf(" %s", visualizer.Error())
+			line += fmt.Sprintf(" %s", style.Error())
 		}
 		line += typeTag
 
@@ -526,7 +526,7 @@ func (v *InteractiveViewer) listSteps(countStr string) {
 func (v *InteractiveViewer) showSplitPane() {
 	state, err := v.trace.GetCurrentState()
 	if err != nil {
-		fmt.Printf("%s %s\n", visualizer.Error(), err)
+		fmt.Printf("%s %s\n", style.Error(), err)
 		return
 	}
 	node := executionStateToNode(state)
@@ -555,7 +555,7 @@ func executionStateToNode(state *ExecutionState) *TraceNode {
 // showHelp displays available keyboard shortcuts
 func (v *InteractiveViewer) showHelp() {
 	termW := getTermWidth()
-	fmt.Printf("\n%s Keyboard Shortcuts\n", visualizer.Symbol("book"))
+	fmt.Printf("\n%s Keyboard Shortcuts\n", style.Symbol("book"))
 	fmt.Println(separator(termW))
 	fmt.Println("Navigation:")
 	fmt.Println("  n, next, forward        - Step forward")
@@ -595,7 +595,7 @@ func (v *InteractiveViewer) showHelp() {
 func (v *InteractiveViewer) handleYank(args []string) {
 	state, err := v.trace.GetCurrentState()
 	if err != nil {
-		fmt.Printf("%s %s\n", visualizer.Error(), err)
+		fmt.Printf("%s %s\n", style.Error(), err)
 		return
 	}
 
@@ -608,39 +608,39 @@ func (v *InteractiveViewer) handleYank(args []string) {
 		if len(args) > 1 {
 			index, err = strconv.Atoi(args[1])
 			if err != nil {
-				fmt.Printf("%s Invalid argument index: %s\n", visualizer.Error(), args[1])
+				fmt.Printf("%s Invalid argument index: %s\n", style.Error(), args[1])
 				return
 			}
 		}
 
 		if index < 0 || index >= len(state.RawArguments) {
 			fmt.Printf("%s Argument index %d out of bounds (0-%d)\n",
-				visualizer.Error(), index, len(state.RawArguments)-1)
+				style.Error(), index, len(state.RawArguments)-1)
 			return
 		}
 		value = state.RawArguments[index]
 
 	case "r", "ret", "return":
 		if state.RawReturnValue == "" {
-			fmt.Printf("%s No raw return value available at this step\n", visualizer.Error())
+			fmt.Printf("%s No raw return value available at this step\n", style.Error())
 			return
 		}
 		value = state.RawReturnValue
 
 	default:
 		fmt.Printf("%s Unknown yank subcommand: %s. Use 'a' for arguments or 'r' for return value.\n",
-			visualizer.Error(), subcmd)
+			style.Error(), subcmd)
 		return
 	}
 
 	if err := clipboard.WriteAll(value); err != nil {
-		fmt.Printf("%s Failed to copy to clipboard: %v\n", visualizer.Error(), err)
+		fmt.Printf("%s Failed to copy to clipboard: %v\n", style.Error(), err)
 		// Fallback: just print it so the user can see it
 		fmt.Printf("Raw XDR: %s\n", value)
 		return
 	}
 
-	fmt.Printf("%s Copied raw XDR to clipboard\n", visualizer.Symbol("sparkles"))
+	fmt.Printf("%s Copied raw XDR to clipboard\n", style.Symbol("sparkles"))
 }
 
 // Helper functions

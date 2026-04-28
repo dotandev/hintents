@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/dotandev/hintents/internal/dwarf"
-	"github.com/dotandev/hintents/internal/visualizer"
+	"github.com/dotandev/hintents/internal/visualizer/style"
 )
 
 // TrapType categorizes different types of traps/errors
@@ -243,19 +243,19 @@ func FormatTrapInfo(trap *TrapInfo) string {
 	var sb strings.Builder
 
 	// Header
-	sb.WriteString(visualizer.Error() + " ")
+	sb.WriteString(style.Error() + " ")
 	sb.WriteString("Trap Detected: ")
 	sb.WriteString(string(trap.Type))
 	sb.WriteString("\n")
 
 	// Error message
-	sb.WriteString("\n" + visualizer.Symbol("warn") + " Error: ")
+	sb.WriteString("\n" + style.Symbol("warn") + " Error: ")
 	sb.WriteString(trap.Message)
 	sb.WriteString("\n")
 
 	// Source location
 	if trap.SourceLocation != nil {
-		sb.WriteString("\n" + visualizer.Symbol("pin") + " Location: ")
+		sb.WriteString("\n" + style.Symbol("pin") + " Location: ")
 		if trap.SourceLocation.File != "" {
 			sb.WriteString(trap.SourceLocation.File)
 			sb.WriteString(":")
@@ -266,14 +266,14 @@ func FormatTrapInfo(trap *TrapInfo) string {
 
 	// Function
 	if trap.Function != "" {
-		sb.WriteString("\n" + visualizer.Symbol("wrench") + " Function: ")
+		sb.WriteString("\n" + style.Symbol("wrench") + " Function: ")
 		sb.WriteString(trap.Function)
 		sb.WriteString("\n")
 	}
 
 	// Local variables
 	if len(trap.LocalVars) > 0 {
-		sb.WriteString("\n" + visualizer.Symbol("list") + " Local Variables at Trap Point:\n")
+		sb.WriteString("\n" + style.Symbol("list") + " Local Variables at Trap Point:\n")
 		for _, v := range trap.LocalVars {
 			sb.WriteString("  - ")
 			sb.WriteString(v.DemangledName)
@@ -293,7 +293,7 @@ func FormatTrapInfo(trap *TrapInfo) string {
 
 	// Call stack
 	if len(trap.CallStack) > 0 {
-		sb.WriteString("\n" + visualizer.Symbol("list") + " Call Stack:\n")
+		sb.WriteString("\n" + style.Symbol("list") + " Call Stack:\n")
 		for i, frame := range trap.CallStack {
 			sb.WriteString("  ")
 			sb.WriteString(fmt.Sprintf("%d", i))

@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/visualizer"
+	"github.com/dotandev/hintents/internal/visualizer/style"
 )
 
 const (
@@ -144,7 +144,7 @@ func (p *SplitPane) renderTracePane(w io.Writer, node *TraceNode, width int) {
 	lines := nodeDisplayLines(node)
 	for i, line := range lines {
 		if i >= limit {
-			fmt.Fprintf(w, "  %s\n", visualizer.Colorize(fmt.Sprintf("... (%d more)", len(lines)-limit), "dim"))
+			fmt.Fprintf(w, "  %s\n", style.Colorize(fmt.Sprintf("... (%d more)", len(lines)-limit), "dim"))
 			break
 		}
 		fmt.Fprintf(w, "  %s\n", line)
@@ -173,7 +173,7 @@ func (p *SplitPane) renderDivider(w io.Writer, width int, src *SourceContext) {
 func (p *SplitPane) renderSourcePane(w io.Writer, src *SourceContext, width int) {
 	limit := paneRows(p.SrcRows, defaultSrcRows)
 	if src == nil || len(src.Lines) == 0 {
-		fmt.Fprintf(w, "  %s\n", visualizer.Colorize("No source mapping available for this node.", "dim"))
+		fmt.Fprintf(w, "  %s\n", style.Colorize("No source mapping available for this node.", "dim"))
 		for i := 1; i < limit; i++ {
 			fmt.Fprintln(w)
 		}
@@ -186,15 +186,15 @@ func (p *SplitPane) renderSourcePane(w io.Writer, src *SourceContext, width int)
 	}
 	for i, line := range src.Lines {
 		if i >= limit {
-			fmt.Fprintf(w, "  %s\n", visualizer.Colorize(fmt.Sprintf("... (%d more)", len(src.Lines)-limit), "dim"))
+			fmt.Fprintf(w, "  %s\n", style.Colorize(fmt.Sprintf("... (%d more)", len(src.Lines)-limit), "dim"))
 			break
 		}
 		lineNum := startLine + i
 		numStr := fmt.Sprintf("%4d", lineNum)
 		if i == src.FocusIndex {
-			fmt.Fprintf(w, "%s | %s\n", visualizer.Colorize(numStr, "yellow"), visualizer.Colorize(line, "bold"))
+			fmt.Fprintf(w, "%s | %s\n", style.Colorize(numStr, "yellow"), style.Colorize(line, "bold"))
 		} else {
-			fmt.Fprintf(w, "%s | %s\n", visualizer.Colorize(numStr, "dim"), line)
+			fmt.Fprintf(w, "%s | %s\n", style.Colorize(numStr, "dim"), line)
 		}
 	}
 	for i := len(src.Lines); i < limit; i++ {
@@ -206,18 +206,18 @@ func (p *SplitPane) renderSourcePane(w io.Writer, src *SourceContext, width int)
 // nodeDisplayLines converts a TraceNode into display strings for the trace pane.
 func nodeDisplayLines(node *TraceNode) []string {
 	var out []string
-	out = append(out, fmt.Sprintf("Type:     %s", visualizer.Colorize(strings.ToUpper(node.Type), "bold")))
+	out = append(out, fmt.Sprintf("Type:     %s", style.Colorize(strings.ToUpper(node.Type), "bold")))
 	if node.ContractID != "" {
-		out = append(out, fmt.Sprintf("Contract: %s", visualizer.Colorize(node.ContractID, "cyan")))
+		out = append(out, fmt.Sprintf("Contract: %s", style.Colorize(node.ContractID, "cyan")))
 	}
 	if node.Function != "" {
-		out = append(out, fmt.Sprintf("Function: %s", visualizer.Colorize(node.Function, "yellow")))
+		out = append(out, fmt.Sprintf("Function: %s", style.Colorize(node.Function, "yellow")))
 	}
 	if node.EventData != "" {
 		out = append(out, fmt.Sprintf("Data:     %s", node.EventData))
 	}
 	if node.Error != "" {
-		out = append(out, fmt.Sprintf("Error:    %s", visualizer.Colorize(node.Error, "red")))
+		out = append(out, fmt.Sprintf("Error:    %s", style.Colorize(node.Error, "red")))
 	}
 	indent := strings.Repeat("  ", node.Depth)
 	out = append(out, fmt.Sprintf("Depth:    %s%d", indent, node.Depth))
@@ -226,7 +226,7 @@ func nodeDisplayLines(node *TraceNode) []string {
 		if node.SourceRef.Column > 0 {
 			loc = fmt.Sprintf("%s:%d:%d", node.SourceRef.File, node.SourceRef.Line, node.SourceRef.Column)
 		}
-		out = append(out, fmt.Sprintf("Source:   %s", visualizer.Colorize(loc, "dim")))
+		out = append(out, fmt.Sprintf("Source:   %s", style.Colorize(loc, "dim")))
 	}
 	return out
 }

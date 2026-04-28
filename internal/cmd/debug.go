@@ -27,7 +27,7 @@ import (
 	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/dotandev/hintents/internal/tokenflow"
-	"github.com/dotandev/hintents/internal/visualizer"
+	"github.com/dotandev/hintents/internal/visualizer/style"
 	"github.com/dotandev/hintents/internal/wat"
 	"github.com/dotandev/hintents/internal/watch"
 
@@ -246,9 +246,9 @@ Local WASM Replay Mode:
 
 		// Apply theme if specified, otherwise auto-detect
 		if themeFlag != "" {
-			visualizer.SetTheme(visualizer.Theme(themeFlag))
+			style.SetTheme(style.Theme(themeFlag))
 		} else {
-			visualizer.SetTheme(visualizer.DetectTheme())
+			style.SetTheme(style.DetectTheme())
 		}
 
 		// Demo mode: print sample output for testing color detection (no network)
@@ -585,7 +585,7 @@ Local WASM Replay Mode:
 		secDetector := security.NewDetector()
 		findings := secDetector.Analyze(resp.EnvelopeXdr, resp.ResultMetaXdr, lastSimResp.Events, lastSimResp.Logs)
 		if len(findings) == 0 {
-			fmt.Printf("%s No security issues detected\n", visualizer.Success())
+			fmt.Printf("%s No security issues detected\n", style.Success())
 		} else {
 			verifiedCount := 0
 			heuristicCount := 0
@@ -684,15 +684,15 @@ func runDemoMode(cmdArgs []string) error {
 	fmt.Printf("  Operations: 5\n")
 	fmt.Printf("\nEvents: 2, Logs: 3\n")
 	fmt.Printf("\n=== Security Analysis ===\n")
-	fmt.Printf("%s No security issues detected\n", visualizer.Success())
+	fmt.Printf("%s No security issues detected\n", style.Success())
 	fmt.Printf("\nToken Flow Summary:\n")
-	fmt.Printf("  %s XLM transferred\n", visualizer.Symbol("arrow_r"))
+	fmt.Printf("  %s XLM transferred\n", style.Symbol("arrow_r"))
 	fmt.Printf("\nSession ready. Use 'erst session save' to persist.\n")
 	return nil
 }
 
 func runLocalWasmReplay() error {
-	fmt.Printf("%s  WARNING: Using Mock State (not mainnet data)\n", visualizer.Warning())
+	fmt.Printf("%s  WARNING: Using Mock State (not mainnet data)\n", style.Warning())
 	fmt.Println()
 	effectiveWasmPath := wasmPath
 
@@ -708,7 +708,7 @@ func runLocalWasmReplay() error {
 	defer cleanup()
 	effectiveWasmPath = optimizedPath
 
-	fmt.Printf("%s Local WASM Replay Mode\n", visualizer.Symbol("wrench"))
+	fmt.Printf("%s Local WASM Replay Mode\n", style.Symbol("wrench"))
 	fmt.Printf("WASM File: %s\n", effectiveWasmPath)
 	if wasmOptimizeFlag {
 		printOptimizationReport(report)
@@ -736,17 +736,17 @@ func runLocalWasmReplay() error {
 	applySimulationFeeMocks(req)
 
 	// Run simulation
-	fmt.Printf("%s Executing contract locally...\n", visualizer.Symbol("play"))
+	fmt.Printf("%s Executing contract locally...\n", style.Symbol("play"))
 	resp, err := runner.Run(req)
 	if err != nil {
-		fmt.Printf("%s Technical failure: %v\n", visualizer.Error(), err)
+		fmt.Printf("%s Technical failure: %v\n", style.Error(), err)
 		return err
 	}
 
 	// Display results
 	fmt.Println()
 	if resp.Status == "error" {
-		fmt.Printf("%s Execution failed\n", visualizer.Error())
+		fmt.Printf("%s Execution failed\n", style.Error())
 		if resp.Error != "" {
 			fmt.Printf("Error: %s\n", resp.Error)
 		}
@@ -761,12 +761,12 @@ func runLocalWasmReplay() error {
 			}
 		}
 	} else {
-		fmt.Printf("%s Execution completed successfully\n", visualizer.Success())
+		fmt.Printf("%s Execution completed successfully\n", style.Success())
 	}
 	fmt.Println()
 
 	if len(resp.Logs) > 0 {
-		fmt.Printf("%s Logs:\n", visualizer.Symbol("logs"))
+		fmt.Printf("%s Logs:\n", style.Symbol("logs"))
 		for _, log := range resp.Logs {
 			fmt.Printf("  %s\n", log)
 		}
@@ -774,10 +774,10 @@ func runLocalWasmReplay() error {
 	}
 
 	if len(resp.Events) > 0 {
-		fmt.Printf("%s Events:\n", visualizer.Symbol("events"))
+		fmt.Printf("%s Events:\n", style.Symbol("events"))
 		for _, event := range resp.Events {
 			if deprecatedFn, ok := findDeprecatedHostFunction(event); ok {
-				fmt.Printf("  %s %s %s\n", event, visualizer.Warning(), visualizer.Colorize("deprecated host fn: "+deprecatedFn, "yellow"))
+				fmt.Printf("  %s %s %s\n", event, style.Warning(), style.Colorize("deprecated host fn: "+deprecatedFn, "yellow"))
 				continue
 			}
 			fmt.Printf("  %s\n", event)
@@ -786,7 +786,7 @@ func runLocalWasmReplay() error {
 	}
 
 	if verbose {
-		fmt.Printf("%s Full Response:\n", visualizer.Symbol("magnify"))
+		fmt.Printf("%s Full Response:\n", style.Symbol("magnify"))
 		jsonBytes, _ := json.MarshalIndent(resp, "", "  ")
 		fmt.Println(string(jsonBytes))
 	}
@@ -945,7 +945,7 @@ func printSimulationResult(network string, res *simulator.SimulationResponse) {
 					fmt.Printf(", Contract: %s", *event.ContractID)
 				}
 				if deprecatedFn, ok := deprecatedHostFunctionInDiagnosticEvent(event); ok {
-					fmt.Printf(" %s %s", visualizer.Warning(), visualizer.Colorize("deprecated host fn: "+deprecatedFn, "yellow"))
+					fmt.Printf(" %s %s", style.Warning(), style.Colorize("deprecated host fn: "+deprecatedFn, "yellow"))
 				}
 				fmt.Printf("\n")
 				if len(event.Topics) > 0 {
@@ -1136,7 +1136,7 @@ func checkLTOWarning(wasmFilePath string) {
 }
 
 func displaySourceLocation(loc *simulator.SourceLocation) {
-	fmt.Printf("%s Location: %s:%d:%d\n", visualizer.Symbol("location"), loc.File, loc.Line, loc.Column)
+	fmt.Printf("%s Location: %s:%d:%d\n", style.Symbol("location"), loc.File, loc.Line, loc.Column)
 
 	// Try to find the file
 	content, err := os.ReadFile(loc.File)

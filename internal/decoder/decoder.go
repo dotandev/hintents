@@ -8,23 +8,17 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/dotandev/hintents/internal/trace"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// StateChange represents a modification to the ledger state
-type StateChange struct {
-	Type  string `json:"type"`  // "put", "del"
-	Key   string `json:"key"`   // Hex-encoded ledger key
-	Value string `json:"value"` // Hex-encoded ledger entry (for "put")
-}
-
 // CallNode represents a node in the execution call tree
 type CallNode struct {
-	ContractID   string         `json:"contract_id"`
-	Function     string         `json:"function,omitempty"`
-	Events       []DecodedEvent `json:"events,omitempty"`
-	StateChanges []StateChange  `json:"state_changes,omitempty"`
-	SubCalls     []*CallNode    `json:"sub_calls,omitempty"`
+	ContractID   string              `json:"contract_id"`
+	Function     string              `json:"function,omitempty"`
+	Events       []DecodedEvent      `json:"events,omitempty"`
+	StateChanges []trace.StateChange `json:"state_changes,omitempty"`
+	SubCalls     []*CallNode         `json:"sub_calls,omitempty"`
 
 	// Internal for tree building
 	parent *CallNode
@@ -103,6 +97,15 @@ func DecodeEvents(eventsXdr []string) (*CallNode, error) {
 			if current.parent != nil {
 				current = current.parent
 			}
+		} else if isStateChange(decoded) {
+			// Record state modification
+			change := trace.StateChange{
+				Type:  extractStateChangeType(decoded),
+				Key:   extractStateChangeKey(decoded),
+				Value: extractStateChangeValue(decoded),
+			}
+			current.StateChanges = append(current.StateChanges, change)
+			current.Events = append(current.Events, decoded)
 		} else {
 			// Regular event, add to current scope
 			current.Events = append(current.Events, decoded)
@@ -152,6 +155,33 @@ func extractFunctionName(e DecodedEvent) string {
 		return e.Topics[1]
 	}
 	return "unknown"
+}
+
+func isStateChange(e DecodedEvent) bool {
+	return len(e.Topics) > 0 && (e.Topics[0] == "put_ledger_entry" || e.Topics[0] == "del_ledger_entry")
+}
+
+func extractStateChangeType(e DecodedEvent) string {
+	if len(e.Topics) > 0 {
+		if e.Topics[0] == "put_ledger_entry" {
+			return "put"
+		}
+		if e.Topics[0] == "del_ledger_entry" {
+			return "del"
+		}
+	}
+	return "unknown"
+}
+
+func extractStateChangeKey(e DecodedEvent) string {
+	if len(e.Topics) > 1 {
+		return e.Topics[1] // Convention: second topic is the key
+	}
+	return "unknown"
+}
+
+func extractStateChangeValue(e DecodedEvent) string {
+	return e.Data // Convention: data is the new value
 }
 
 // DecodeEnvelope decodes a base64-encoded XDR transaction envelope

@@ -17,7 +17,7 @@ import (
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/simulator"
-	"github.com/dotandev/hintents/internal/visualizer"
+	"github.com/dotandev/hintents/internal/visualizer/style"
 
 	"github.com/spf13/cobra"
 )
@@ -134,12 +134,12 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 
 	// Theme
 	if cmpThemeFlag != "" {
-		visualizer.SetTheme(visualizer.Theme(cmpThemeFlag))
+		style.SetTheme(style.Theme(cmpThemeFlag))
 	} else {
-		visualizer.SetTheme(visualizer.DetectTheme())
+		style.SetTheme(style.DetectTheme())
 	}
 
-	fmt.Printf("%s  Compare Replay\n", visualizer.Symbol("chart"))
+	fmt.Printf("%s  Compare Replay\n", style.Symbol("chart"))
 	fmt.Printf("Transaction : %s\n", txHash)
 	fmt.Printf("Network     : %s\n", cmpNetworkFlag)
 	fmt.Printf("Local WASM  : %s\n", cmpLocalWasmFlag)
@@ -182,12 +182,12 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 	}
 
 	// ── Fetch transaction ───────────────────────────────────────────────────
-	fmt.Printf("%s Fetching transaction from %s...\n", visualizer.Symbol("pin"), cmpNetworkFlag)
+	fmt.Printf("%s Fetching transaction from %s...\n", style.Symbol("pin"), cmpNetworkFlag)
 	txResp, err := client.GetTransaction(ctx, txHash)
 	if err != nil {
 		return errors.WrapRPCConnectionFailed(err)
 	}
-	fmt.Printf("%s Fetched (envelope: %d bytes)\n\n", visualizer.Success(), len(txResp.EnvelopeXdr))
+	fmt.Printf("%s Fetched (envelope: %d bytes)\n\n", style.Success(), len(txResp.EnvelopeXdr))
 
 	// ── Extract ledger keys & entries ───────────────────────────────────────
 	keys, err := extractLedgerKeys(txResp.ResultMetaXdr)
@@ -211,7 +211,7 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 	}
 
 	// ── Run two simulation passes in parallel ────────────────────────────────
-	fmt.Printf("%s Running two simulation passes in parallel...\n", visualizer.Symbol("play"))
+	fmt.Printf("%s Running two simulation passes in parallel...\n", style.Symbol("play"))
 	fmt.Printf("   Pass A – local WASM  : %s\n", localWasmPath)
 	fmt.Printf("   Pass B – on-chain WASM: (using network ledger state)\n\n")
 

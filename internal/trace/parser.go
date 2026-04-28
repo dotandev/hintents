@@ -62,6 +62,24 @@ func ParseSimulationResponse(resp *SimulationResponse) (*TraceNode, error) {
 			deNode.ContractID = *de.ContractID
 		}
 
+		// Detect state changes
+		if len(de.Topics) > 0 && (de.Topics[0] == "put_ledger_entry" || de.Topics[0] == "del_ledger_entry") {
+			op := "put"
+			if de.Topics[0] == "del_ledger_entry" {
+				op = "del"
+			}
+			key := "unknown"
+			if len(de.Topics) > 1 {
+				key = de.Topics[1]
+			}
+			deNode.StateChanges = append(deNode.StateChanges, StateChange{
+				Type:  op,
+				Key:   key,
+				Value: de.Data,
+			})
+			deNode.Type = "state_modification"
+		}
+
 		// If it's a budget tick with a WASM instruction, add a sub-node
 		if de.WasmInstruction != nil {
 			instrNode := NewTraceNode(fmt.Sprintf("diag-%d-instr", i), "wasm_instruction")
