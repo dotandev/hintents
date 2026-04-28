@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -34,6 +35,7 @@ func (r *DetailedReporter) GenerateReport() string {
 	fmt.Fprintf(&sb, "Account: %s\n", r.trace.AccountID)
 	fmt.Fprintf(&sb, "Total Signers: %d\n", r.trace.SignerCount)
 	fmt.Fprintf(&sb, "Valid Signatures: %d\n\n", r.trace.ValidSignatures)
+	r.writeMultiSigRequirement(&sb)
 	if expirationLedger, ok := r.findExpirationLedger(); ok {
 		fmt.Fprintf(&sb, "  Expiration Ledger: %d\n\n", expirationLedger)
 	}
@@ -72,6 +74,90 @@ func (r *DetailedReporter) findExpirationLedger() (uint32, bool) {
 		return uint32(ledger), true
 	}
 	return 0, false
+}
+
+func (r *DetailedReporter) writeMultiSigRequirement(sb *strings.Builder) {
+	requiredWeight, providedWeight, ok := r.multiSigWeights()
+	if !ok {
+		return
+	}
+
+	requiredSigs := minSignaturesForWeight(r.trace.SignatureWeights, requiredWeight)
+	if requiredSigs <= 1 {
+		return
+	}
+
+	providedSigs := r.validSignerCount()
+	missingSigs := requiredSigs - providedSigs
+	if missingSigs < 0 {
+		missingSigs = 0
+	}
+
+	fmt.Fprintf(sb, "  Signatures: %d/%d (Missing: %d)\n", providedSigs, requiredSigs, missingSigs)
+	fmt.Fprintf(sb, "  Required Weight: %d\n", requiredWeight)
+	fmt.Fprintf(sb, "  Provided Weight: %d\n\n", providedWeight)
+}
+
+func (r *DetailedReporter) multiSigWeights() (uint32, uint32, bool) {
+	var requiredWeight uint32
+	var providedWeight uint32
+	if len(r.trace.Failures) > 0 {
+		requiredWeight = r.trace.Failures[0].RequiredWeight
+		providedWeight = r.trace.Failures[0].CollectedWeight
+	} else {
+		requiredWeight = r.trace.Thresholds.HighThreshold
+		for _, event := range r.trace.AuthEvents {
+			if event.EventType == "signature_verification" && event.Status == "valid" {
+				providedWeight += event.Weight
+			}
+		}
+	}
+
+	var maxSingleSignerWeight uint32
+	for _, signer := range r.trace.SignatureWeights {
+		if signer.Weight > maxSingleSignerWeight {
+			maxSingleSignerWeight = signer.Weight
+		}
+	}
+
+	if requiredWeight == 0 || requiredWeight <= maxSingleSignerWeight {
+		return 0, 0, false
+	}
+	return requiredWeight, providedWeight, true
+}
+
+func (r *DetailedReporter) validSignerCount() int {
+	seen := make(map[string]struct{})
+	for _, event := range r.trace.AuthEvents {
+		if event.EventType != "signature_verification" || event.Status != "valid" || event.SignerKey == "" {
+			continue
+		}
+		seen[event.SignerKey] = struct{}{}
+	}
+	return len(seen)
+}
+
+func minSignaturesForWeight(weights []KeyWeight, required uint32) int {
+	if required == 0 {
+		return 0
+	}
+
+	sorted := make([]uint32, 0, len(weights))
+	for _, w := range weights {
+		if w.Weight > 0 {
+			sorted = append(sorted, w.Weight)
+		}
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] > sorted[j] })
+
+	var total uint32
+	for i, weight := range sorted {
+		total += weight
+		if total >= required {
+			return i + 1
+		}
+	}
+	return len(sorted)
 }
 
 func (r *DetailedReporter) writeFailures(sb *strings.Builder) {

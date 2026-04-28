@@ -22,34 +22,35 @@ func SetHumanGas(enable bool) {
 }
 
 // GenerateCallGraphSVG generates a premium SVG call graph from a decoder.CallNode tree
-func GenerateCallGraphSVG(root *decoder.CallNode) string {
+func GenerateCallGraphSVG(root *decoder.CallNode, maxDepth int) string {
 	if root == nil {
 		return ""
 	}
 
-	// Layout and dimensions
 	nodeWidth := 200
 	nodeHeight := 96
 	horizontalGap := 40
 	verticalGap := 60
 	legendHeight := 56
 
-	// Track total dimensions and compute positions
-	positions := make(map[*decoder.CallNode][2]int) // node -> [x, y]
+	positions := make(map[*decoder.CallNode][2]int)
 
-	// First pass: calculate tree width and positions
-	var calculatePositions func(node *decoder.CallNode, x, y int) int
-	calculatePositions = func(node *decoder.CallNode, x, y int) int {
+	actualMaxDepth := 0
+	var calculatePositions func(node *decoder.CallNode, x, y, depth int) int
+	calculatePositions = func(node *decoder.CallNode, x, y, depth int) int {
 		positions[node] = [2]int{x, y}
+		if depth > actualMaxDepth {
+			actualMaxDepth = depth
+		}
 
-		if len(node.SubCalls) == 0 {
+		if len(node.SubCalls) == 0 || (maxDepth > 0 && depth >= maxDepth) {
 			return nodeWidth
 		}
 
 		totalChildWidth := 0
 		currentX := x
 		for i, child := range node.SubCalls {
-			childWidth := calculatePositions(child, currentX, y+nodeHeight+verticalGap)
+			childWidth := calculatePositions(child, currentX, y+nodeHeight+verticalGap, depth+1)
 			totalChildWidth += childWidth
 			if i < len(node.SubCalls)-1 {
 				totalChildWidth += horizontalGap
@@ -57,35 +58,20 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 			}
 		}
 
-		// Center parent over children
 		positions[node] = [2]int{x + (totalChildWidth-nodeWidth)/2, y}
 		return totalChildWidth
 	}
 
-	totalWidth := calculatePositions(root, 0, 0)
+	totalWidth := calculatePositions(root, 0, 0, 1)
 	if totalWidth < nodeWidth {
 		totalWidth = nodeWidth
 	}
 
-	// Find max depth for height
-	maxDepth := 0
-	var findDepth func(node *decoder.CallNode, depth int)
-	findDepth = func(node *decoder.CallNode, depth int) {
-		if depth > maxDepth {
-			maxDepth = depth
-		}
-		for _, child := range node.SubCalls {
-			findDepth(child, depth+1)
-		}
-	}
-	findDepth(root, 1)
-	totalHeight := maxDepth*(nodeHeight+verticalGap) - verticalGap + 40 // + padding
+	totalHeight := actualMaxDepth*(nodeHeight+verticalGap) - verticalGap + 40
 
-	// Build SVG
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `<svg viewBox="-20 -20 %d %d" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif">`, totalWidth+40, totalHeight+40+legendHeight+16)
 
-	// CSS for styling and dark mode
 	sb.WriteString(`
 <style>
 	:root {
@@ -125,38 +111,32 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 	.gas-low rect.node-box { fill: var(--gas-low-bg); }
 	.gas-mid rect.node-box { fill: var(--gas-mid-bg); }
 	.gas-high rect.node-box { fill: var(--gas-high-bg); }
-	rect { transition: fill 0.2s; }
-	rect:hover { fill: var(--bg); stroke-width: 2px; }
+	rect:hover { stroke-width: 2px; }
 	.node-title { font-weight: 600; font-size: 14px; fill: var(--text-main); }
 	.node-sub { font-size: 11px; fill: var(--text-mute); }
-	.node-metric { font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-	.gas-low { fill: var(--node-bg); }
-	.gas-medium { fill: #fff4e6; }
-	.gas-high { fill: #ffeef0; }
-	@media (prefers-color-scheme: dark) {
-		.gas-medium { fill: #2d2315; }
-		.gas-high { fill: #351a1d; }
-	}
+	.node-metric { font-size: 10px; font-family: monospace; }
 </style>
 <rect width="100%" height="100%" fill="var(--bg)" />`)
 
-	// Second pass: Draw links
+	// Links
 	for node, pos := range positions {
 		for _, child := range node.SubCalls {
-			childPos := positions[child]
+			childPos, ok := positions[child]
+			if !ok {
+				continue
+			}
 			x1 := pos[0] + nodeWidth/2
 			y1 := pos[1] + nodeHeight
 			x2 := childPos[0] + nodeWidth/2
 			y2 := childPos[1]
 
-			// Cubic bezier for smooth curves
 			midY := y1 + (y2-y1)/2
-			fmt.Fprintf(&sb, `<path d="M %d %d C %d %d, %d %d, %d %d" stroke="var(--link)" fill="none" stroke-width="1.5" />`,
+			fmt.Fprintf(&sb, `<path d="M %d %d C %d %d, %d %d, %d %d" stroke="var(--link)" fill="none"/>`,
 				x1, y1, x1, midY, x2, midY, x2, y2)
 		}
 	}
 
-	// Third pass: Draw nodes
+	// Nodes
 	for node, pos := range positions {
 		x, y := pos[0], pos[1]
 
@@ -165,44 +145,33 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 			contractShort = contractShort[:6] + "..." + contractShort[len(contractShort)-4:]
 		}
 
+		collapsedText := ""
+		if maxDepth > 0 && len(node.SubCalls) > 0 {
+			if _, ok := positions[node.SubCalls[0]]; !ok {
+				collapsedText = fmt.Sprintf(` <tspan fill="var(--link)">[+%d]</tspan>`, len(node.SubCalls))
+			}
+		}
+
 		fmt.Fprintf(&sb, `
-<<<<<<< HEAD
 	<g class="%s" transform="translate(%d, %d)">
 		<rect class="node-box" width="%d" height="%d" rx="8" stroke="var(--node-border)" />
-=======
-	<g transform="translate(%d, %d)">
-		<rect width="%d" height="%d" rx="8" class="gas-%s" stroke="var(--node-border)" />
->>>>>>> 22ad461 (fix: finalize visualizer event tree formatting)
 		<text x="12" y="24" class="node-title">%s</text>
-		<text x="12" y="40" class="node-sub">%s</text>
-		<text x="12" y="60" class="node-metric" fill="var(--cpu)">CPU: %s</text>
-		<text x="100" y="60" class="node-metric" fill="var(--mem)">Mem: %s</text>
-		<text x="12" y="78" class="node-metric" fill="var(--text-mute)">Elapsed: %s</text>
-<<<<<<< HEAD
-// feature/human-readable-gas
-	</g>`, gasLevel(node.CPUInstructions), x, y, nodeWidth, nodeHeight,
-      node.Function, contractShort,
-      formatGas(int64(node.CPUInstructions), humanGas),
-      formatBytes(node.MemoryBytes),
-      formatElapsedPerCall(node))
-
-	// Legend footer
-	legendY := totalHeight + 8
-	fmt.Fprintf(&sb, `
-	<g transform="translate(0, %d)">
-		<rect width="320" height="%d" rx="6" fill="var(--node-bg)" stroke="var(--node-border)" />
-		<text x="12" y="16" style="font-size:11px;font-weight:600;fill:var(--text-mute)">Gas Intensity (CPU instructions)</text>
-		<rect x="12" y="26" width="12" height="12" rx="2" fill="var(--gas-low-swatch)" />
-		<text x="28" y="36" style="font-size:10px;fill:var(--text-mute)">Low (&lt;100K)</text>
-		<rect x="112" y="26" width="12" height="12" rx="2" fill="var(--gas-mid-swatch)" />
-		<text x="128" y="36" style="font-size:10px;fill:var(--text-mute)">Medium (100K&#8211;1M)</text>
-		<rect x="248" y="26" width="12" height="12" rx="2" fill="var(--gas-high-swatch)" />
-		<text x="264" y="36" style="font-size:10px;fill:var(--text-mute)">High (&gt;1M)</text>
-	</g>`, legendY, legendHeight)
-=======
-	</g>`, x, y, nodeWidth, nodeHeight, gasLevel(node.CPUInstructions), node.Function, contractShort, formatGas(int64(node.CPUInstructions), humanGas), formatBytes(node.MemoryBytes), formatElapsedPerCall(node))
+		<text x="12" y="40" class="node-sub">%s%s</text>
+		<text x="12" y="60" class="node-metric">CPU: %s</text>
+		<text x="100" y="60" class="node-metric">Mem: %s</text>
+		<text x="12" y="78" class="node-metric">Elapsed: %s</text>
+	</g>`,
+			gasLevel(node.CPUInstructions),
+			x, y,
+			nodeWidth, nodeHeight,
+			node.Function,
+			contractShort,
+			collapsedText,
+			formatGas(int64(node.CPUInstructions), humanGas),
+			formatBytes(node.MemoryBytes),
+			formatElapsedPerCall(node),
+		)
 	}
->>>>>>> 22ad461 (fix: finalize visualizer event tree formatting)
 
 	sb.WriteString("</svg>")
 	return sb.String()
@@ -210,25 +179,14 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 
 func formatElapsedPerCall(node *decoder.CallNode) string {
 	for _, event := range node.Events {
-		if event.Data == "" {
-			continue
-		}
 		m := elapsedPattern.FindStringSubmatch(event.Data)
-		if len(m) < 3 {
-			continue
+		if len(m) >= 3 {
+			unit := m[1]
+			if unit == "" {
+				unit = "ms"
+			}
+			return m[2] + unit
 		}
-		unit := strings.ToLower(strings.TrimSpace(m[1]))
-		valueRaw := strings.TrimSpace(m[2])
-		if valueRaw == "" {
-			continue
-		}
-		if unit == "" {
-			unit = "ms"
-		}
-		if _, err := strconv.ParseFloat(valueRaw, 64); err != nil {
-			continue
-		}
-		return valueRaw + unit
 	}
 	return "n/a"
 }
@@ -255,27 +213,14 @@ func formatBytes(b uint64) string {
 }
 
 func formatGas(value int64, human bool) string {
-	if !human || value == 0 {
+	if !human {
 		return fmt.Sprintf("%d", value)
 	}
-
 	if value >= 1_000_000 {
-		v := float64(value) / 1_000_000
-		return strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0") + " MGas"
+		return fmt.Sprintf("%.1fM", float64(value)/1_000_000)
 	}
 	if value >= 1_000 {
-		v := float64(value) / 1_000
-		return strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0") + " kGas"
+		return fmt.Sprintf("%.1fk", float64(value)/1_000)
 	}
 	return fmt.Sprintf("%d", value)
-}
-
-func gasLevel(gas uint64) string {
-	if gas >= 10_000_000 {
-		return "high"
-	}
-	if gas >= 1_000_000 {
-		return "medium"
-	}
-	return "low"
 }

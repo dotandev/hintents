@@ -97,7 +97,7 @@ Example:
 			if err != nil {
 				return errors.WrapValidationError(fmt.Sprintf("failed to decode call tree: %v", err))
 			}
-			svg := visualizer.GenerateCallGraphSVG(callTree)
+			svg := visualizer.GenerateCallGraphSVG(callTree, maxDepth)
 			if err := os.WriteFile(traceExportSVG, []byte(svg), 0644); err != nil {
 				return errors.WrapValidationError(fmt.Sprintf("failed to save SVG: %v", err))
 			}

@@ -654,7 +654,7 @@ Local WASM Replay Mode:
 				if err != nil {
 					fmt.Printf("%s Error building call tree for SVG: %v\n", visualizer.Symbol("error"), err)
 				} else {
-					svg := visualizer.GenerateCallGraphSVG(callTree)
+					svg := visualizer.GenerateCallGraphSVG(callTree, maxDepth)
 					err := os.WriteFile(exportSVGFlag, []byte(svg), 0644)
 					if err != nil {
 						fmt.Printf("%s Error saving SVG: %v\n", visualizer.Symbol("error"), err)
