@@ -2,7 +2,6 @@
 
 The interactive trace viewer provides a powerful search and navigation interface for exploring Stellar Soroban transaction execution traces.
 
-> **Full Documentation**: [https://dotandev-hintents-75.mintlify.app/](https://dotandev-hintents-75.mintlify.app/)
 
 ## Features
 

@@ -9,9 +9,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/simulator"
-	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/spf13/cobra"
 )
 

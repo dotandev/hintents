@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/dwarf"
-	"github.com/dotandev/hintents/internal/visualizer"
 )
 
 // TrapType categorizes different types of traps/errors

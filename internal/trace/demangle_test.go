@@ -6,8 +6,6 @@ package trace_test
 import (
 	"testing"
 
-	"github.com/dotandev/hintents/internal/demangle"
-	"github.com/dotandev/hintents/internal/trace"
 )
 
 // testTable returns a small symbol table used across all tests.

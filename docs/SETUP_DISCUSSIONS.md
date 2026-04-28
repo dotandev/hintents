@@ -4,11 +4,9 @@ This guide explains how to enable and configure GitHub Discussions for the hinte
 
 ## Prerequisites
 
-- Repository admin access to `dotandev/hintents`
 
 ## Step 1: Enable GitHub Discussions
 
-1. Go to the repository: https://github.com/dotandev/hintents
 2. Click on **Settings** (top navigation)
 3. Scroll down to the **Features** section
 4. Check the box next to **Discussions**
@@ -79,8 +77,6 @@ Consider enabling:
 ## Step 6: Verify the Links
 
 After setup, verify these links work:
-- Main discussions: https://github.com/dotandev/hintents/discussions
-- Feature requests category: https://github.com/dotandev/hintents/discussions/categories/feature-requests
 
 ## Alternative: Using Issues Instead
 

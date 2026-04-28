@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dotandev/hintents/internal/abi"
-	"github.com/dotandev/hintents/internal/errors"
 	"github.com/spf13/cobra"
 )
 

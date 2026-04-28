@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/snapshot"
 )
 
 func TestSnapshotDiffIdentical(t *testing.T) {

@@ -3,7 +3,6 @@
 
 package simulator
 
-import "github.com/dotandev/hintents/internal/authtrace"
 
 type SimulationResponse struct {
 	Status             string               `json:"status"`

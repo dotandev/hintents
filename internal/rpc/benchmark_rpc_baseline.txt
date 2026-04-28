@@ -1,3 +1,2 @@
 testing: warning: no tests to run
 PASS
-ok  	github.com/dotandev/hintents/internal/rpc	0.218s [no tests to run]

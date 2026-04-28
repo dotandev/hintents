@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 // ToErstError converts an IPC Error from the Rust simulator into the unified ErstError type.

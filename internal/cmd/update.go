@@ -9,7 +9,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/updater"
 	"github.com/spf13/cobra"
 )
 

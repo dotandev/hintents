@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 const maxRequestTimeout = 300

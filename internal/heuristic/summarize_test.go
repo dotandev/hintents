@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 func strPtr(s string) *string { return &s }

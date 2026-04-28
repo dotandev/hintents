@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/authtrace"
 )
 
 // ==================== Compute-Heavy Benchmarks ====================

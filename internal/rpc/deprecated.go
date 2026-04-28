@@ -4,7 +4,6 @@
 package rpc
 
 import (
-	"github.com/dotandev/hintents/internal/logger"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 )
 

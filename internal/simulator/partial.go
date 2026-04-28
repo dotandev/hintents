@@ -4,7 +4,6 @@
 package simulator
 
 import (
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 // PartialSimResult holds the outcome of a partial simulation run.

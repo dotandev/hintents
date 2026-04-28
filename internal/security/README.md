@@ -70,7 +70,6 @@ Identifies contract execution panics or traps that indicate critical errors.
 ## Usage
 
 ```go
-import "github.com/dotandev/hintents/internal/security"
 
 // Create detector
 detector := security.NewDetector()

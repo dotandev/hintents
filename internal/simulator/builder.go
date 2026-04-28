@@ -6,7 +6,6 @@ package simulator
 import (
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 // SimulationRequestBuilder provides a fluent interface for building SimulationRequest objects.

@@ -16,7 +16,6 @@ The XDR Result Code Decoder translates binary Stellar XDR error codes into human
 ### Basic Usage
 
 ```go
-import "github.com/dotandev/hintents/internal/decoder"
 
 // Decode a transaction result code
 txCodeInfo := decoder.DecodeTransactionResultCode(xdr.TransactionResultCodeTxInsufficientBalance)
@@ -146,7 +145,6 @@ go test ./internal/decoder/...
 Expected output:
 ```
 PASS
-ok      github.com/dotandev/hintents/internal/decoder    0.123s
 ```
 
 ## Future Enhancements

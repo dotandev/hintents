@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/simulator"
-	"github.com/dotandev/hintents/internal/visualizer"
 )
 
 const (

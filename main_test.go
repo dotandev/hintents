@@ -8,7 +8,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/cmd"
 )
 
 func TestRun_Interrupted(t *testing.T) {

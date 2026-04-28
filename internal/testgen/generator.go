@@ -12,7 +12,6 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/dotandev/hintents/internal/rpc"
 )
 
 // Formal schema validation regex

@@ -12,10 +12,6 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/dotandev/hintents/internal/deeplink"
-	"github.com/dotandev/hintents/internal/localization"
-	"github.com/dotandev/hintents/internal/shutdown"
-	"github.com/dotandev/hintents/internal/updater"
 	"github.com/spf13/cobra"
 )
 

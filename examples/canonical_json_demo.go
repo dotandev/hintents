@@ -12,8 +12,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/dotandev/hintents/internal/cmd"
-	"github.com/dotandev/hintents/internal/signer"
 )
 
 // This example demonstrates how canonical JSON serialization ensures

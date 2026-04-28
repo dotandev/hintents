@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dotandev/hintents/internal/trace"
 	goprofile "github.com/google/pprof/profile"
 )
 

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dotandev/hintents/internal/config"
 	"github.com/spf13/cobra"
 )
 

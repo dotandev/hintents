@@ -778,7 +778,6 @@ To prevent unbounded disk usage from repeated simulations, the **Source Map Cach
 
 ```bash
 # Clone and navigate
-git clone https://github.com/dotandev/hintents.git
 cd hintents
 
 # Build Rust simulator

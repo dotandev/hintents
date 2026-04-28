@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dotandev/hintents/internal/trace"
 )
 
 func main() {

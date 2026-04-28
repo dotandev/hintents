@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/simulator"
 	_ "modernc.org/sqlite"
 )
 

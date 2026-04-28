@@ -123,7 +123,6 @@ Output example:
 ### Programmatic Usage
 
 ```go
-import "github.com/dotandev/hintents/internal/decoder"
 
 // Create engine
 engine := decoder.NewSuggestionEngine()

@@ -36,7 +36,6 @@ Findings:
 ## Programmatic Usage
 
 ```go
-import "github.com/dotandev/hintents/internal/security"
 
 // Create detector
 detector := security.NewDetector()

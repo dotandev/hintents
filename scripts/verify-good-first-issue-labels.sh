@@ -7,7 +7,6 @@
 
 set -e
 
-REPO="${GITHUB_REPO:-dotandev/hintents}"
 LABEL="good%20first%20issue"
 REQUIRED=10
 

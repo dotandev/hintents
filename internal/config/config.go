@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/endpoints"
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 func joinPath(parts ...string) string {

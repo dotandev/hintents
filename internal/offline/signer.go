@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 // SignEnvelope signs the envelope XDR with the given ed25519 private key and

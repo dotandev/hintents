@@ -14,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/logger"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	_ "modernc.org/sqlite"
 )

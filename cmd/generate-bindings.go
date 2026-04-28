@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dotandev/hintents/internal/bindings"
 	"github.com/spf13/cobra"
 )
 

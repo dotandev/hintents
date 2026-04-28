@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/spf13/cobra"
 )
 

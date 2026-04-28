@@ -86,8 +86,6 @@ erst debug <transaction-hash> --network testnet
 
 ```go
 import (
-    "github.com/dotandev/hintents/internal/rpc"
-    "github.com/dotandev/hintents/internal/simulator"
 )
 
 // Extract ledger entries from metadata

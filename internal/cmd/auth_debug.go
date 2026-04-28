@@ -9,11 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/dotandev/hintents/internal/authtrace"
-	"github.com/dotandev/hintents/internal/config"
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/spf13/cobra"
 )
 

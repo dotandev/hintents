@@ -5,8 +5,6 @@
 // Copyright (c) Hintents Authors.
 // SPDX-License-Identifier: Apache-2.0
 
-// Copyright (c) 2026 dotandev
-// SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Command } from 'commander';
 import { registerProtocolCommands } from './commands/protocol-handler';

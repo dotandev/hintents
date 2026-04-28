@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 type JobStatus string

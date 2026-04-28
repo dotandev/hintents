@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/stretchr/testify/assert"
 )
 

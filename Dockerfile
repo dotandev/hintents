@@ -66,7 +66,6 @@ LABEL org.opencontainers.image.description="Execution Runtime Simulation Tool wi
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.revision="${COMMIT_SHA}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
-LABEL org.opencontainers.image.source="https://github.com/dotandev/hintents"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 WORKDIR /app

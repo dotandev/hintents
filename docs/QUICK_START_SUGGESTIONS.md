@@ -58,7 +58,6 @@ stellar contract invoke \
 ### Using in Code
 
 ```go
-import "github.com/dotandev/hintents/internal/decoder"
 
 // Create engine
 engine := decoder.NewSuggestionEngine()

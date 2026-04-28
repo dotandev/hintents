@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 func TestToErstErrorMemoryLimitByCode(t *testing.T) {

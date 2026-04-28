@@ -30,7 +30,6 @@ Tasks chosen for **good first issue**:
 
 ## Verification
 
-- Filter by label [good first issue](https://github.com/dotandev/hintents/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and confirm count ≥ 10.
 - This PR does not change application code; only labels (and this doc + script) are added.
 
 ## Applying the labels
@@ -43,7 +42,6 @@ Tasks chosen for **good first issue**:
   ./scripts/label-good-first-issue.sh
   ```
 
-  Script repo default: `dotandev/hintents`. Override with `GITHUB_REPO=owner/repo` if needed.
 
 ## Completing this issue
 
@@ -52,5 +50,4 @@ To satisfy **Success Criteria: At least 10 issues labeled with "good first issue
 1. **Apply labels** (one of):
    - Run the script: `export GITHUB_TOKEN=your_token && ./scripts/label-good-first-issue.sh` (from repo root).
    - Or add the label **good first issue** manually in the GitHub UI to each of the 10 issues in the table above.
-2. **Verify:** Open [good first issue filter](https://github.com/dotandev/hintents/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and confirm ≥ 10 issues, or run `./scripts/verify-good-first-issue-labels.sh` (no token needed).
 3. **Close the issue** (e.g. reference this PR or audit doc in a comment, then close).

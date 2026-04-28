@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/trace"
 )
 
 // StateRow is a single key-value pair shown in the right pane.

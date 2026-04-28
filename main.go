@@ -10,10 +10,6 @@ import (
 	"os"
 	"runtime/debug"
 
-	// "github.com/dotandev/hintents/internal/cmd"
-	"github.com/dotandev/hintents/internal/cmd"
-	"github.com/dotandev/hintents/internal/config"
-	"github.com/dotandev/hintents/internal/crashreport"
 )
 
 // Build-time variables injected via -ldflags.

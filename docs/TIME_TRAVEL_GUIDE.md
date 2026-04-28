@@ -4,7 +4,6 @@ The Magic Rewind feature lets you re-simulate any Soroban transaction at an arbi
 point in time, replay it across a sliding window, and save the entire session to disk
 so that teammates can reproduce your findings without a network connection.
 
-> **Full documentation**: [https://dotandev-hintents-75.mintlify.app/](https://dotandev-hintents-75.mintlify.app/)
 
 ## Contents
 

@@ -285,7 +285,6 @@ Logs from Go and Rust may occasionally appear slightly out of order due to buffe
 ### Docker
 
 ```bash
-docker run --rm ghcr.io/dotandev/hintents:latest \
   --log-level=debug debug <tx-hash>
 ```
 
@@ -314,7 +313,6 @@ env:
 ### Go Logger Functions
 
 ```go
-import "github.com/dotandev/hintents/internal/logger"
 
 // Set log level
 logger.SetLevel(logger.LevelTrace)

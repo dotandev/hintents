@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 // NewLoggingMiddleware returns a Middleware that logs each outbound HTTP request

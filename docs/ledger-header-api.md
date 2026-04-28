@@ -26,7 +26,6 @@ import (
     "log"
     "time"
 
-    "github.com/dotandev/hintents/internal/rpc"
 )
 
 func main() {

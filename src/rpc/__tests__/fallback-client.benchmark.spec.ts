@@ -26,8 +26,6 @@
             expect(memoryIncrease).toBeLessThan(50); // Should not exceed 50MB
         });
     });
-// Copyright (c) 2026 dotandev
-// SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { FallbackRPCClient } from '../fallback-client';
 import { RPCConfig } from '../../config/rpc-config';

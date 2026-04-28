@@ -6,7 +6,6 @@ package security_test
 import (
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/security"
 )
 
 // Example demonstrates basic usage of the security detector

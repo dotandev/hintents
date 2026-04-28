@@ -4,7 +4,6 @@
 package trace
 
 import (
-	"github.com/dotandev/hintents/internal/demangle"
 )
 
 // DemangleNode rewrites the Function field of a single TraceNode using the

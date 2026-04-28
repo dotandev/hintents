@@ -6,9 +6,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/rpc"
-	"github.com/dotandev/hintents/internal/wizard"
 	"github.com/spf13/cobra"
 )
 

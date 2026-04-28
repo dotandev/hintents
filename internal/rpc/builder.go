@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 )
 

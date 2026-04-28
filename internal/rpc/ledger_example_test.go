@@ -9,7 +9,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/dotandev/hintents/internal/rpc"
 )
 
 // ExampleClient_GetLedgerHeader demonstrates how to fetch ledger header information

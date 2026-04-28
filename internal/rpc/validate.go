@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 func isValidURL(urlStr string) error {

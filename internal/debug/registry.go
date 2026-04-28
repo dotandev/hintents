@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dotandev/hintents/internal/snapshot"
-	"github.com/dotandev/hintents/internal/types"
 )
 
 // FileExtension is the conventional extension for snapshot registry files.

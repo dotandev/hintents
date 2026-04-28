@@ -1,4 +1,3 @@
-module github.com/dotandev/hintents
 
 go 1.25.0
 

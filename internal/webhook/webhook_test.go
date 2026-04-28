@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 func TestSlackMessageFormatting(t *testing.T) {

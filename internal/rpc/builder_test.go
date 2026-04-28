@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 )
 

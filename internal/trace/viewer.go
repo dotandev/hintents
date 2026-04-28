@@ -15,8 +15,6 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
-	"github.com/dotandev/hintents/internal/dwarf"
-	"github.com/dotandev/hintents/internal/visualizer"
 )
 
 // InteractiveViewer provides a terminal-based interactive trace navigation interface

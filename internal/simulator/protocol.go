@@ -8,7 +8,6 @@ import (
 	"maps"
 	"sort"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 type Protocol struct {

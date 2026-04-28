@@ -13,8 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/dwarf"
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 // Resolver coordinates fetching verified source code from a registry,

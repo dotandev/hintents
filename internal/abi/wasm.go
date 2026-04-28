@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 var wasmMagic = []byte{0x00, 0x61, 0x73, 0x6d} // \0asm

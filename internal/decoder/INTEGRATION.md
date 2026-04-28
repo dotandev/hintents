@@ -28,7 +28,6 @@ Operation Results:
 // In your debug command (e.g., internal/cmd/debug.go or wherever you process results)
 
 import (
-    "github.com/dotandev/hintents/internal/decoder"
     "github.com/stellar/go/xdr"
 )
 

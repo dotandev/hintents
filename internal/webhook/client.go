@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 // Type defines the supported webhook platforms

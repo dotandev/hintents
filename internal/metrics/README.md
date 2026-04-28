@@ -18,7 +18,6 @@ The metrics package exports four key metrics:
 ```go
 import (
     "time"
-    "github.com/dotandev/hintents/internal/metrics"
 )
 
 // Record a successful response

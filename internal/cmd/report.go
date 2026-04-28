@@ -9,9 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/report"
-	"github.com/dotandev/hintents/internal/trace"
 	"github.com/spf13/cobra"
 )
 

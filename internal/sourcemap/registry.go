@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 const (

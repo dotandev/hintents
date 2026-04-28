@@ -11,9 +11,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/dotandev/hintents/internal/endpoints"
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 // SubmitRequest is the JSON-RPC request body for sendTransaction.

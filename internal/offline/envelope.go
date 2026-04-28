@@ -18,7 +18,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 // EnvelopeFile is the portable JSON structure written to / read from disk.

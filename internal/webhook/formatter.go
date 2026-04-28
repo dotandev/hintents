@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 // ReportData contains the debugging report information

@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )

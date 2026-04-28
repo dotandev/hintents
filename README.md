@@ -3,7 +3,6 @@
 **Erst** is a premium developer toolset for the Stellar network, designed to provide high-fidelity "glass-box" debugging and simulation for Soroban smart contracts.
 
 > **Status**: Active Development (Phase 4: Advanced Diagnostics)
-> **Documentation**: [https://dotandev-hintents-75.mintlify.app/](https://dotandev-hintents-75.mintlify.app/)
 > **Focus**: High-Fidelity Simulation, Auth Tracing, and Security Auditing
 
 ## Scope & Objective
@@ -205,7 +204,6 @@ We are building this open-source to help the entire Stellar community. All contr
 
 1.  Clone the repo:
     ```bash
-    git clone https://github.com/dotandev/hintents.git
     cd hintents
     ```
 
@@ -515,7 +513,6 @@ Thanks goes to these wonderful people:
 <table>
   <tbody>
     <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/dotandev"><img src="https://avatars.githubusercontent.com/u/105521093?v=4" width="100px;" alt="dotdev."/><br /><sub><b>dotdev.</b></sub></a><br /><a href="#code-dotandev" title="Code">Code</a> <a href="#doc-dotandev" title="Documentation">Documentation</a> <a href="#ideas-dotandev" title="Ideas & Planning">Ideas & Planning</a></td>
     </tr>
   </tbody>
 </table>

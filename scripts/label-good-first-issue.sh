@@ -9,7 +9,6 @@
 
 set -e
 
-REPO="${GITHUB_REPO:-dotandev/hintents}"
 LABEL="good first issue"
 # Issue numbers from LABELS_AUDIT.md (same list as doc)
 ISSUES=(32 81 84 86 87 114 116 130 131 162)

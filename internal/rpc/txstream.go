@@ -25,8 +25,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 )
 

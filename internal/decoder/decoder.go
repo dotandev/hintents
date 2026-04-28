@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 

@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 // SimulatorNotifier handles notifications for CI session failures

@@ -17,8 +17,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dotandev/hintents/config"
-	"github.com/dotandev/hintents/middleware"
 )
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

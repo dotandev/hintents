@@ -6,8 +6,6 @@ package rpc
 import (
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 // MaxPayloadSize is the maximum allowed size for JSON payloads (10 MB)

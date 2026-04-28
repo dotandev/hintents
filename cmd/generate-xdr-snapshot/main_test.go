@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/snapshot"
 )
 
 // TestGeneratorCreation tests that the generator can be created with valid config

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 // Input collects all available signals about a transaction execution.

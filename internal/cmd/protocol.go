@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/dotandev/hintents/internal/protocolreg"
 	"github.com/spf13/cobra"
 )
 

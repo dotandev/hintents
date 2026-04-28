@@ -13,11 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/metrics"
 
-	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 	"go.opentelemetry.io/otel/attribute"
 )

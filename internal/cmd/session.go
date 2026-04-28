@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/session"
 	"github.com/spf13/cobra"
 )
 

@@ -6,7 +6,6 @@ package simulator_test
 import (
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 // ExampleSimulationRequestBuilder demonstrates basic usage of the builder pattern.

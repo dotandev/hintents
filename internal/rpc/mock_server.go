@@ -20,7 +20,6 @@ type MockServer struct {
 	callCount map[string]int
 }
 
-// MockRoute defines the response configuration for a specific endpointhttps://github.com/dotandev/hintents
 type MockRoute struct {
 	StatusCode int
 	Body       interface{}

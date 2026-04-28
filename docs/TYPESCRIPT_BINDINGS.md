@@ -16,7 +16,6 @@ The bindings generator:
 
 ```bash
 # Install erst
-go install github.com/dotandev/hintents/cmd/erst@latest
 
 # Verify installation
 erst --version
@@ -284,7 +283,6 @@ jobs:
       
       - name: Install erst
         run: |
-          go install github.com/dotandev/hintents/cmd/erst@latest
       
       - name: Generate bindings
         run: |
@@ -401,7 +399,6 @@ soroban contract build
 
 ```bash
 # Install
-go install github.com/dotandev/hintents/cmd/erst@latest
 
 # Or specify path
 const simulator = new ErstSimulator({

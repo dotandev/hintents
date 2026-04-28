@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dotandev/hintents/internal/wasmopt"
 )
 
 func optimizeWasmBytesIfRequested(input []byte, enabled bool) ([]byte, *wasmopt.Report, error) {

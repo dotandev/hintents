@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/trace"
 )
 
 // TestPrintTraceTree_NoColor verifies that PrintTraceTree emits expected

@@ -6,7 +6,6 @@ package simulator
 import (
 	"testing"
 
-	interrors "github.com/dotandev/hintents/internal/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

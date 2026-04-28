@@ -17,8 +17,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/simulator"
-	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

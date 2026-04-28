@@ -101,17 +101,14 @@ If you prefer manual verification using GitHub API:
 ```bash
 # Check issue count
 curl -H "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/dotandev/hintents/issues?labels=new_for_wave&per_page=100" \
   | jq 'length'
 
 # Get all issues with label
 curl -H "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/dotandev/hintents/issues?labels=new_for_wave&per_page=100" \
   | jq '.[] | {number, title, labels: [.labels[].name]}'
 
 # Export to file
 curl -H "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/dotandev/hintents/issues?labels=new_for_wave&per_page=100" \
   > issues.json
 ```
 
@@ -119,16 +116,12 @@ curl -H "Authorization: token $GITHUB_TOKEN" \
 
 ```bash
 # List all issues with label
-gh issue list --repo dotandev/hintents --label new_for_wave
 
 # Count issues
-gh issue list --repo dotandev/hintents --label new_for_wave --json number --jq 'length'
 
 # View specific issue
-gh issue view 123 --repo dotandev/hintents
 
 # Export issues to JSON
-gh issue list --repo dotandev/hintents --label new_for_wave --limit 100 \
   --json number,title,labels,body > issues_export.json
 ```
 

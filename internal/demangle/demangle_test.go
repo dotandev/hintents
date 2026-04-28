@@ -6,7 +6,6 @@ package demangle_test
 import (
 	"testing"
 
-	"github.com/dotandev/hintents/internal/demangle"
 )
 
 // ---------------------------------------------------------------------------

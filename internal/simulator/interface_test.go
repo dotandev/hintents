@@ -7,7 +7,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/errors"
 	"github.com/stretchr/testify/assert"
 )
 

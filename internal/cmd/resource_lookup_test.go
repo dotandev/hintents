@@ -6,7 +6,6 @@ package cmd
 import (
 	"testing"
 
-	"github.com/dotandev/hintents/internal/session"
 )
 
 func TestLevenshteinDistance(t *testing.T) {

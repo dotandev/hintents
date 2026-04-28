@@ -145,8 +145,6 @@ erst debug <tx-hash> --network staging
 
 ```go
 import (
-    "github.com/dotandev/hintents/internal/config"
-    "github.com/dotandev/hintents/internal/rpc"
 )
 
 // Create a custom network client

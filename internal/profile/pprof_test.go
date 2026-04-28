@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/trace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

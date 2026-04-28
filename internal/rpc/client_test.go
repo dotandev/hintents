@@ -15,8 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dotandev/hintents/internal/endpoints"
-	"github.com/dotandev/hintents/internal/errors"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 	effects "github.com/stellar/go-stellar-sdk/protocols/horizon/effects"

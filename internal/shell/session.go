@@ -10,8 +10,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/dotandev/hintents/internal/rpc"
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 // Session represents an interactive shell session with persistent ledger state

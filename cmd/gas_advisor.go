@@ -7,8 +7,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/rpc"
-	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/spf13/cobra"
 )
 

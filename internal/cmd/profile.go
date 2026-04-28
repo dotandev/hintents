@@ -10,9 +10,6 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/dotandev/hintents/internal/profile"
-	"github.com/dotandev/hintents/internal/simulator"
-	"github.com/dotandev/hintents/internal/trace"
 	"github.com/spf13/cobra"
 )
 

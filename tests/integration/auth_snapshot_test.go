@@ -6,8 +6,6 @@ package integration
 import (
 	"testing"
 
-	"github.com/dotandev/hintents/internal/authtrace"
-	"github.com/dotandev/hintents/internal/trace"
 )
 
 func TestAuthSnapshotMultiSigFlow(t *testing.T) {

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 // GlobalConfig holds the global cache configuration

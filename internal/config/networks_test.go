@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/rpc"
 )
 
 // setTestHomeDir sets both HOME (Unix) and USERPROFILE (Windows) to the given directory

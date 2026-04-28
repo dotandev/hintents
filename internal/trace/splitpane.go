@@ -10,7 +10,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/visualizer"
 )
 
 const (

@@ -50,7 +50,6 @@ The cache contains:
 When an update is available, you'll see a one-line banner at the start of the run (to stderr):
 
 ```
-Upgrade available: v1.2.3 — run 'go install github.com/dotandev/hintents/cmd/erst@latest' to update
 ```
 
 ## Building with Version Information
@@ -73,7 +72,6 @@ Without this flag, the version defaults to "dev" and update checking is skipped.
 
 ## Technical Details
 
-- **API Endpoint**: `https://api.github.com/repos/dotandev/hintents/releases/latest`
 - **Check Interval**: 24 hours
 - **Request Timeout**: 5 seconds
 - **Version Comparison**: Uses semantic versioning (via hashicorp/go-version)

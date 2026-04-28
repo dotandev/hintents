@@ -11,13 +11,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dotandev/hintents/internal/compare"
-	"github.com/dotandev/hintents/internal/config"
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/rpc"
-	"github.com/dotandev/hintents/internal/simulator"
-	"github.com/dotandev/hintents/internal/visualizer"
 
 	"github.com/spf13/cobra"
 )

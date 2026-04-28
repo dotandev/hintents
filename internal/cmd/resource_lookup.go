@@ -9,7 +9,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/session"
 )
 
 const (

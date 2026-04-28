@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/rpc"
 )
 
 func TestCheckGo(t *testing.T) {

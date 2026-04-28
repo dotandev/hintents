@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/abi"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 

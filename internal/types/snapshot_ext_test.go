@@ -6,8 +6,6 @@ package types_test
 import (
 	"testing"
 
-	"github.com/dotandev/hintents/internal/snapshot"
-	"github.com/dotandev/hintents/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

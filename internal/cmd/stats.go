@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/session"
-	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/spf13/cobra"
 )
 

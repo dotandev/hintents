@@ -6,8 +6,6 @@ package debug_test
 import (
 	"testing"
 
-	"github.com/dotandev/hintents/internal/debug"
-	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

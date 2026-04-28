@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 // Verify checks the integrity and signature of an AuditLog

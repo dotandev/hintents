@@ -11,7 +11,6 @@ import (
 	"io"
 	"text/template"
 
-	"github.com/dotandev/hintents/internal/trace"
 )
 
 //go:embed template.html

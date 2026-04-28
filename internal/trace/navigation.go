@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 // ExecutionState represents the state at a specific point in execution

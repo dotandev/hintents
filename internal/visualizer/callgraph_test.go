@@ -6,7 +6,6 @@ package visualizer
 import (
 	"testing"
 
-	"github.com/dotandev/hintents/internal/decoder"
 	"github.com/stretchr/testify/assert"
 )
 

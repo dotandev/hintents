@@ -6,7 +6,6 @@ package cmd
 import (
 	"testing"
 
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 func makeResponse(events []simulator.CategorizedEvent) *simulator.SimulationResponse {

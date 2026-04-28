@@ -8,10 +8,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/rpc"
-	"github.com/dotandev/hintents/internal/terminal"
 )
 
 const defaultLimit = 10

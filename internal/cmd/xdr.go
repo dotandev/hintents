@@ -7,8 +7,6 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/decoder"
-	"github.com/dotandev/hintents/internal/errors"
 	"github.com/spf13/cobra"
 )
 

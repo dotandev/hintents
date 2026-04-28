@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dotandev/hintents/internal/cmd"
 )
 
 var Version = "dev"

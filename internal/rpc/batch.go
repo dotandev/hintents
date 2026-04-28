@@ -7,7 +7,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 // batchSize is the maximum number of ledger keys per getLedgerEntries request.

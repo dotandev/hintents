@@ -10,10 +10,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/dotandev/hintents/internal/daemon"
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/rpc"
-	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 

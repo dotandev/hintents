@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/plugin"
 )
 
 // CustomDecoder is an example implementation of a DecoderPlugin

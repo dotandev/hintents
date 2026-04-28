@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dotandev/hintents/internal/dwarf"
 )
 
 func TestIdentifyTrapType(t *testing.T) {

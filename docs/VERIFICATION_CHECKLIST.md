@@ -11,7 +11,6 @@ Quick reference checklist for verifying the Erst project components.
 - [ ] Expected count: 40 issues
 
 ### Manual Checks
-- [ ] Navigate to https://github.com/dotandev/hintents/issues
 - [ ] Filter by label: `new_for_wave`
 - [ ] Verify all 40 issues are present
 - [ ] Spot-check 5-10 issues for format compliance

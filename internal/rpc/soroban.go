@@ -14,11 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dotandev/hintents/internal/endpoints"
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/metrics"
-	"github.com/dotandev/hintents/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 )
 

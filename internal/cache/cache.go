@@ -10,7 +10,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 // Config holds cache configuration

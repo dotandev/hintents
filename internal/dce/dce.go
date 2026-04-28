@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 // Stats holds metrics about the dead code elimination pass.

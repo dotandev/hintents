@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/dotandev/hintents/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 )
 

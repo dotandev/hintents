@@ -317,7 +317,6 @@ jobs:
 
       - name: Install erst
         run: |
-          go install github.com/dotandev/hintents/cmd/erst@latest
 
       - name: Generate TypeScript Bindings
         run: |

@@ -8,10 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/rpc"
-	"github.com/dotandev/hintents/internal/shutdown"
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 const shutdownTimeout = 3 * time.Second

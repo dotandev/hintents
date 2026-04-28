@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"github.com/cespare/xxhash/v2"
-	"github.com/dotandev/hintents/internal/snapshot"
 )
 
 // StateSnapshot mirrors the Rust simulator snapshot payload.

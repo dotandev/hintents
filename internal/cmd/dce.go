@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dotandev/hintents/internal/dce"
 	"github.com/spf13/cobra"
 )
 

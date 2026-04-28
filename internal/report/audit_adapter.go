@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dotandev/hintents/internal/audit"
 )
 
 // FromDump converts a raw Dump into a Report for HTML/PDF rendering.

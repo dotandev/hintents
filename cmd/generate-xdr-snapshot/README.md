@@ -121,7 +121,6 @@ Approximate file sizes for generated snapshots:
 ### Using Generated Snapshots in Tests
 
 ```go
-import "github.com/dotandev/hintents/internal/snapshot"
 
 func BenchmarkLargeSnapshot(b *testing.B) {
     // Load pre-generated snapshot

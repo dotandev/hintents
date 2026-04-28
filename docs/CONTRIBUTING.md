@@ -30,7 +30,6 @@ We believe the community should drive the project's priorities. Here's how you c
 
 ### Requesting a New Feature
 
-1.  **Check existing requests**: Before creating a new feature request, browse [GitHub Discussions](https://github.com/dotandev/hintents/discussions) (under the "Feature Requests" category) to see if someone has already suggested it.
 2.  **Create a discussion**: If your idea is new, start a discussion in the **Feature Requests** category with:
     -   A clear, descriptive title
     -   The problem or use case you're trying to solve
@@ -38,7 +37,6 @@ We believe the community should drive the project's priorities. Here's how you c
     -   Any relevant examples or context
 3.  **Engage with the community**: Respond to questions and feedback to help refine the idea.
 
-> **Note**: If GitHub Discussions are not yet enabled, please open a regular [GitHub Issue](https://github.com/dotandev/hintents/issues) with the `feature-request` label instead.
 
 ### Voting on Features
 

@@ -9,9 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/dotandev/hintents/internal/cache"
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/spf13/cobra"
 )
 

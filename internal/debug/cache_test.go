@@ -8,7 +8,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/stretchr/testify/require"
 )
 

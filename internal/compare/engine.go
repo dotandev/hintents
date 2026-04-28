@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 // Side labels used throughout the diff output.

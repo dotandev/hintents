@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 // ─── Fee estimation constants ─────────────────────────────────────────────────

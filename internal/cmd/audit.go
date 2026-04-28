@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/signer"
 )
 
 // AttestationCertificate represents a single X.509 certificate in the

@@ -1,6 +1,5 @@
 # HSM Signing Load Test - Enterprise Scale Benchmarking
 
-**Issue**: [#342](https://github.com/dotandev/hintents/issues/342) / [#219](https://github.com/dotandev/hintents/issues/219)
 
 **Objective**: Benchmark the exact performance capacity of `audit:sign` when dealing with enterprise-scale transaction counts (10,000 transactions).
 
@@ -436,8 +435,6 @@ if (results.throughputTxnsPerSec < 100) {
 
 ## References
 
-- [Issue #342](https://github.com/dotandev/hintents/issues/342): Performance benchmarking requirement
-- [Issue #219](https://github.com/dotandev/hintents/issues/219): Enterprise scale testing
 - [AuditLogger.ts](../src/audit/AuditLogger.ts): Core signing implementation
 - [SoftwareEd25519Signer.ts](../src/audit/signing/softwareSigner.ts): Ed25519 signing backend
 

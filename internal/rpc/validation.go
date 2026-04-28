@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 // ValidateTransactionHash checks if the provided string is a valid Stellar transaction hash.

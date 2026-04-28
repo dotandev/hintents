@@ -3,8 +3,6 @@
 
 #!/bin/bash
 
-# Copyright (c) 2026 dotandev
-# SPDX-License-Identifier: MIT OR Apache-2.0
 
 TX_HASH="a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef"
 RPC_URL="https://horizon-testnet.stellar.org"

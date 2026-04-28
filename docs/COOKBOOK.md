@@ -346,8 +346,6 @@ import (
     "fmt"
     "log"
 
-    "github.com/dotandev/hintents/internal/rpc"
-    "github.com/dotandev/hintents/internal/simulator"
 )
 
 func main() {

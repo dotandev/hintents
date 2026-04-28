@@ -4,7 +4,6 @@
 package rpc
 
 import (
-	"github.com/dotandev/hintents/internal/endpoints"
 )
 
 // Network types for Stellar

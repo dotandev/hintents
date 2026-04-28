@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/errors"
 )
 
 func loadFromEnv(cfg *Config) error { //nolint:unused

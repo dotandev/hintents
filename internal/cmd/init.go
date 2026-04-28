@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )

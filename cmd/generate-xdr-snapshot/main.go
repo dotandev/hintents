@@ -14,7 +14,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dotandev/hintents/internal/snapshot"
 )
 
 // GeneratorConfig holds configuration for XDR generation

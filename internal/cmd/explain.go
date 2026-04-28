@@ -10,10 +10,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/dotandev/hintents/internal/config"
-	"github.com/dotandev/hintents/internal/heuristic"
-	"github.com/dotandev/hintents/internal/rpc"
-	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/spf13/cobra"
 )
 

@@ -16,11 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dotandev/hintents/internal/bridge"
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/ipc"
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/metrics"
 )
 
 // Runner handles the execution of the Rust simulator binary

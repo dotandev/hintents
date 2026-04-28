@@ -20,7 +20,6 @@ import (
 
 const (
 	// GitHubAPIURL is the endpoint for fetching the latest release
-	GitHubAPIURL = "https://api.github.com/repos/dotandev/hintents/releases/latest"
 	// CheckInterval is how often we check for updates (24 hours)
 	CheckInterval = 24 * time.Hour
 	// RequestTimeout is the maximum time to wait for GitHub API
@@ -153,7 +152,6 @@ func (c *Checker) FetchReleaseInfo(ctx context.Context, version string) (*GitHub
 		if !strings.HasPrefix(version, "v") {
 			version = "v" + version
 		}
-		url = fmt.Sprintf("https://api.github.com/repos/dotandev/hintents/releases/tags/%s", version)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -218,7 +216,6 @@ func (c *Checker) compareVersions(current, latest string) (bool, error) {
 // displayNotification prints the update message to stderr (small one-line banner)
 func (c *Checker) displayNotification(latestVersion string) {
 	message := fmt.Sprintf(
-		"Upgrade available: %s — run 'go install github.com/dotandev/hintents/cmd/erst@latest' to update\n",
 		latestVersion,
 	)
 	fmt.Fprint(os.Stderr, message)
@@ -234,12 +231,10 @@ func (c *Checker) PerformUpdate(ctx context.Context, version string) error {
 		}
 	}
 
-	target := "github.com/dotandev/hintents/cmd/erst@latest"
 	if version != "" && version != "latest" {
 		if !strings.HasPrefix(version, "v") {
 			version = "v" + version
 		}
-		target = fmt.Sprintf("github.com/dotandev/hintents/cmd/erst@%s", version)
 	}
 
 	fmt.Printf("Updating to %s via 'go install'...\n", target)

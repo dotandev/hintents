@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/logger"
 )
 
 // RetryConfig defines the retry behavior

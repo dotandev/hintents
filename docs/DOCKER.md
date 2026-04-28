@@ -22,24 +22,19 @@ Docker automatically pulls the correct image for your platform.
 
 ```bash
 # Pull latest from GitHub Container Registry
-docker pull ghcr.io/dotandev/hintents:latest
 
 # Or pull a specific version
-docker pull ghcr.io/dotandev/hintents:v1.0.0
 ```
 
 ### Run the Container
 
 ```bash
 # Show help
-docker run --rm ghcr.io/dotandev/hintents:latest --help
 
 # Show version
-docker run --rm ghcr.io/dotandev/hintents:latest --version
 
 # Run with configuration
 docker run --rm -v $(pwd)/erst.toml:/app/erst.toml:ro \
-  ghcr.io/dotandev/hintents:latest [command]
 ```
 
 ## Building Locally
@@ -129,31 +124,25 @@ The `.github/workflows/docker-build.yml` workflow:
 
 ```bash
 # Force amd64
-docker pull --platform linux/amd64 ghcr.io/dotandev/hintents:latest
 
 # Force arm64
-docker pull --platform linux/arm64 ghcr.io/dotandev/hintents:latest
 ```
 
 ### Inspect Image Architecture
 
 ```bash
 # View manifest
-docker manifest inspect ghcr.io/dotandev/hintents:latest
 
 # Check local image
-docker image inspect ghcr.io/dotandev/hintents:latest | grep Architecture
 ```
 
 ### Run with Custom Entrypoint
 
 ```bash
 # Access shell
-docker run --rm -it --entrypoint sh ghcr.io/dotandev/hintents:latest
 
 # Run simulator directly
 docker run --rm --entrypoint /app/simulator/target/release/erst-sim \
-  ghcr.io/dotandev/hintents:latest --help
 ```
 
 ## Development
@@ -201,7 +190,6 @@ docker run --rm -it erst:go-builder sh
 
 ### GitHub Container Registry (GHCR)
 
-Images are published to: `ghcr.io/dotandev/hintents`
 
 #### Authentication
 
@@ -257,10 +245,8 @@ If binaries don't work on target platform:
 
 ```bash
 # Verify binary architecture
-docker run --rm --entrypoint file ghcr.io/dotandev/hintents:latest /app/erst
 
 # Check for dynamic linking issues
-docker run --rm --entrypoint ldd ghcr.io/dotandev/hintents:latest /app/erst
 ```
 
 ## Security
@@ -269,10 +255,8 @@ docker run --rm --entrypoint ldd ghcr.io/dotandev/hintents:latest /app/erst
 
 ```bash
 # Scan with Docker Scout
-docker scout cves ghcr.io/dotandev/hintents:latest
 
 # Scan with Trivy
-trivy image ghcr.io/dotandev/hintents:latest
 ```
 
 ### Best Practices
@@ -297,7 +281,6 @@ The workflow uses GitHub Actions cache:
 
 ```bash
 # Pre-pull for faster startup
-docker pull ghcr.io/dotandev/hintents:latest
 
 # Use in Kubernetes with imagePullPolicy: IfNotPresent
 ```

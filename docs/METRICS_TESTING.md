@@ -26,7 +26,6 @@ go test ./internal/metrics -v
 === RUN   TestMetricsLabels
 --- PASS: TestMetricsLabels (0.00s)
 PASS
-ok      github.com/dotandev/hintents/internal/metrics   0.123s
 ```
 
 **What's tested:**
@@ -55,7 +54,6 @@ go test -tags=integration ./internal/metrics -v
 === RUN   TestMetricsMultipleNodes
 --- PASS: TestMetricsMultipleNodes (0.01s)
 PASS
-ok      github.com/dotandev/hintents/internal/metrics   2.234s
 ```
 
 **What's tested:**

@@ -10,11 +10,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/rpc"
-	"github.com/dotandev/hintents/internal/shell"
-	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/spf13/cobra"
 )
 

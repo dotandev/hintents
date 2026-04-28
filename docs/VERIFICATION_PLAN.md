@@ -71,7 +71,6 @@ go test ./... -tags=integration -v
 
 # Use GitHub API to verify
 curl -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/dotandev/hintents/issues?labels=new_for_wave
 ```
 
 ### 1.4 API Response Verification
@@ -91,7 +90,6 @@ curl -X POST \
   -H "Authorization: token $GITHUB_TOKEN" \
   -H "Content-Type: application/json" \
   -d @test_issue.json \
-  https://api.github.com/repos/dotandev/hintents/issues
 
 # Verify response
 # Expected: 201 Created with issue number
@@ -102,7 +100,6 @@ curl -X POST \
 ### 2.1 Repository Issue Verification
 
 **Checklist**:
-- [ ] All 40 issues appear on `dotandev/hintents`
 - [ ] Labels `new_for_wave` are applied to all issues
 - [ ] Issue format matches the standard template
 - [ ] Issues are properly categorized (Feature, Refactor, UX, etc.)
@@ -111,7 +108,6 @@ curl -X POST \
 - [ ] Example commit messages are provided
 
 **Verification Steps**:
-1. Navigate to https://github.com/dotandev/hintents/issues
 2. Filter by label: `new_for_wave`
 3. Verify count matches expected (40 issues)
 4. Spot-check 5-10 issues for format compliance

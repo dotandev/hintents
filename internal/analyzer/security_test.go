@@ -6,7 +6,6 @@ package analyzer
 import (
 	"testing"
 
-	"github.com/dotandev/hintents/internal/simulator"
 	"github.com/stretchr/testify/assert"
 )
 

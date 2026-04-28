@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	stellarrpc "github.com/dotandev/hintents/internal/rpc"
 )
 
 // getTestSimPath returns a path to a mock simulator for testing.

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dotandev/hintents/internal/shutdown"
 )
 
 func TestExecuteWithSignals_InterruptReturnsSentinelAndRunsShutdown(t *testing.T) {

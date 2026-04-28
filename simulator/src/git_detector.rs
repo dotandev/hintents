@@ -212,22 +212,17 @@ mod tests {
 
     #[test]
     fn test_normalize_git_url_ssh() {
-        let url = "git@github.com:dotandev/hintents.git";
         let normalized = GitRepository::normalize_git_url(url);
-        assert_eq!(normalized, "https://github.com/dotandev/hintents");
     }
 
     #[test]
     fn test_normalize_git_url_https() {
-        let url = "https://github.com/dotandev/hintents.git";
         let normalized = GitRepository::normalize_git_url(url);
-        assert_eq!(normalized, "https://github.com/dotandev/hintents");
     }
 
     #[test]
     fn test_is_github() {
         let repo = GitRepository {
-            remote_url: "https://github.com/dotandev/hintents".to_string(),
             branch: "main".to_string(),
             commit_hash: "abc123".to_string(),
             root_path: PathBuf::from("/tmp/repo"),
@@ -238,7 +233,6 @@ mod tests {
     #[test]
     fn test_generate_file_link() {
         let repo = GitRepository {
-            remote_url: "https://github.com/dotandev/hintents".to_string(),
             branch: "main".to_string(),
             commit_hash: "abc123def456".to_string(),
             root_path: PathBuf::from("/tmp/repo"),
@@ -248,7 +242,6 @@ mod tests {
         assert_eq!(
             link,
             Some(
-                "https://github.com/dotandev/hintents/blob/abc123def456/src/token.rs#L45"
                     .to_string()
             )
         );

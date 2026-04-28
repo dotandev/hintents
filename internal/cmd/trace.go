@@ -7,10 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dotandev/hintents/internal/decoder"
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/trace"
-	"github.com/dotandev/hintents/internal/visualizer"
 	"github.com/spf13/cobra"
 )
 

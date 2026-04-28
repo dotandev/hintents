@@ -34,7 +34,6 @@ https://github.com/{owner}/{repo}/blob/{commit_hash}/{file_path}#L{line_number}
 
 Example:
 ```
-https://github.com/dotandev/hintents/blob/abc123def456/src/token.rs#L45
 ```
 
 ### 3. Trace Integration
@@ -53,7 +52,6 @@ When viewing traces, source locations with GitHub links are displayed:
 
 ```
 [FILE] Source: token.rs:45
-[LINK] GitHub: https://github.com/dotandev/hintents/blob/abc123/src/token.rs#L45
 ```
 
 ### In JSON Output
@@ -65,7 +63,6 @@ When viewing traces, source locations with GitHub links are displayed:
   "error": "Contract execution failed",
   "source_file": "token.rs",
   "source_line": 45,
-  "github_link": "https://github.com/dotandev/hintents/blob/abc123/src/token.rs#L45"
 }
 ```
 
@@ -85,7 +82,6 @@ Step: 5/10
 Operation: contract_call
 Error: Contract execution failed
 [FILE] Source: token.rs:45
-[LINK] GitHub: https://github.com/dotandev/hintents/blob/abc123/src/token.rs#L45
 ```
 
 ## Requirements

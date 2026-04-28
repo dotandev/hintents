@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dotandev/hintents/internal/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

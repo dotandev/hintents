@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dotandev/hintents/internal/rpc"
-	"github.com/dotandev/hintents/internal/simulator"
 )
 
 // MockRunner implements simulator.RunnerInterface for testing

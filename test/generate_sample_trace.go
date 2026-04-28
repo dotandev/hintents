@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dotandev/hintents/internal/trace"
 )
 
 // Generate a sample execution trace for testing the interactive viewer

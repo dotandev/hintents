@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dotandev/hintents/internal/audit"
-	"github.com/dotandev/hintents/internal/report"
 )
 
 func auditDumpFixture() *audit.Dump {

@@ -6,7 +6,6 @@ package main
 import (
 	"fmt"
 
-	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 

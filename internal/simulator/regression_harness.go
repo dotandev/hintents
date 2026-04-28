@@ -9,8 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/rpc"
 )
 
 // RegressionTestResult represents the outcome of a single transaction test
