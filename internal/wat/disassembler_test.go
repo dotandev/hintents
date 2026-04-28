@@ -224,6 +224,20 @@ func TestDecodeOpcode_Unknown(t *testing.T) {
 	}
 }
 
+func TestDecodeOpcode_BrIf(t *testing.T) {
+	m, op, n := decodeOpcode(0x0d, []byte{0x02})
+	if m != "br_if" || op != "2" || n != 1 {
+		t.Errorf("expected br_if 2, got %q %q %d", m, op, n)
+	}
+}
+
+func TestDecodeOpcode_BrTable(t *testing.T) {
+	m, op, n := decodeOpcode(0x0e, []byte{0x02, 0x00, 0x01, 0x02})
+	if m != "br_table" || op != "(count=2)" || n != 4 {
+		t.Errorf("expected br_table count=2, got %q %q %d", m, op, n)
+	}
+}
+
 // =============================================================================
 // LEB128 Tests
 // =============================================================================
@@ -422,6 +436,101 @@ func TestDecodeAll_CallInstruction(t *testing.T) {
 	}
 	if !found {
 		t.Error("call $func0 instruction not found")
+	}
+}
+
+func TestDecodeAll_NestedLoopsAndBranches(t *testing.T) {
+	body := []byte{
+		0x03, 0x40, // loop
+		0x41, 0x00, // i32.const 0
+		0x0d, 0x00, // br_if 0
+		0x02, 0x40, // block
+		0x03, 0x40, // loop
+		0x41, 0x01, // i32.const 1
+		0x0c, 0x01, // br 1
+		0x0b,       // end (inner loop)
+		0x0b,       // end (block)
+		0x0c, 0x00, // br 0
+		0x0b,       // end (outer loop)
+	}
+	wasm := buildMinimalWasm(body)
+
+	d := NewDisassembler(wasm)
+	instructions, err := d.DecodeAll()
+	if err != nil {
+		t.Fatalf("DecodeAll failed: %v", err)
+	}
+
+	expected := []struct {
+		mnemonic string
+		operands string
+	}{
+		{"loop", ""},
+		{"i32.const", "0"},
+		{"br_if", "0"},
+		{"block", ""},
+		{"loop", ""},
+		{"i32.const", "1"},
+		{"br", "1"},
+		{"end", ""},
+		{"end", ""},
+		{"br", "0"},
+		{"end", ""},
+		{"end", ""},
+	}
+
+	if len(instructions) != len(expected) {
+		t.Fatalf("expected %d instructions, got %d", len(expected), len(instructions))
+	}
+
+	for i, exp := range expected {
+		if instructions[i].Mnemonic != exp.mnemonic || instructions[i].Operands != exp.operands {
+			t.Fatalf("instruction[%d] = %q %q, want %q %q", i, instructions[i].Mnemonic, instructions[i].Operands, exp.mnemonic, exp.operands)
+		}
+	}
+}
+
+func TestDisassembleAt_NestedLoopBranchTarget(t *testing.T) {
+	body := []byte{
+		0x03, 0x40, // loop
+		0x41, 0x00, // i32.const 0
+		0x0d, 0x00, // br_if 0
+		0x03, 0x40, // loop
+		0x41, 0x01, // i32.const 1
+		0x0c, 0x01, // br 1
+		0x0b,       // end (inner loop)
+		0x0c, 0x00, // br 0
+		0x0b,       // end (outer loop)
+	}
+	wasm := buildMinimalWasm(body)
+
+	d := NewDisassembler(wasm)
+	instructions, err := d.DecodeAll()
+	if err != nil {
+		t.Fatalf("DecodeAll failed: %v", err)
+	}
+
+	var branchOffset uint64
+	for _, inst := range instructions {
+		if inst.Mnemonic == "br" && inst.Operands == "1" {
+			branchOffset = inst.Offset
+			break
+		}
+	}
+	if branchOffset == 0 {
+		t.Fatal("expected nested br instruction to be present")
+	}
+
+	snippet, err := d.DisassembleAt(branchOffset, 2)
+	if err != nil {
+		t.Fatalf("DisassembleAt failed: %v", err)
+	}
+
+	if snippet.TargetIndex < 0 || snippet.TargetIndex >= len(snippet.Instructions) {
+		t.Fatalf("invalid target index %d", snippet.TargetIndex)
+	}
+	if snippet.Instructions[snippet.TargetIndex].Mnemonic != "br" {
+		t.Errorf("expected nested br target instruction, got %q", snippet.Instructions[snippet.TargetIndex].Mnemonic)
 	}
 }
 
