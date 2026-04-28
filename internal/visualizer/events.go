@@ -5,118 +5,133 @@ package visualizer
 
 import (
 	"fmt"
+	"sort"
 	"strings"
-
-	"github.com/dotandev/hintents/internal/decoder"
 )
 
-// GenerateEventTree produces a structured ASCII tree view of contract events
-// emitted during a transaction, grouped by call hierarchy.
-func GenerateEventTree(root *decoder.CallNode) string {
-	if root == nil {
-		return ""
+// Event represents a contract call event with its parameters and execution order.
+type Event struct {
+	Name     string
+	Contract string
+	Params   map[string]string
+	Index    int
+}
+
+// kvPair represents a key-value pair for deterministic parameter rendering.
+type kvPair struct {
+	key   string
+	value string
+}
+
+// RenderEventTree produces a structured ASCII tree view of contract events.
+// It returns "No events emitted" for empty or nil input.
+func RenderEventTree(events []Event) string {
+	if len(events) == 0 {
+		return "No events emitted"
 	}
 
-	var sb strings.Builder
-	sb.WriteString(Colorize("Event Trace Tree", "bold") + "\n")
+	// Work on a copy to avoid mutating the input slice.
+	sorted := make([]Event, len(events))
+	copy(sorted, events)
+	sortEvents(sorted)
 
-	renderEventNode(root, "", true, &sb)
+	var sb strings.Builder
+	sb.WriteString("Events:\n")
+
+	for i, event := range sorted {
+		isLastEvent := i == len(sorted)-1
+		renderEvent(&sb, event, isLastEvent)
+	}
 
 	return sb.String()
 }
 
-func renderEventNode(node *decoder.CallNode, indent string, isLast bool, sb *strings.Builder) {
-	isRoot := node.Function == "TOP_LEVEL" && node.ContractID == "ROOT"
-
-	var childIndent string
-
-	if !isRoot {
-		marker := "├── "
-		if isLast {
-			marker = "└── "
-		}
-
-		header := fmt.Sprintf("%s (%s)",
-			Colorize(node.Function, "cyan"),
-			Colorize(formatShortContractID(node.ContractID), "dim"),
-		)
-
-		sb.WriteString(indent + marker + header + "\n")
-
-		if isLast {
-			childIndent = indent + "    "
-		} else {
-			childIndent = indent + "│   "
-		}
-	} else {
-		childIndent = indent
+// renderEvent handles the ASCII tree rendering for a single event and its parameters.
+func renderEvent(sb *strings.Builder, event Event, isLast bool) {
+	name := safeName(event.Name)
+	marker := "├── "
+	if isLast {
+		marker = "└── "
 	}
 
-	// Filter events (remove fn_call / fn_return)
-	var events []decoder.DecodedEvent
-	for _, e := range node.Events {
-		if len(e.Topics) > 0 && (e.Topics[0] == "fn_call" || e.Topics[0] == "fn_return") {
-			continue
-		}
-		events = append(events, e)
+	sb.WriteString(marker + name + "\n")
+
+	params := formatParams(event.Params)
+	if len(params) == 0 {
+		return
 	}
 
-	totalItems := len(events) + len(node.SubCalls)
-	currentIndex := 0
-
-	// Render events
-	for _, event := range events {
-		itemIsLast := currentIndex == totalItems-1
-
-		marker := "├── "
-		if itemIsLast {
-			marker = "└── "
+	maxKeyLen := 0
+	for _, p := range params {
+		if len(p.key) > maxKeyLen {
+			maxKeyLen = len(p.key)
 		}
-
-		topics := formatTopics(event.Topics)
-		data := truncateValue(event.Data)
-
-		line := fmt.Sprintf("[%s] %s | data: %s",
-			Colorize("EVENT", "yellow"),
-			topics,
-			data,
-)
-
-		sb.WriteString(childIndent + marker + line + "\n")
-		currentIndex++
 	}
 
-	// Render subcalls
-	for _, child := range node.SubCalls {
-		itemIsLast := currentIndex == totalItems-1
-		renderEventNode(child, childIndent, itemIsLast, sb)
-		currentIndex++
+	// buildTreePrefix generates the indentation for the child parameters.
+	prefix := buildTreePrefix(isLast, "")
+
+	for j, p := range params {
+		isLastParam := j == len(params)-1
+		paramMarker := "├── "
+		if isLastParam {
+			paramMarker = "└── "
+		}
+
+		// Align values using padding based on maxKeyLen.
+		padding := strings.Repeat(" ", maxKeyLen-len(p.key))
+		val := truncateValue(p.value)
+
+		fmt.Fprintf(sb, "%s%s%s: %s%s\n", prefix, paramMarker, p.key, padding, val)
 	}
 }
 
-func formatTopics(topics []string) string {
-	if len(topics) == 0 {
-		return "no topics"
-	}
-
-	var parts []string
-	for _, t := range topics {
-		parts = append(parts, truncateValue(t))
-	}
-
-	return strings.Join(parts, ", ")
+// sortEvents performs a stable sort of events based on their Index.
+func sortEvents(events []Event) {
+	sort.SliceStable(events, func(i, j int) bool {
+		return events[i].Index < events[j].Index
+	})
 }
 
+// formatParams converts a map into a sorted slice of key-value pairs for determinism.
+func formatParams(params map[string]string) []kvPair {
+	if params == nil {
+		return nil
+	}
+
+	pairs := make([]kvPair, 0, len(params))
+	for k, v := range params {
+		pairs = append(pairs, kvPair{key: k, value: v})
+	}
+
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].key < pairs[j].key
+	})
+
+	return pairs
+}
+
+// buildTreePrefix constructs the indentation prefix for child nodes.
+func buildTreePrefix(isLast bool, parentPrefix string) string {
+	if isLast {
+		return parentPrefix + "    "
+	}
+	return parentPrefix + "│   "
+}
+
+// truncateValue returns a truncated string if it exceeds 80 characters.
 func truncateValue(s string) string {
-	if len(s) <= 24 {
+	const maxLen = 80
+	if len(s) <= maxLen {
 		return s
 	}
-	return s[:10] + "..." + s[len(s)-10:]
+	return s[:maxLen] + "..."
 }
 
-func formatShortContractID(id string) string {
-	if len(id) > 12 {
-		return id[:6] + "..." + id[len(id)-4:]
+// safeName returns the event name or "UnknownEvent" if empty.
+func safeName(name string) string {
+	if name == "" {
+		return "UnknownEvent"
 	}
-	return id
+	return name
 }

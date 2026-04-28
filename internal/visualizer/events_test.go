@@ -4,64 +4,132 @@
 package visualizer
 
 import (
-	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/dotandev/hintents/internal/decoder"
 )
 
-func TestGenerateEventTree(t *testing.T) {
-	root := &decoder.CallNode{
-		ContractID: "ROOT",
-		Function:   "TOP_LEVEL",
-		SubCalls: []*decoder.CallNode{
-			{
-				ContractID: "CA12345678901234567890",
-				Function:   "main_fn",
-				Events: []decoder.DecodedEvent{
-					{Topics: []string{"fn_call", "main_fn"}, Data: ""},
-					{Topics: []string{"storage_read", "key1"}, Data: "value1"},
-				},
-				SubCalls: []*decoder.CallNode{
-					{
-						ContractID: "CB09876543210987654321",
-						Function:   "sub_fn",
-						Events: []decoder.DecodedEvent{
-							{Topics: []string{"fn_call", "sub_fn"}, Data: ""},
-							{Topics: []string{"transfer"}, Data: "100 XLM"},
-							{Topics: []string{"fn_return", "sub_fn"}, Data: ""},
-						},
+func TestRenderEventTree(t *testing.T) {
+	tests := []struct {
+		name     string
+		events   []Event
+		expected string
+	}{
+		{
+			name:     "Empty input",
+			events:   []Event{},
+			expected: "No events emitted",
+		},
+		{
+			name:     "Nil slice",
+			events:   nil,
+			expected: "No events emitted",
+		},
+		{
+			name: "Single event without params",
+			events: []Event{
+				{Name: "Transfer", Index: 1},
+			},
+			expected: "Events:\n└── Transfer\n",
+		},
+		{
+			name: "Unknown event name fallback",
+			events: []Event{
+				{Name: "", Index: 1},
+			},
+			expected: "Events:\n└── UnknownEvent\n",
+		},
+		{
+			name: "Sorting correctness",
+			events: []Event{
+				{Name: "Approval", Index: 2},
+				{Name: "Transfer", Index: 1},
+			},
+			expected: "Events:\n" +
+				"├── Transfer\n" +
+				"└── Approval\n",
+		},
+		{
+			name: "Key alignment and determinism",
+			events: []Event{
+				{
+					Name: "Transfer",
+					Index: 1,
+					Params: map[string]string{
+						"to":   "0xdef",
+						"from": "0xabc",
 					},
 				},
 			},
+			expected: "Events:\n" +
+				"└── Transfer\n" +
+				"    ├── from: 0xabc\n" +
+				"    └── to:   0xdef\n",
+		},
+		{
+			name: "Long value truncation",
+			events: []Event{
+				{
+					Name: "DataUpdate",
+					Index: 1,
+					Params: map[string]string{
+						"value": strings.Repeat("A", 100),
+					},
+				},
+			},
+			expected: "Events:\n" +
+				"└── DataUpdate\n" +
+				"    └── value: " + strings.Repeat("A", 80) + "...\n",
+		},
+		{
+			name: "Nil Params handling",
+			events: []Event{
+				{Name: "Ping", Index: 1, Params: nil},
+			},
+			expected: "Events:\n└── Ping\n",
+		},
+		{
+			name: "Multiple events with varying param counts",
+			events: []Event{
+				{
+					Name: "Transfer",
+					Index: 1,
+					Params: map[string]string{
+						"from":  "0xabc",
+						"to":    "0xdef",
+						"value": "1000",
+					},
+				},
+				{
+					Name: "Approval",
+					Index: 2,
+					Params: map[string]string{
+						"owner":   "0xabc",
+						"spender": "0xdef",
+					},
+				},
+			},
+			expected: "Events:\n" +
+				"├── Transfer\n" +
+				"│   ├── from:  0xabc\n" +
+				"│   ├── to:    0xdef\n" +
+				"│   └── value: 1000\n" +
+				"└── Approval\n" +
+				"    ├── owner:   0xabc\n" +
+				"    └── spender: 0xdef\n",
 		},
 	}
 
-	output := GenerateEventTree(root)
-
-	// 🔍 Debug output (correct placement)
-	fmt.Println("OUTPUT:\n" + output)
-
-	// Basic check for expected content
-	if !strings.Contains(output, "main_fn") {
-		t.Errorf("Output missing main function name")
-	}
-	if !strings.Contains(output, "sub_fn") {
-		t.Errorf("Output missing sub function name")
-	}
-	if !strings.Contains(output, "storage_read, key1") {
-		t.Errorf("Output missing event topics")
-	}
-	if !strings.Contains(output, "value1") {
-		t.Errorf("Output missing event data")
-	}
-	if !strings.Contains(output, "transfer") {
-		t.Errorf("Output missing nested event")
-	}
-
-	// Check for tree structure markers
-	if !strings.Contains(output, "└── ") && !strings.Contains(output, "├── ") {
-		t.Errorf("Output missing tree markers")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RenderEventTree(tt.events)
+			// Normalize newlines for cross-platform comparison if necessary,
+			// but the requirement says use "\n" ONLY.
+			if got != tt.expected {
+				t.Errorf("RenderEventTree() = \n%q, want \n%q", got, tt.expected)
+				// Print visual diff for easier debugging
+				t.Logf("GOT:\n%s", got)
+				t.Logf("WANT:\n%s", tt.expected)
+			}
+		})
 	}
 }
