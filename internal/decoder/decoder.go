@@ -11,12 +11,20 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
+// StateChange represents a modification to the ledger state
+type StateChange struct {
+	Type  string `json:"type"`  // "put", "del"
+	Key   string `json:"key"`   // Hex-encoded ledger key
+	Value string `json:"value"` // Hex-encoded ledger entry (for "put")
+}
+
 // CallNode represents a node in the execution call tree
 type CallNode struct {
-	ContractID string         `json:"contract_id"`
-	Function   string         `json:"function,omitempty"`
-	Events     []DecodedEvent `json:"events,omitempty"`
-	SubCalls   []*CallNode    `json:"sub_calls,omitempty"`
+	ContractID   string         `json:"contract_id"`
+	Function     string         `json:"function,omitempty"`
+	Events       []DecodedEvent `json:"events,omitempty"`
+	StateChanges []StateChange  `json:"state_changes,omitempty"`
+	SubCalls     []*CallNode    `json:"sub_calls,omitempty"`
 
 	// Internal for tree building
 	parent *CallNode
