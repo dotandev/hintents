@@ -362,6 +362,7 @@ func (d *Disassembler) parseImportedFunctionCount() uint32 {
 // parallelThreshold is the minimum number of functions required to trigger
 // parallel decoding. Below this, sequential decoding is used.
 const parallelThreshold = 16
+const largeMemoryOperationThreshold = 64 * 1024
 
 // funcBodyRange holds the byte range [start, end) of a single function body
 // within the WASM module.
@@ -413,6 +414,8 @@ func (d *Disassembler) decodeFuncBody(body funcBodyRange) []Instruction {
 	}
 
 	var insts []Instruction
+	var previousConstValue int64
+	var previousWasI32Const bool
 	for pos < end {
 		instOffset := uint64(pos)
 		opcode := d.data[pos]
@@ -425,6 +428,14 @@ func (d *Disassembler) decodeFuncBody(body funcBodyRange) []Instruction {
 			operands = d.highlightImportedCall(operands)
 		}
 
+		if (mnemonic == "memory.grow" || mnemonic == "memory.fill") &&
+			previousWasI32Const && previousConstValue > largeMemoryOperationThreshold {
+			if operands != "" {
+				operands = operands + " "
+			}
+			operands += "⚠ Large memory operation detected"
+		}
+
 		insts = append(insts, Instruction{
 			Offset:   instOffset,
 			Opcode:   opcode,
@@ -432,6 +443,15 @@ func (d *Disassembler) decodeFuncBody(body funcBodyRange) []Instruction {
 			Operands: operands,
 			Size:     1 + consumed,
 		})
+
+		if mnemonic == "i32.const" {
+			if parsed, err := strconv.ParseInt(operands, 10, 64); err == nil {
+				previousConstValue = parsed
+				previousWasI32Const = true
+				continue
+			}
+		}
+		previousWasI32Const = false
 	}
 	return insts
 }
@@ -1008,6 +1028,17 @@ func decodeOpcode(opcode byte, rest []byte) (string, string, int) { //nolint:goc
 		return "drop", "", 0
 	case 0x1b:
 		return "select", "", 0
+	case 0xfc:
+		subOpcode, n := decodeULEB128(rest)
+		switch subOpcode {
+		case 11: // memory.fill
+			if len(rest[n:]) > 0 {
+				return "memory.fill", "", n + 1
+			}
+			return "memory.fill", "", n
+		default:
+			return fmt.Sprintf("unknown_0xfc_%d", subOpcode), "", n
+		}
 
 	default:
 		return fmt.Sprintf("unknown_0x%02x", opcode), "", 0

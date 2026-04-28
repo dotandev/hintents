@@ -52,6 +52,8 @@ func (r *DetailedReporter) GenerateReport() string {
 		r.writeContracts(&sb)
 	}
 
+	r.writeSignatureWeightSummary(&sb)
+
 	return sb.String()
 }
 
@@ -209,6 +211,22 @@ func (r *DetailedReporter) writeContracts(sb *strings.Builder) {
 			fmt.Fprintf(sb, "  Error: %s\n", contract.ErrorMsg)
 		}
 	}
+}
+
+func (r *DetailedReporter) writeSignatureWeightSummary(sb *strings.Builder) {
+	var totalProvided uint32
+	for _, event := range r.trace.AuthEvents {
+		if event.EventType == "signature_verification" && event.Status == "valid" {
+			totalProvided += event.Weight
+		}
+	}
+
+	required := r.trace.Thresholds.HighThreshold
+	if required == 0 && len(r.trace.Failures) > 0 {
+		required = r.trace.Failures[0].RequiredWeight
+	}
+
+	fmt.Fprintf(sb, "\nTotal Signature Weight: %d / Required: %d\n", totalProvided, required)
 }
 
 func (r *DetailedReporter) GenerateJSON() ([]byte, error) {

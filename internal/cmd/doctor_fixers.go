@@ -81,7 +81,7 @@ func FixMissingCacheDir(verbose bool) error {
 	}
 
 	// Create subdirectories
-	subdirs := []string{"transactions", "protocols", "contracts"}
+	subdirs := []string{DirTransactions, DirProtocols, DirContracts}
 	for _, subdir := range subdirs {
 		path := filepath.Join(cacheDir, subdir)
 		if err := os.MkdirAll(path, 0755); err != nil {

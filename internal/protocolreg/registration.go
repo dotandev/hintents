@@ -6,6 +6,7 @@ package protocolreg
 import (
 	"errors"
 	"fmt"
+	ersterrors "github.com/dotandev/hintents/internal/errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,6 +114,13 @@ func (r *Registrar) Verify() (*VerificationReport, error) {
 }
 
 func (r *Registrar) registerWindows() error {
+	// Detect Protocol Registry Conflicts (Issue #1198)
+	registryOutput, err := runCommand("reg", "query", windowsRegistryKey, "/ve")
+	if err == nil && !strings.Contains(registryOutput, "erst") {
+		// If the key exists (err == nil) but (Default) doesn't contain 'erst', it's a conflict
+		return errors.Join(fmt.Errorf("registry conflict for %s", Scheme), ersterrors.ErrRegistryConflict)
+	}
+
 	commands := [][]string{
 		{"add", windowsRegistryKey, "/ve", "/d", "URL:ERST Protocol", "/f"},
 		{"add", windowsRegistryKey, "/v", "URL Protocol", "/d", "", "/f"},

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -17,6 +18,30 @@ var (
 	level  = new(slog.LevelVar)
 	mu     sync.Mutex
 )
+
+// RedactPIN replaces any HSM PIN values in the input string with "*****".
+// This is used to prevent sensitive credentials from appearing in logs.
+func RedactPIN(s string) string {
+	// Pattern 1: ERST_PKCS11_PIN=1234 or ERST_PKCS11_PIN: 1234
+	pattern1 := regexp.MustCompile(`ERST_PKCS11_PIN[=:]\s*[^\s"']+`)
+	s = pattern1.ReplaceAllString(s, "ERST_PKCS11_PIN=*****")
+
+	// Pattern 2: JSON-style "pin": "1234" or 'pin': '1234'
+	pattern2 := regexp.MustCompile(`(["']pin["']\s*[:=]\s*["'])([^"']+)`)
+	s = pattern2.ReplaceAllString(s, `$1*****`)
+
+	return s
+}
+
+// redactingWriter wraps an io.Writer and redacts PIN values from all output.
+type redactingWriter struct {
+	w io.Writer
+}
+
+func (rw *redactingWriter) Write(p []byte) (n int, err error) {
+	redacted := RedactPIN(string(p))
+	return rw.w.Write([]byte(redacted))
+}
 
 // Custom log levels
 const (
@@ -97,6 +122,9 @@ func initLogger(lvl slog.Level, w io.Writer, useJSON bool) {
 
 	level.Set(lvl)
 
+	// Wrap the writer with redactingWriter to scrub PIN values
+	w = &redactingWriter{w: w}
+
 	var handler slog.Handler
 	if useJSON {
 		handler = slog.NewJSONHandler(w, &slog.HandlerOptions{
@@ -143,6 +171,8 @@ func (h *TextHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *TextHandler) Handle(ctx context.Context, record slog.Record) error {
+	// Use the underlying handler directly - redaction happens at the string level
+	// through the RedactPIN function which can be called by loggers when needed
 	return h.handler.Handle(ctx, record)
 }
 

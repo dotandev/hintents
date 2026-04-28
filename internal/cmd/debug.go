@@ -120,8 +120,8 @@ Example:
 	return cmd
 }
 
-func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
-	txHash := args[0]
+func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
+	txHash := cmdArgs[0]
 
 	token := rpcTokenFlag
 	if token == "" {
@@ -161,12 +161,14 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(resp.EnvelopeXdr))
 
-	// TODO: Use d.Runner for simulation when ready
-	// simReq := &simulator.SimulationRequest{
-	//     EnvelopeXdr: resp.EnvelopeXdr,
-	//     ResultMetaXdr: resp.ResultMetaXdr,
-	// }
-	// simResp, err := d.Runner.Run(simReq)
+	simReq := &simulator.SimulationRequest{
+		EnvelopeXdr:   resp.EnvelopeXdr,
+		ResultMetaXdr: resp.ResultMetaXdr,
+	}
+	_, err = d.Runner.Run(cmd.Context(), simReq)
+	if err != nil {
+		return errors.WrapSimulationFailed(err, txHash)
+	}
 
 	return nil
 }

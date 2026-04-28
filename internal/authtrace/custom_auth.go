@@ -6,6 +6,8 @@ package authtrace
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 )
 
 type ContractAuthHandler interface {
@@ -22,6 +24,17 @@ var (
 type CustomContractAuthValidator struct {
 	contracts map[string]ContractAuthHandler
 }
+
+var customAuthErrorMessages = map[string]string{
+	"AUTH_FAILED":         "Authorization failed: invalid signature",
+	"INVALID_SIGNATURE":   "Authorization failed: invalid signature payload",
+	"SIGNER_NOT_FOUND":    "Authorization failed: signer is not registered",
+	"THRESHOLD_NOT_MET":   "Authorization failed: signer threshold was not met",
+	"RECOVERY_MISMATCH":   "Authorization failed: recovery key mismatch",
+	"INSUFFICIENT_PARAMS": "Authorization failed: insufficient auth parameters",
+}
+
+var customAuthCodePattern = regexp.MustCompile(`\b[A-Z][A-Z0-9_]+\b`)
 
 func NewCustomContractAuthValidator() *CustomContractAuthValidator {
 	return &CustomContractAuthValidator{
@@ -47,9 +60,13 @@ func (v *CustomContractAuthValidator) UnregisterContract(contractID string) {
 func (v *CustomContractAuthValidator) ValidateContract(contractID string, method string, params []interface{}) (bool, error) {
 	handler, ok := v.contracts[contractID]
 	if !ok {
-		return false, fmt.Errorf("no handler registered for contract: %s", contractID)
+		return false, mapCustomAuthError(fmt.Errorf("SIGNER_NOT_FOUND: no handler registered for contract: %s", contractID))
 	}
-	return handler.ValidateAuth(contractID, method, params)
+	valid, err := handler.ValidateAuth(contractID, method, params)
+	if err != nil {
+		return false, mapCustomAuthError(err)
+	}
+	return valid, nil
 }
 
 func (v *CustomContractAuthValidator) GetContractInfo(contractID string) (map[string]interface{}, error) {
@@ -103,21 +120,21 @@ func (m *MultiSigContractAuth) GetAuthDetails() map[string]interface{} {
 
 func (m *MultiSigContractAuth) ValidateAuth(contractID string, method string, params []interface{}) (bool, error) {
 	if len(params) < 1 {
-		return false, fmt.Errorf("insufficient parameters for multi-sig validation")
+		return false, fmt.Errorf("INSUFFICIENT_PARAMS: insufficient parameters for multi-sig validation")
 	}
 
 	signaturesData, ok := params[0].(map[string]interface{})
 	if !ok {
-		return false, fmt.Errorf("invalid signatures data format")
+		return false, fmt.Errorf("INVALID_SIGNATURE: invalid signatures data format")
 	}
 
 	signatures, ok := signaturesData["signatures"].([]interface{})
 	if !ok {
-		return false, fmt.Errorf("signatures field not found or invalid type")
+		return false, fmt.Errorf("INVALID_SIGNATURE: signatures field not found or invalid type")
 	}
 
 	if len(signatures) < m.RequiredSignatures {
-		return false, fmt.Errorf("insufficient signatures: got %d, required %d", len(signatures), m.RequiredSignatures)
+		return false, fmt.Errorf("THRESHOLD_NOT_MET: insufficient signatures: got %d, required %d", len(signatures), m.RequiredSignatures)
 	}
 
 	totalWeight := uint32(0)
@@ -168,19 +185,42 @@ func (r *RecoveryAuth) GetAuthDetails() map[string]interface{} {
 
 func (r *RecoveryAuth) ValidateAuth(contractID string, method string, params []interface{}) (bool, error) {
 	if len(params) < 2 {
-		return false, fmt.Errorf("insufficient parameters for recovery validation")
+		return false, fmt.Errorf("INSUFFICIENT_PARAMS: insufficient parameters for recovery validation")
 	}
 
 	recoveryKeyParam, ok := params[0].(string)
 	if !ok {
-		return false, fmt.Errorf("invalid recovery key format")
+		return false, fmt.Errorf("INVALID_SIGNATURE: invalid recovery key format")
 	}
 
 	if recoveryKeyParam != r.RecoveryKey {
-		return false, fmt.Errorf("recovery key mismatch")
+		return false, fmt.Errorf("RECOVERY_MISMATCH: recovery key mismatch")
 	}
 
 	return true, nil
+}
+
+func mapCustomAuthError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	msg := err.Error()
+	code := extractCustomAuthCode(msg)
+	if code == "" {
+		return fmt.Errorf("authorization failed: %s", msg)
+	}
+
+	if readable, ok := customAuthErrorMessages[code]; ok {
+		return fmt.Errorf("%s", readable)
+	}
+
+	return fmt.Errorf("authorization failed: unknown custom auth error (%s)", code)
+}
+
+func extractCustomAuthCode(msg string) string {
+	match := customAuthCodePattern.FindString(msg)
+	return strings.ToUpper(match)
 }
 
 func UnmarshalCustomContractAuth(data []byte) (*CustomContractAuthValidator, error) {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -23,7 +24,11 @@ import (
 )
 
 func joinPath(parts ...string) string {
-	return strings.Join(parts, "/")
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cleaned = append(cleaned, filepath.ToSlash(part))
+	}
+	return path.Join(cleaned...)
 }
 
 // FriendlyPath replaces the user's home directory with ~ for better readability
@@ -58,6 +63,12 @@ const (
 	DepGoModDependencies DependencyID = "go_mod_dependencies"
 	DepConfigTOML        DependencyID = "toml_config"
 	DepRPC               DependencyID = "rpc"
+)
+
+const (
+	DirTransactions = "transactions"
+	DirProtocols    = "protocols"
+	DirContracts    = "contracts"
 )
 
 type DependencyStatus struct {
@@ -384,7 +395,7 @@ func checkCacheDir(verbose bool) DependencyStatus {
 	}
 
 	// Verify subdirectories exist
-	requiredDirs := []string{"transactions", "protocols", "contracts"}
+	requiredDirs := []string{DirTransactions, DirProtocols, DirContracts}
 	for _, subdir := range requiredDirs {
 		path := joinPath(cacheDir, subdir)
 		if _, err := os.Stat(path); err != nil {

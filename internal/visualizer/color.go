@@ -12,10 +12,15 @@ import (
 // ANSI SGR (Select Graphic Rendition) escape codes for terminal colors.
 // Redundant constants removed as they are defined in ansi.go
 
+func noColorSet() bool {
+	_, ok := os.LookupEnv("NO_COLOR")
+	return ok
+}
+
 // ColorEnabled reports whether ANSI color output should be used.
 func ColorEnabled() bool {
 	// NO_COLOR must always take precedence.
-	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+	if noColorSet() {
 		return false
 	}
 	if os.Getenv("FORCE_COLOR") != "" {

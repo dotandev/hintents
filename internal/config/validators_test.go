@@ -168,6 +168,28 @@ func TestLogLevelValidator_InvalidLevel(t *testing.T) {
 	}
 }
 
+// --- MaxTraceDepthValidator ---
+
+func TestMaxTraceDepthValidator_Valid(t *testing.T) {
+	v := MaxTraceDepthValidator{}
+	for _, depth := range []int{1, 50, 500, 1000} {
+		cfg := &Config{MaxTraceDepth: depth}
+		if err := v.Validate(cfg); err != nil {
+			t.Errorf("max_trace_depth %d should be valid: %v", depth, err)
+		}
+	}
+}
+
+func TestMaxTraceDepthValidator_Invalid(t *testing.T) {
+	v := MaxTraceDepthValidator{}
+	for _, depth := range []int{0, -1, 1001, 2000} {
+		cfg := &Config{MaxTraceDepth: depth}
+		if err := v.Validate(cfg); err == nil {
+			t.Errorf("max_trace_depth %d should be invalid", depth)
+		}
+	}
+}
+
 // --- MergeDefaults ---
 
 func TestMergeDefaults_FillsEmptyFields(t *testing.T) {

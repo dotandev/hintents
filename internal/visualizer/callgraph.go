@@ -141,10 +141,7 @@ func GenerateCallGraphSVG(root *decoder.CallNode, maxDepth int) string {
 	for node, pos := range positions {
 		x, y := pos[0], pos[1]
 
-		contractShort := node.ContractID
-		if len(contractShort) > 12 {
-			contractShort = contractShort[:6] + "..." + contractShort[len(contractShort)-4:]
-		}
+		contractShort := shortenContractID(node.ContractID)
 
 		collapsedText := ""
 		if maxDepth > 0 && len(node.SubCalls) > 0 {
@@ -180,6 +177,13 @@ func GenerateCallGraphSVG(root *decoder.CallNode, maxDepth int) string {
 
 	sb.WriteString("</svg>")
 	return sb.String()
+}
+
+func shortenContractID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:6] + "..." + id[len(id)-4:]
 }
 
 func formatElapsedPerCall(node *decoder.CallNode) string {

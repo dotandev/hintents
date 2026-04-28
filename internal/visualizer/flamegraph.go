@@ -29,9 +29,11 @@ const darkModeCSS = `
     opacity: 0.92;
   }
 
-  /* Search match highlight */
-  rect[fill="rgb(230,0,230)"] {
-    fill: rgb(200,80,200) !important;
+  /* Search match highlight - use a high-contrast stroke in dark mode */
+  rect[data-highlighted="true"] {
+    stroke: #f5c2e7 !important;
+    stroke-width: 2px !important;
+    paint-order: stroke fill;
   }
 }
 `
@@ -85,6 +87,7 @@ const interactiveHTML = `<!DOCTYPE html>
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: #f5f5f5;
       padding: 20px;
+      color: #333;
     }
     @media (prefers-color-scheme: dark) {
       body { background: #1e1e2e; color: #cdd6f4; }
@@ -93,114 +96,190 @@ const interactiveHTML = `<!DOCTYPE html>
       max-width: 1400px;
       margin: 0 auto;
       background: white;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
     @media (prefers-color-scheme: dark) {
-      .container { background: #181825; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+      .container { background: #181825; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
     }
     .toolbar {
-      padding: 15px 20px;
-      border-bottom: 1px solid #e0e0e0;
+      padding: 16px 24px;
+      border-bottom: 1px solid #eee;
       display: flex;
-      gap: 10px;
+      gap: 12px;
       align-items: center;
       flex-wrap: wrap;
+      background: rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
     }
     @media (prefers-color-scheme: dark) {
-      .toolbar { border-bottom-color: #313244; }
+      .toolbar { border-bottom-color: #313244; background: rgba(24, 24, 37, 0.8); }
     }
-    .toolbar button {
+    .toolbar-group {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    button {
       padding: 8px 16px;
-      border: 1px solid #ccc;
+      border: 1px solid #ddd;
       background: white;
-      border-radius: 4px;
+      border-radius: 6px;
       cursor: pointer;
       font-size: 14px;
-      transition: all 0.2s;
+      font-weight: 500;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      color: #444;
     }
-    .toolbar button:hover {
+    button:hover {
+      background: #f8f8f8;
+      border-color: #bbb;
+      transform: translateY(-1px);
+    }
+    button:active {
+      transform: translateY(0);
+    }
+    #resetBtn {
       background: #f0f0f0;
-      border-color: #999;
     }
     @media (prefers-color-scheme: dark) {
-      .toolbar button {
+      button {
         background: #313244;
         border-color: #45475a;
         color: #cdd6f4;
       }
-      .toolbar button:hover {
+      button:hover {
         background: #45475a;
         border-color: #585b70;
       }
+      #resetBtn { background: #45475a; }
+    }
+    .search-wrapper {
+      position: relative;
+      flex: 1;
+      min-width: 250px;
+      max-width: 500px;
     }
     .toolbar input {
-      padding: 8px 12px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
+      width: 100%;
+      padding: 10px 16px;
+      padding-right: 100px;
+      border: 1.5px solid #ddd;
+      border-radius: 8px;
       font-size: 14px;
-      flex: 1;
-      min-width: 200px;
-      max-width: 400px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .toolbar input:focus {
+      border-color: #1e66f5;
     }
     @media (prefers-color-scheme: dark) {
       .toolbar input {
-        background: #313244;
-        border-color: #45475a;
+        background: #11111b;
+        border-color: #313244;
         color: #cdd6f4;
       }
+      .toolbar input:focus { border-color: #89b4fa; }
+    }
+    .match-counter {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 12px;
+      color: #888;
+      font-weight: 600;
+      pointer-events: none;
     }
     .svg-container {
-      padding: 20px;
+      padding: 24px;
       overflow: auto;
       position: relative;
+      background: #fafafa;
+    }
+    @media (prefers-color-scheme: dark) {
+      .svg-container { background: #1e1e2e; }
     }
     svg {
       display: block;
       margin: 0 auto;
       cursor: default;
+      transition: transform 0.3s ease-out;
+    }
+    rect[data-highlighted="true"] {
+      stroke: #d20f39;
+      stroke-width: 2px;
+      paint-order: stroke fill;
     }
     .tooltip {
       position: fixed;
-      background: rgba(0, 0, 0, 0.9);
-      color: white;
-      padding: 8px 12px;
-      border-radius: 4px;
-      font-size: 12px;
+      background: rgba(17, 17, 27, 0.95);
+      color: #cdd6f4;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
       pointer-events: none;
       z-index: 1000;
       display: none;
-      max-width: 400px;
+      max-width: 450px;
       word-wrap: break-word;
-    }
-    @media (prefers-color-scheme: dark) {
-      .tooltip { background: rgba(30, 30, 46, 0.95); border: 1px solid #45475a; }
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      border: 1px solid #313244;
     }
     .info {
-      padding: 10px 20px;
+      padding: 12px 24px;
       font-size: 13px;
-      color: #666;
-      border-top: 1px solid #e0e0e0;
+      color: #6c7086;
+      border-top: 1px solid #eee;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
     @media (prefers-color-scheme: dark) {
       .info { color: #a6adc8; border-top-color: #313244; }
+    }
+    .kdb {
+      background: #eee;
+      border-radius: 3px;
+      padding: 2px 5px;
+      font-family: monospace;
+      font-size: 11px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .kdb { background: #313244; }
     }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="toolbar">
-      <button id="resetBtn">Reset Zoom</button>
-      <input type="text" id="searchInput" placeholder="Search frames (e.g., function name)...">
-      <button id="searchBtn">Search</button>
-      <button id="clearBtn">Clear</button>
+      <div class="toolbar-group">
+        <button id="resetBtn" title="Reset view to original size">Reset View</button>
+      </div>
+      <div class="search-wrapper">
+        <input type="text" id="searchInput" placeholder="Search frames, contracts, functions..." autocomplete="off">
+        <span class="match-counter" id="matchCounter"></span>
+      </div>
+      <div class="toolbar-group">
+        <button id="clearBtn">Clear</button>
+      </div>
     </div>
     <div class="svg-container">
       {{SVG_CONTENT}}
     </div>
     <div class="info">
-      <strong>Interactions:</strong> Hover for details • Click to zoom • Search to highlight
+      <div>
+        <span class="kdb">Hover</span> Details &bull; 
+        <span class="kdb">Click</span> Zoom &bull; 
+        <span class="kdb">Ctrl+F</span> Search
+      </div>
+      <div>Flamegraph Visualizer</div>
     </div>
   </div>
   <div class="tooltip" id="tooltip"></div>
@@ -213,82 +292,122 @@ const interactiveHTML = `<!DOCTYPE html>
       const tooltip = document.getElementById('tooltip');
       const resetBtn = document.getElementById('resetBtn');
       const searchInput = document.getElementById('searchInput');
-      const searchBtn = document.getElementById('searchBtn');
       const clearBtn = document.getElementById('clearBtn');
+      const matchCounter = document.getElementById('matchCounter');
 
       let zoomStack = [];
       let originalViewBox = null;
+      let cachedNodes = [];
+      let debounceTimer = null;
 
       // Initialize
       if (svg) {
         originalViewBox = svg.getAttribute('viewBox') || '0 0 ' + svg.getAttribute('width') + ' ' + svg.getAttribute('height');
+        
+        // Cache nodes for performance
+        cachedNodes = Array.from(svg.querySelectorAll('g')).map(g => {
+          const rect = g.querySelector('rect');
+          const title = g.querySelector('title');
+          return {
+            g,
+            rect,
+            label: title ? title.textContent.toLowerCase() : '',
+            originalFill: rect ? rect.getAttribute('fill') : null,
+            originalStroke: rect ? rect.getAttribute('stroke') : null,
+            originalStrokeWidth: rect ? rect.getAttribute('stroke-width') : null
+          };
+        }).filter(n => n.rect);
+
         setupInteractivity();
       }
 
       function setupInteractivity() {
-        // Hover tooltips
         svg.addEventListener('mouseover', handleMouseOver);
         svg.addEventListener('mouseout', handleMouseOut);
         svg.addEventListener('mousemove', handleMouseMove);
-
-        // Click to zoom
         svg.addEventListener('click', handleClick);
 
-        // Toolbar actions
         resetBtn.addEventListener('click', resetZoom);
-        searchBtn.addEventListener('click', performSearch);
-        clearBtn.addEventListener('click', clearSearch);
-        searchInput.addEventListener('keypress', (e) => {
-          if (e.key === 'Enter') performSearch();
+        clearBtn.addEventListener('click', () => {
+          searchInput.value = '';
+          performSearch();
+        });
+
+        searchInput.addEventListener('input', () => {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(performSearch, 200);
+        });
+
+        // Shortcuts
+        window.addEventListener('keydown', (e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+            e.preventDefault();
+            searchInput.focus();
+          }
         });
       }
 
       function handleMouseOver(e) {
         const target = e.target;
-        if (target.tagName === 'rect' || target.tagName === 'g') {
-          const g = target.tagName === 'g' ? target : target.parentElement;
+        const g = target.tagName === 'g' ? target : (target.tagName === 'rect' || target.tagName === 'text' ? target.parentElement : null);
+        if (g && g.tagName === 'g') {
           const title = g.querySelector('title');
           if (title) {
-            tooltip.textContent = title.textContent;
+            tooltip.innerHTML = title.textContent.replace(/\n/g, '<br>');
             tooltip.style.display = 'block';
           }
         }
       }
 
-      function handleMouseOut(e) {
+      function handleMouseOut() {
         tooltip.style.display = 'none';
       }
 
       function handleMouseMove(e) {
         if (tooltip.style.display === 'block') {
-          tooltip.style.left = (e.clientX + 10) + 'px';
-          tooltip.style.top = (e.clientY + 10) + 'px';
+          const x = e.clientX + 15;
+          const y = e.clientY + 15;
+          
+          // Keep tooltip within viewport
+          const width = tooltip.offsetWidth;
+          const height = tooltip.offsetHeight;
+          const windowWidth = window.innerWidth;
+          const windowHeight = window.innerHeight;
+          
+          tooltip.style.left = (x + width > windowWidth ? x - width - 20 : x) + 'px';
+          tooltip.style.top = (y + height > windowHeight ? y - height - 20 : y) + 'px';
         }
       }
 
       function handleClick(e) {
-        const target = e.target;
-        if (target.tagName !== 'rect') return;
+        let target = e.target;
+        if (target.tagName !== 'rect') {
+          const g = target.closest('g');
+          if (g) target = g.querySelector('rect');
+        }
+        if (!target || target.tagName !== 'rect') return;
 
-        const g = target.parentElement;
-        const rect = target;
+        zoomToRect(target);
+      }
 
-        // Get bounding box
+      function zoomToRect(rect) {
         const x = parseFloat(rect.getAttribute('x') || 0);
         const y = parseFloat(rect.getAttribute('y') || 0);
         const width = parseFloat(rect.getAttribute('width') || 0);
         const height = parseFloat(rect.getAttribute('height') || 0);
 
         if (width > 0 && height > 0) {
-          // Save current viewBox to stack
           zoomStack.push(svg.getAttribute('viewBox'));
-
-          // Calculate new viewBox with some padding
-          const padding = width * 0.1;
+          
+          const padding = width * 0.05;
           const newX = Math.max(0, x - padding);
-          const newY = Math.max(0, y - padding);
           const newWidth = width + (padding * 2);
-          const newHeight = height * 10; // Show more vertical context
+          
+          // Maintain aspect ratio or focus on vertical context
+          const currentVB = svg.getAttribute('viewBox').split(' ');
+          const currentAspect = parseFloat(currentVB[2]) / parseFloat(currentVB[3]);
+          const newHeight = newWidth / currentAspect;
+          const newY = Math.max(0, y - (newHeight * 0.1));
 
           svg.setAttribute('viewBox', newX + ' ' + newY + ' ' + newWidth + ' ' + newHeight);
         }
@@ -303,42 +422,44 @@ const interactiveHTML = `<!DOCTYPE html>
 
       function performSearch() {
         const query = searchInput.value.trim().toLowerCase();
-        if (!query) return;
-
-        clearSearch();
-
-        const allGroups = svg.querySelectorAll('g');
-        let matchCount = 0;
-
-        allGroups.forEach(g => {
-          const title = g.querySelector('title');
-          const rect = g.querySelector('rect');
-
-          if (title && rect && title.textContent.toLowerCase().includes(query)) {
-            // Highlight matching frames
-            const originalFill = rect.getAttribute('fill');
-            rect.setAttribute('data-original-fill', originalFill);
-            rect.setAttribute('fill', 'rgb(230, 100, 230)');
-            rect.setAttribute('data-highlighted', 'true');
-            matchCount++;
+        
+        // Clear previous highlights
+        cachedNodes.forEach(node => {
+          if (node.rect.getAttribute('data-highlighted') === 'true') {
+            node.rect.setAttribute('fill', node.originalFill);
+            if (node.originalStroke) node.rect.setAttribute('stroke', node.originalStroke);
+            else node.rect.removeAttribute('stroke');
+            
+            if (node.originalStrokeWidth) node.rect.setAttribute('stroke-width', node.originalStrokeWidth);
+            else node.rect.removeAttribute('stroke-width');
+            
+            node.rect.removeAttribute('data-highlighted');
           }
         });
 
-        if (matchCount === 0) {
-          alert('No matches found for: ' + query);
+        if (!query) {
+          matchCounter.textContent = '';
+          return;
         }
-      }
 
-      function clearSearch() {
-        const highlighted = svg.querySelectorAll('rect[data-highlighted="true"]');
-        highlighted.forEach(rect => {
-          const originalFill = rect.getAttribute('data-original-fill');
-          if (originalFill) {
-            rect.setAttribute('fill', originalFill);
+        let matches = [];
+        cachedNodes.forEach(node => {
+          if (node.label.includes(query)) {
+            node.rect.setAttribute('data-highlighted', 'true');
+            // Highlight color - use a distinct color that works in light/dark
+            node.rect.setAttribute('fill', 'rgb(230, 100, 230)'); 
+            node.rect.setAttribute('stroke', '#d20f39');
+            node.rect.setAttribute('stroke-width', '2');
+            matches.push(node);
           }
-          rect.removeAttribute('data-original-fill');
-          rect.removeAttribute('data-highlighted');
         });
+
+        matchCounter.textContent = matches.length > 0 ? matches.length + ' matches' : 'No matches';
+        
+        if (matches.length > 0) {
+          // Zoom to the first match if it's a fresh search
+          zoomToRect(matches[0].rect);
+        }
       }
     })();
   </script>
