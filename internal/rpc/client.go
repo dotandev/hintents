@@ -13,15 +13,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/metrics"
 
 	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 	"go.opentelemetry.io/otel/attribute"
-
-	"github.com/dotandev/hintents/internal/errors"
 )
+
+var Version = "dev"
 
 // HTTPClient is an interface that matches horizonclient.HTTP.
 type HTTPClient interface {
@@ -55,14 +56,6 @@ type Client struct {
 	// client is operating in a multi‑URL failover configuration.
 	rotateCount     int
 	healthCollector *HealthCollector
-}
-
-// attempts returns the number of retry attempts for failover loops (at least 1)
-func (c *Client) attempts() int { //nolint:unused
-	if len(c.AltURLs) == 0 {
-		return 1
-	}
-	return len(c.AltURLs)
 }
 
 func (c *Client) startMethodTimer(ctx context.Context, method string, attributes map[string]string) MethodTimer {
