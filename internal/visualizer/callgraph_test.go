@@ -39,7 +39,7 @@ func TestGenerateCallGraphSVG(t *testing.T) {
 		},
 	}
 
-	svg := GenerateCallGraphSVG(root)
+	svg := GenerateCallGraphSVG(root, 0)
 
 	// Basic SVG verification
 	assert.Contains(t, svg, "<svg")
