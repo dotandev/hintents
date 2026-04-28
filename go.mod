@@ -1,4 +1,3 @@
-
 go 1.25.0
 
 require (
@@ -70,3 +69,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+module example.com/mod
