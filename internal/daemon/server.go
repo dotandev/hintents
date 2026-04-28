@@ -220,7 +220,7 @@ func (s *Server) Start(ctx context.Context, port string) error {
 		return errors.WrapValidationError(fmt.Sprintf("failed to register service: %v", err))
 	}
 
-	// ✅ Create isolated mux (FIX)
+	// Create isolated mux (fix)
 	mux := http.NewServeMux()
 
 	// RPC endpoint
@@ -239,7 +239,7 @@ func (s *Server) Start(ctx context.Context, port string) error {
 
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: mux, // ✅ attach mux here
+		Handler: mux, // attach mux here
 	}
 
 	// Start server in goroutine
@@ -254,3 +254,4 @@ func (s *Server) Start(ctx context.Context, port string) error {
 	logger.Logger.Info("Shutting down JSON-RPC server")
 	return srv.Shutdown(context.Background())
 }
+

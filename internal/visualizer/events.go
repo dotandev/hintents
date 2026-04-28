@@ -36,7 +36,7 @@ func RenderEventTree(events []Event) string {
 	sortEvents(sorted)
 
 	var sb strings.Builder
-	sb.WriteString("Events:\n")
+	sb.WriteString("Event Trace Tree\n")
 
 	for i, event := range sorted {
 		isLastEvent := i == len(sorted)-1
@@ -135,3 +135,4 @@ func safeName(name string) string {
 	}
 	return name
 }
+
