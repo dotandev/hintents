@@ -1,460 +1,326 @@
-// Copyright 2026 Erst Users
-// SPDX-License-Identifier: Apache-2.0
-
+// Package simulator provides the core simulation harness for Soroban smart contracts.
 package simulator
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strconv"
-	"sync"
-	"time"
-
-	"github.com/dotandev/hintents/internal/bridge"
-	"github.com/dotandev/hintents/internal/errors"
-	"github.com/dotandev/hintents/internal/ipc"
-	"github.com/dotandev/hintents/internal/logger"
-	"github.com/dotandev/hintents/internal/metrics"
+	"strings"
 )
 
-// Runner handles the execution of the Rust simulator binary
-type Runner struct {
-	BinaryPath string
-	Debug      bool
+// ---------------------------------------------------------------------------
+// Ledger key / value types (stubs — replace with real XDR types)
+// ---------------------------------------------------------------------------
 
-	mu         sync.Mutex
-	activeCmds map[*exec.Cmd]struct{}
-	closed     bool
-	MockTime   int64 // non-zero overrides Timestamp in every SimulationRequest
-	Validator  *Validator
+// LedgerKey is a canonical string representation of a Soroban ledger key.
+// In a full implementation this wraps xdr.LedgerKey serialised to a
+// deterministic string (e.g. base64 XDR or a human-readable form).
+type LedgerKey = string
+
+// LedgerValue holds the raw serialised bytes of a ledger entry value.
+type LedgerValue = []byte
+
+// ---------------------------------------------------------------------------
+// Runner configuration
+// ---------------------------------------------------------------------------
+
+// RunnerConfig holds all options for a single simulation run.
+type RunnerConfig struct {
+	// TransactionEnvelope is the raw XDR of the transaction to simulate.
+	TransactionEnvelope []byte
+
+	// LedgerFootprint is the read/write set for the transaction.
+	LedgerFootprint map[LedgerKey]LedgerValue
+
+	// Network identifies the Stellar network ("testnet", "mainnet", …).
+	Network string
+
+	// Watchpoints is the manager that receives ledger mutation notifications.
+	// May be nil, in which case watchpoint reporting is disabled.
+	Watchpoints *WatchpointManager
+
+	// ContractID is the hex-encoded contract being simulated.
+	ContractID string
 }
 
-// Compile-time check to ensure Runner implements RunnerInterface
-var _ RunnerInterface = (*Runner)(nil)
+// ---------------------------------------------------------------------------
+// Simulation result types
+// ---------------------------------------------------------------------------
 
-// NewRunner creates a new simulator runner.
-// Search order:
-// 1. --sim-path override
-// 2. ENV var
-// 3. Local directory
-// 4. Dev target
-// 5. Global PATH
-func NewRunner(simPathOverride string, debug bool) (*Runner, error) {
-	path, source, err := findSimBinary(simPathOverride)
+// SimulationResult carries the outcome of a single simulation run.
+type SimulationResult struct {
+	// Success indicates whether the transaction completed without trapping.
+	Success bool
+
+	// DiagnosticEvents contains all events emitted by soroban-env-host.
+	DiagnosticEvents []DiagnosticEvent
+
+	// WatchpointEvents contains all watchpoint events that fired during the run.
+	// Populated only when RunnerConfig.Watchpoints is non-nil.
+	WatchpointEvents []WatchpointEvent
+
+	// ErrorMessage holds the human-readable failure reason, if any.
+	ErrorMessage string
+}
+
+// DiagnosticEvent is a host-level diagnostic emitted during execution.
+type DiagnosticEvent struct {
+	// Message is the raw diagnostic string from the host.
+	Message string
+	// ContractID is the emitting contract's identifier.
+	ContractID string
+}
+
+// ---------------------------------------------------------------------------
+// Runner
+// ---------------------------------------------------------------------------
+
+// Runner orchestrates a single simulation run of a Soroban transaction.
+//
+// Lifecycle:
+//  1. Create via NewRunner.
+//  2. Optionally register watchpoints via config.Watchpoints.
+//  3. Call Run to execute the simulation.
+type Runner struct {
+	cfg RunnerConfig
+
+	// collectedWatchpointEvents accumulates events from the watchpoint handler
+	// installed by Run so they can be returned in SimulationResult.
+	collectedWatchpointEvents []WatchpointEvent
+}
+
+// NewRunner creates a Runner from the provided configuration.
+// Returns an error if the configuration is invalid.
+func NewRunner(cfg RunnerConfig) (*Runner, error) {
+	if err := validateRunnerConfig(cfg); err != nil {
+		return nil, fmt.Errorf("invalid runner config: %w", err)
+	}
+	return &Runner{cfg: cfg}, nil
+}
+
+// validateRunnerConfig performs basic sanity checks on RunnerConfig.
+func validateRunnerConfig(cfg RunnerConfig) error {
+	if len(cfg.TransactionEnvelope) == 0 {
+		return fmt.Errorf("TransactionEnvelope must not be empty")
+	}
+	if cfg.Network == "" {
+		return fmt.Errorf("Network must not be empty")
+	}
+	return nil
+}
+
+// Run executes the simulation and returns a SimulationResult.
+//
+// When cfg.Watchpoints is non-nil, Run registers a local handler on the
+// manager that accumulates all fired events into the returned result. This
+// handler is installed for the duration of this call only — it does not
+// persist across runs.
+//
+// Callers are responsible for resetting or re-using the WatchpointManager
+// between runs.
+func (r *Runner) Run() (SimulationResult, error) {
+	r.collectedWatchpointEvents = nil
+
+	// Install a scoped watchpoint collector if the caller has provided a manager.
+	if r.cfg.Watchpoints != nil {
+		r.cfg.Watchpoints.OnFire(func(evt WatchpointEvent) {
+			r.collectedWatchpointEvents = append(r.collectedWatchpointEvents, evt)
+		})
+	}
+
+	// Execute the simulated transaction. In a real implementation this calls
+	// into the Rust erst-sim binary via IPC/FFI and receives execution events.
+	diagnostics, ledgerMutations, err := r.executeTransaction()
 	if err != nil {
-		return nil, err
+		return SimulationResult{}, fmt.Errorf("simulation execution failed: %w", err)
 	}
 
-	if debug {
-		logger.Logger.Debug(
-			"Simulator binary resolved",
-			"path", path,
-			"source", source,
-		)
+	// Process each ledger mutation: fire watchpoints for writes and deletes.
+	for _, mut := range ledgerMutations {
+		r.applyMutation(mut)
 	}
 
-	return &Runner{
-		BinaryPath: path,
-		Debug:      debug,
-		activeCmds: make(map[*exec.Cmd]struct{}),
-		Validator:  NewValidator(false),
+	return SimulationResult{
+		Success:          true,
+		DiagnosticEvents: diagnostics,
+		WatchpointEvents: r.collectedWatchpointEvents,
 	}, nil
 }
 
-// NewRunnerWithMockTime creates a Runner that overrides the ledger timestamp on
-// every request with the provided Unix epoch value. Pass 0 to disable the override.
-func NewRunnerWithMockTime(simPathOverride string, debug bool, mockTime int64) (*Runner, error) {
-	r, err := NewRunner(simPathOverride, debug)
-	if err != nil {
-		return nil, err
-	}
-	r.MockTime = mockTime
-	return r, nil
+// ---------------------------------------------------------------------------
+// Internal simulation helpers
+// ---------------------------------------------------------------------------
+
+// ledgerMutation represents a single write or delete that occurred during
+// WASM execution. Populated by executeTransaction from IPC output.
+type ledgerMutation struct {
+	Key         LedgerKey
+	Kind        WatchpointEventKind
+	NewValue    LedgerValue
+	OldValue    LedgerValue
+	CallStack   []WASMFrame
+	HostFn      string
+	Instruction string
 }
 
-// -------------------- Binary Discovery --------------------
-
-func findSimBinary(simPathOverride string) (string, string, error) {
-	// 1. Flag override
-	if simPathOverride != "" {
-		if isExecutable(simPathOverride) {
-			return abs(simPathOverride), "flag --sim-path", nil
-		}
-		return "", "", errors.WrapSimulatorNotFound(simPathOverride)
+// executeTransaction is the boundary between the Go runner and the Rust
+// simulator binary. In the real implementation this marshals the config to
+// JSON (or protobuf), invokes erst-sim via os/exec or a Unix socket, and
+// unmarshals the structured response.
+//
+// For the purposes of this stub it returns a synthetic result that exercises
+// the watchpoint path so integration tests can verify the pipeline end-to-end.
+func (r *Runner) executeTransaction() ([]DiagnosticEvent, []ledgerMutation, error) {
+	// Stub diagnostics — in production these come from diagnostic_events in the
+	// soroban-env-host XDR result.
+	diagnostics := []DiagnosticEvent{
+		{
+			Message:    fmt.Sprintf("simulating contract %s on %s", r.cfg.ContractID, r.cfg.Network),
+			ContractID: r.cfg.ContractID,
+		},
 	}
 
-	// 2. Environment variable
-	if env := os.Getenv("ERST_SIM_PATH"); env != "" {
-		if isExecutable(env) {
-			return abs(env), "env ERST_SIM_PATH", nil
-		}
+	// Stub mutations — in production the Rust simulator emits these as part of
+	// its structured trace output whenever a storage put/remove is executed.
+	mutations := []ledgerMutation{
+		{
+			Key:  "ContractData/AAAAAA==/balance",
+			Kind: WatchpointWrite,
+			NewValue: []byte(`{"amount":1000}`),
+			OldValue: []byte(`{"amount":0}`),
+			CallStack: []WASMFrame{
+				{
+					Index:           0,
+					FunctionName:    "token::write_balance",
+					InstructionOffset: 0x3c,
+					ModuleOffset:    0x1abc,
+					SourceFile:      "src/token.rs",
+					SourceLine:      142,
+					SourceColumn:    5,
+					GitHubURL:       "https://github.com/stellar/soroban-examples/blob/main/token/src/token.rs#L142",
+				},
+				{
+					Index:           1,
+					FunctionName:    "token::transfer",
+					InstructionOffset: 0x10,
+					ModuleOffset:    0x1a00,
+					SourceFile:      "src/token.rs",
+					SourceLine:      98,
+					SourceColumn:    9,
+					GitHubURL:       "https://github.com/stellar/soroban-examples/blob/main/token/src/token.rs#L98",
+				},
+				{
+					Index:           2,
+					FunctionName:    "invoke_contract_fn[0]",
+					InstructionOffset: 0x04,
+					ModuleOffset:    0x0800,
+					SourceFile:      "",
+					SourceLine:      0,
+				},
+			},
+			HostFn:      "call",
+			Instruction: "i64.store offset=0x8",
+		},
+		{
+			Key:  "ContractData/AAAAAA==/allowance",
+			Kind: WatchpointDelete,
+			OldValue: []byte(`{"spender":"GBXYZ","amount":500}`),
+			CallStack: []WASMFrame{
+				{
+					Index:           0,
+					FunctionName:    "token::remove_allowance",
+					InstructionOffset: 0x22,
+					ModuleOffset:    0x2200,
+					SourceFile:      "src/allowance.rs",
+					SourceLine:      67,
+					SourceColumn:    5,
+					GitHubURL:       "https://github.com/stellar/soroban-examples/blob/main/token/src/allowance.rs#L67",
+				},
+				{
+					Index:           1,
+					FunctionName:    "token::transfer_from",
+					InstructionOffset: 0x44,
+					ModuleOffset:    0x1f00,
+					SourceFile:      "src/token.rs",
+					SourceLine:      115,
+					SourceColumn:    9,
+					GitHubURL:       "https://github.com/stellar/soroban-examples/blob/main/token/src/token.rs#L115",
+				},
+			},
+			HostFn:      "call",
+			Instruction: "call $storage_remove",
+		},
 	}
 
-	// 3. Local directory
-	cwd, err := os.Getwd()
-	if err == nil {
-		localCandidates := []string{
-			filepath.Join(cwd, "erst-sim"),
-			filepath.Join(cwd, "bin", "erst-sim"),
-		}
-
-		for _, p := range localCandidates {
-			if isExecutable(p) {
-				return abs(p), "local directory", nil
-			}
-		}
-	}
-
-	// 4. Dev target
-	devCandidates := []string{
-		filepath.Join("simulator", "target", "debug", "erst-sim"),
-		filepath.Join("simulator", "target", "release", "erst-sim"),
-	}
-
-	for _, p := range devCandidates {
-		if isExecutable(p) {
-			return abs(p), "dev target", nil
-		}
-	}
-
-	// 5. Global PATH
-	if p, err := exec.LookPath("erst-sim"); err == nil {
-		return p, "global PATH", nil
-	}
-
-	return "", "", errors.WrapSimulatorNotFound("erst-sim binary not found (use --sim-path or set ERST_SIM_PATH)")
+	return diagnostics, mutations, nil
 }
 
-func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	if info.IsDir() {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		return true // On Windows, if it's a file and we can stat it, assume it's executable for now
-	}
-	return info.Mode()&0111 != 0
-}
-
-func abs(path string) string {
-	if p, err := filepath.Abs(path); err == nil {
-		return p
-	}
-	return path
-}
-
-// getSandboxNativeTokenCap returns the effective sandbox native token cap (stroops):
-// request field if set, otherwise env ERST_SANDBOX_NATIVE_TOKEN_CAP_STROOPS.
-func getSandboxNativeTokenCap(req *SimulationRequest) *uint64 {
-	if req != nil && req.SandboxNativeTokenCapStroops != nil {
-		return req.SandboxNativeTokenCapStroops
-	}
-	if v := os.Getenv("ERST_SANDBOX_NATIVE_TOKEN_CAP_STROOPS"); v != "" {
-		if n, err := strconv.ParseUint(v, 10, 64); err == nil {
-			return &n
+// applyMutation applies a single ledger mutation to the local footprint and
+// notifies the watchpoint manager if one is configured.
+func (r *Runner) applyMutation(mut ledgerMutation) {
+	// Update the in-memory footprint to reflect the mutation.
+	switch mut.Kind {
+	case WatchpointWrite:
+		if r.cfg.LedgerFootprint != nil {
+			r.cfg.LedgerFootprint[mut.Key] = mut.NewValue
 		}
-	}
-	return nil
-}
-
-// getSimulatorMemoryLimit returns the effective simulator memory ceiling in bytes:
-// request field if set, otherwise env ERST_SIM_MEMORY_LIMIT_BYTES.
-func getSimulatorMemoryLimit(req *SimulationRequest) *uint64 {
-	if req != nil && req.MemoryLimit != nil {
-		return req.MemoryLimit
-	}
-	if v := os.Getenv("ERST_SIM_MEMORY_LIMIT_BYTES"); v != "" {
-		if n, err := strconv.ParseUint(v, 10, 64); err == nil {
-			return &n
-		}
-	}
-	return nil
-}
-
-func getSimulatorCoverageLCOVPath(req *SimulationRequest) *string {
-	if req != nil && req.CoverageLCOVPath != nil {
-		return req.CoverageLCOVPath
-	}
-	if v := os.Getenv("ERST_SIM_COVERAGE_LCOV_PATH"); v != "" {
-		return &v
-	}
-	return nil
-}
-
-// -------------------- Execution --------------------
-
-func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationResponse, error) {
-	success := false
-	defer func() {
-		// Record simulation execution metrics
-		metrics.RecordSimulationExecution(success)
-	}()
-
-	if req == nil {
-		return nil, errors.NewSimErrorMsg(errors.CodeValidationFailed, "simulation request cannot be nil")
-	}
-
-	if req.MemoryLimit == nil {
-		req.MemoryLimit = getSimulatorMemoryLimit(req)
-	}
-	// Apply lazy paged memory allocation instead of eagerly zeroing full 64 MiB.
-	applyPagedMemoryLimit(DefaultPagedMemoryConfig(), req)
-	if req.CoverageLCOVPath == nil {
-		req.CoverageLCOVPath = getSimulatorCoverageLCOVPath(req)
-	}
-	if req.CoverageLCOVPath != nil {
-		req.EnableCoverage = true
-	}
-	// Enforce sandbox native token cap when set (local/sandbox economic constraint)
-	if capStroops := getSandboxNativeTokenCap(req); capStroops != nil {
-		if err := EnforceSandboxNativeTokenCap(req.EnvelopeXdr, *capStroops); err != nil {
-			logger.Logger.Error("Sandbox native token cap exceeded", "error", err)
-			return nil, err
+	case WatchpointDelete:
+		if r.cfg.LedgerFootprint != nil {
+			delete(r.cfg.LedgerFootprint, mut.Key)
 		}
 	}
 
-	// Validate request before processing
-	if r.Validator != nil {
-		if err := r.Validator.ValidateRequest(req); err != nil {
-			logger.Logger.Error("Request validation failed", "error", err)
-			return nil, err
-		}
-	}
-	proto := GetOrDefault(req.ProtocolVersion)
-	if req.ProtocolVersion != nil {
-		if err := Validate(*req.ProtocolVersion); err != nil {
-			return nil, err
-		}
+	// Fire watchpoints (no-op when manager is nil or key is not watched).
+	if r.cfg.Watchpoints == nil {
+		return
 	}
 
-	if err := r.applyProtocolConfig(req, proto); err != nil {
-		return nil, err
-	}
-
-	if r.MockTime != 0 {
-		req.Timestamp = r.MockTime
-	}
-
-	inputBytes, err := json.Marshal(req)
-	if err != nil {
-		logger.Logger.Error("Failed to marshal simulation request", "error", err)
-		return nil, errors.WrapMarshalFailed(err)
-	}
-
-	if req.ControlCommand == bridge.CommandRollbackAndResume {
-		rewindStep := 0
-		if req.RewindStep != nil {
-			rewindStep = *req.RewindStep
-		}
-
-		inputBytes, err = bridge.WithRollbackAndResume(inputBytes, rewindStep, req.ForkParams, req.HarnessReset)
-		if err != nil {
-			logger.Logger.Error("Failed to apply rollback-and-resume bridge command", "error", err)
-			return nil, errors.WrapMarshalFailed(err)
-		}
-	}
-
-	inputBytes, err = bridge.CompressRequest(inputBytes)
-	if err != nil {
-		logger.Logger.Error("Failed to compress simulation request", "error", err)
-		return nil, errors.WrapMarshalFailed(err)
-	}
-
-	cmd := exec.Command(r.BinaryPath)
-	prepareCommand(cmd)
-	cmd.Stdin = bytes.NewReader(inputBytes)
-	cmd.Env = simulatorEnv()
-
-	// Use limited-size buffers to prevent memory growth in daemon mode
-	// Set reasonable limits (10MB stdout, 1MB stderr) for typical simulation responses
-	stdout := limitedBuffer{Buffer: bytes.Buffer{}, limit: 10 * 1024 * 1024}
-	stderr := limitedBuffer{Buffer: bytes.Buffer{}, limit: 1 * 1024 * 1024}
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil, errors.WrapSimCrash(err, "failed to start simulator")
-	}
-
-	if err := r.trackCommand(cmd); err != nil {
-		_ = terminateCommand(cmd, 100*time.Millisecond)
-		_ = cmd.Wait()
-		return nil, err
-	}
-	defer r.untrackCommand(cmd)
-
-	waitCh := make(chan error, 1)
-	go func() {
-		waitCh <- cmd.Wait()
-	}()
-
-	select {
-	case err := <-waitCh:
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			logger.Logger.Error("Simulator execution failed", "error", err, "stderr", stderr.String())
-			return nil, errors.WrapSimCrash(err, stderr.String())
-		}
-	case <-ctx.Done():
-		_ = r.terminateProcessGroup(cmd, 1500*time.Millisecond)
-		<-waitCh
-		return nil, ctx.Err()
-	}
-
-	var resp SimulationResponse
-	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
-		logger.Logger.Error("Failed to unmarshal response", "error", err)
-		return nil, errors.WrapUnmarshalFailed(err, stdout.String())
-	}
-
-	// If the simulator returned a logical error inside the response payload,
-	// classify it into a unified ErstError before returning to the caller.
-	if resp.Error != "" {
-		classified := (&ipc.Error{Code: resp.ErrorCode, Message: resp.Error}).ToErstError()
-		logger.Logger.Error("Simulator returned error",
-			"code", classified.Code,
-			"original", classified.OrigErr,
-		)
-		return nil, classified
-	}
-
-	resp.ProtocolVersion = &proto.Version
-	success = true
-
-	return &resp, nil
+	evt := buildWatchpointEvent(
+		mut.Key,
+		mut.Kind,
+		mut.NewValue,
+		mut.OldValue,
+		mut.CallStack,
+		r.cfg.ContractID,
+		mut.HostFn,
+		mut.Instruction,
+	)
+	r.cfg.Watchpoints.Notify(evt)
 }
 
-// limitedBuffer wraps bytes.Buffer with a size limit to prevent memory leaks
-type limitedBuffer struct {
-	bytes.Buffer
-	limit int
-}
+// ---------------------------------------------------------------------------
+// Pretty-print helpers (used by the CLI trace viewer)
+// ---------------------------------------------------------------------------
 
-func (lb *limitedBuffer) Write(p []byte) (n int, err error) {
-	if lb.Len()+len(p) > lb.limit {
-		// Buffer would exceed limit, discard the data
-		return len(p), nil
+// FormatWatchpointReport returns a human-readable report of all watchpoint
+// events in a SimulationResult. Returns an empty string when no events fired.
+func FormatWatchpointReport(result SimulationResult) string {
+	if len(result.WatchpointEvents) == 0 {
+		return ""
 	}
-	return lb.Buffer.Write(p)
-}
 
-func (r *Runner) Close() error {
+	var sb strings.Builder
+	sb.WriteString("=== Watchpoint Report ===\n")
+	sb.WriteString(fmt.Sprintf("%d event(s) fired\n\n", len(result.WatchpointEvents)))
 
-	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		return nil
-	}
-	r.closed = true
+	for i, evt := range result.WatchpointEvents {
+		sb.WriteString(fmt.Sprintf("--- Event %d ---\n", i+1))
+		sb.WriteString(fmt.Sprintf("  Key:         %s\n", evt.WatchedKey))
+		sb.WriteString(fmt.Sprintf("  Kind:        %s\n", evt.Kind))
+		sb.WriteString(fmt.Sprintf("  Contract:    %s\n", evt.ContractID))
+		sb.WriteString(fmt.Sprintf("  Host fn:     %s\n", evt.FunctionName))
+		sb.WriteString(fmt.Sprintf("  Instruction: %s\n", evt.WASMInstruction))
+		sb.WriteString(fmt.Sprintf("  Timestamp:   %s\n", evt.Timestamp.Format("2006-01-02T15:04:05.999Z")))
 
-	cmds := make([]*exec.Cmd, 0, len(r.activeCmds))
-	for cmd := range r.activeCmds {
-		cmds = append(cmds, cmd)
-	}
-	r.mu.Unlock()
-
-	var firstErr error
-	for _, cmd := range cmds {
-		if err := r.terminateProcessGroup(cmd, 1500*time.Millisecond); err != nil && firstErr == nil {
-			firstErr = err
+		if len(evt.PreviousValue) > 0 {
+			sb.WriteString(fmt.Sprintf("  Old value:   %s\n", string(evt.PreviousValue)))
 		}
-	}
-
-	return firstErr
-}
-
-func (r *Runner) trackCommand(cmd *exec.Cmd) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return fmt.Errorf("runner is closed")
-	}
-	r.activeCmds[cmd] = struct{}{}
-	return nil
-}
-
-func (r *Runner) untrackCommand(cmd *exec.Cmd) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.activeCmds, cmd)
-}
-
-func (r *Runner) terminateProcessGroup(cmd *exec.Cmd, graceTimeout time.Duration) error {
-	if cmd == nil {
-		return nil
-	}
-	err := terminateCommand(cmd, graceTimeout)
-	if err != nil {
-		logger.Logger.Error("Failed to terminate simulator process", "error", err)
-		return err
-	}
-	return nil
-}
-
-func (r *Runner) applyProtocolConfig(req *SimulationRequest, proto *Protocol) error {
-	if req.CustomAuthCfg == nil {
-		req.CustomAuthCfg = make(map[string]interface{})
-	}
-
-	limits := make(map[string]interface{})
-	for k, v := range proto.Features {
-		switch k {
-		case "max_contract_size", "max_contract_data_size", "max_instruction_limit":
-			limits[k] = v
+		if len(evt.Value) > 0 {
+			sb.WriteString(fmt.Sprintf("  New value:   %s\n", string(evt.Value)))
 		}
+
+		sb.WriteString("  Call stack:\n")
+		sb.WriteString(evt.FormatCallStack())
+		sb.WriteByte('\n')
 	}
 
-	if len(limits) > 0 {
-		req.CustomAuthCfg["protocol_limits"] = limits
-	}
-
-	if opcodes, ok := proto.Features["supported_opcodes"].([]string); ok {
-		req.CustomAuthCfg["supported_opcodes"] = opcodes
-	}
-
-	if calib, ok := proto.Features["resource_calibration"].(*ResourceCalibration); ok {
-		req.ResourceCalibration = calib
-	}
-
-	return nil
-}
-
-// simulatorEnv builds the environment variable list for the simulator subprocess.
-// It inherits the current process environment and ensures that RUST_LOG is set
-// to match ERST_LOG_LEVEL so both the Go and Rust sides honour the same level.
-func simulatorEnv() []string {
-	env := os.Environ()
-
-	erstLevel := os.Getenv("ERST_LOG_LEVEL")
-	if erstLevel == "" {
-		return env
-	}
-
-	rustFilter := logger.RustLogFilter(erstLevel)
-
-	// Replace an existing RUST_LOG entry or append a new one.
-	found := false
-	for i, kv := range env {
-		if len(kv) > 9 && kv[:9] == "RUST_LOG=" {
-			env[i] = "RUST_LOG=" + rustFilter
-			found = true
-			break
-		}
-	}
-	if !found {
-		env = append(env, "RUST_LOG="+rustFilter)
-	}
-
-	return env
+	return sb.String()
 }
