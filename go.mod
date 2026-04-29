@@ -14,6 +14,7 @@ require (
 	github.com/libp2p/go-libp2p v0.48.0
 	github.com/libp2p/go-libp2p-pubsub v0.16.0
 	github.com/mattn/go-isatty v0.0.21
+	github.com/miekg/pkcs11 v1.1.2
 	github.com/multiformats/go-multiaddr v0.16.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.10.2

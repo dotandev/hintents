@@ -5,6 +5,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -29,11 +30,12 @@ type Session struct {
 
 // Store handles database operations
 type Store struct {
-	db *sql.DB
+	db  *sql.DB
+	key []byte
 }
 
 // InitDB initializes the SQLite database
-func InitDB() (*Store, error) {
+func InitDB(key []byte) (*Store, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home dir: %w", err)
@@ -54,7 +56,7 @@ func InitDB() (*Store, error) {
 		return nil, err
 	}
 
-	return &Store{db: db}, nil
+	return &Store{db: db, key: key}, nil
 }
 
 func initSchema(db *sql.DB) error {
@@ -84,11 +86,24 @@ func (s *Store) SaveSession(session *Session) error {
 	eventsJSON, _ := json.Marshal(session.Events)
 	logsJSON, _ := json.Marshal(session.Logs)
 
+	encEvents, err := Encrypt(eventsJSON, s.key)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt events: %w", err)
+	}
+	encLogs, err := Encrypt(logsJSON, s.key)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt logs: %w", err)
+	}
+	encError, err := Encrypt([]byte(session.ErrorMsg), s.key)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt error message: %w", err)
+	}
+
 	query := `
 	INSERT INTO sessions (tx_hash, network, status, error_msg, events, logs, timestamp)
 	VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
-	_, err := s.db.Exec(query, session.TxHash, session.Network, session.Status, session.ErrorMsg, string(eventsJSON), string(logsJSON), time.Now())
+	_, err = s.db.Exec(query, session.TxHash, session.Network, session.Status, hex.EncodeToString(encError), hex.EncodeToString(encEvents), hex.EncodeToString(encLogs), time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to insert session: %w", err)
 	}
@@ -154,9 +169,27 @@ func (s *Store) SearchSessions(params SearchParams) ([]Session, error) {
 		}
 		sess.Timestamp = ts
 
-		// Deserialize JSON
-		_ = json.Unmarshal([]byte(eventsRaw), &sess.Events)
-		_ = json.Unmarshal([]byte(logsRaw), &sess.Logs)
+		if dec, err := hex.DecodeString(sess.ErrorMsg); err == nil {
+			if pt, err := Decrypt(dec, s.key); err == nil {
+				sess.ErrorMsg = string(pt)
+			}
+		}
+
+		eventsPlain := []byte(eventsRaw)
+		if dec, err := hex.DecodeString(eventsRaw); err == nil {
+			if pt, err := Decrypt(dec, s.key); err == nil {
+				eventsPlain = pt
+			}
+		}
+		_ = json.Unmarshal(eventsPlain, &sess.Events)
+
+		logsPlain := []byte(logsRaw)
+		if dec, err := hex.DecodeString(logsRaw); err == nil {
+			if pt, err := Decrypt(dec, s.key); err == nil {
+				logsPlain = pt
+			}
+		}
+		_ = json.Unmarshal(logsPlain, &sess.Logs)
 
 		// Filter
 		if errorRe != nil {
