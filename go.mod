@@ -5,6 +5,9 @@ go 1.25.0
 require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/cespare/xxhash/v2 v2.3.0
+	github.com/charmbracelet/bubbles v0.20.0
+	github.com/charmbracelet/bubbletea v1.3.4
+	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/fatih/color v1.19.0
 	github.com/getsentry/sentry-go v0.31.1
 	github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e
