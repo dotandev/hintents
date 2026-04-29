@@ -123,7 +123,7 @@ func (m model) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 
@@ -194,7 +194,7 @@ func (m *model) moveCursor(dir int) {
 	}
 }
 
-func (m model) renderTrace() string {
+func (m *model) renderTrace() string {
 	var s strings.Builder
 	for i, it := range m.items {
 		if !it.visible || it.filtered {
@@ -221,7 +221,7 @@ func (m model) renderTrace() string {
 	return s.String()
 }
 
-func (m model) renderDetails() string {
+func (m *model) renderDetails() string {
 	if m.cursor >= len(m.items) {
 		return ""
 	}
@@ -242,7 +242,7 @@ func (m model) renderDetails() string {
 	return s.String()
 }
 
-func (m model) View() string {
+func (m *model) View() string {
 	if !m.ready {
 		return "Initializing..."
 	}
