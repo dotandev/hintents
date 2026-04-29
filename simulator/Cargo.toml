@@ -3,6 +3,11 @@ name = "simulator"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "mock"
+path = "src/hsm/mock.rs"
+crate-type = ["cdylib"]
+
 [lints.rust]
 unused_variables = "warn"
 unused_imports = "warn"

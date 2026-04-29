@@ -8,6 +8,7 @@
 //! and PKCS#11 HSM signers.
 
 pub mod mock;
+pub mod mock_signer;
 pub mod pkcs11;
 pub mod software;
 
@@ -118,7 +119,7 @@ impl SignerFactory {
             }
             "mock" => {
                 let mock_config = config.mock.clone().unwrap_or_default();
-                let mock_hsm = mock::MockHsm::from_config(&mock_config)?;
+                let mock_hsm = mock_signer::MockHsm::from_config(&mock_config)?;
                 Ok(Box::new(mock_hsm))
             }
             other => Err(SignerError::Config(format!(
