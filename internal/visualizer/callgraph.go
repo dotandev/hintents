@@ -158,7 +158,7 @@ func GenerateCallGraphSVG(root *decoder.CallNode, maxDepth int) string {
 		<text x="12" y="60" class="node-metric" fill="var(--cpu)">CPU: %d</text>
 		<text x="100" y="60" class="node-metric" fill="var(--mem)">Mem: %s</text>
 		<text x="12" y="78" class="node-metric" fill="var(--text-mute)">Elapsed: %s</text>
-	</g>`, gasLevel(node.CPUInstructions), x, y, nodeWidth, nodeHeight, node.Function, contractShort, collapsedText, node.CPUInstructions, formatBytes(node.MemoryBytes), formatElapsedPerCall(node))
+	</g>`, GasLevel(node.CPUInstructions), x, y, nodeWidth, nodeHeight, node.Function, ShortenContractID(node.ContractID), collapsedText, node.CPUInstructions, FormatBytes(node.MemoryBytes), formatElapsedPerCall(node))
 	}
 
 	// Legend footer
@@ -179,7 +179,8 @@ func GenerateCallGraphSVG(root *decoder.CallNode, maxDepth int) string {
 	return sb.String()
 }
 
-func shortenContractID(id string) string {
+// ShortenContractID reduces a long contract ID to a readable format
+func ShortenContractID(id string) string {
 	if len(id) <= 12 {
 		return id
 	}
@@ -211,7 +212,8 @@ func formatElapsedPerCall(node *decoder.CallNode) string {
 	return "n/a"
 }
 
-func gasLevel(cpu uint64) string {
+// GasLevel returns a CSS class or status string based on CPU usage
+func GasLevel(cpu uint64) string {
 	switch {
 	case cpu > 1_000_000:
 		return "gas-high"
@@ -222,7 +224,8 @@ func gasLevel(cpu uint64) string {
 	}
 }
 
-func formatBytes(b uint64) string {
+// FormatBytes converts a byte count to a human-readable string
+func FormatBytes(b uint64) string {
 	if b < 1024 {
 		return fmt.Sprintf("%d B", b)
 	}
