@@ -141,7 +141,6 @@ func GenerateCallGraphSVG(root *decoder.CallNode, maxDepth int) string {
 	for node, pos := range positions {
 		x, y := pos[0], pos[1]
 
-		contractShort := shortenContractID(node.ContractID)
 
 		collapsedText := ""
 		if maxDepth > 0 && len(node.SubCalls) > 0 {

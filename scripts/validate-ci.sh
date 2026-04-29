@@ -6,7 +6,9 @@
 set -euo pipefail
 
 # Ensure we are in the project root
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# Using BASH_SOURCE[0] if available, otherwise $0
+SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
+SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" &>/dev/null && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." &>/dev/null && pwd)"
 cd "${REPO_ROOT}" || { echo "Failed to change directory to project root: ${REPO_ROOT}"; exit 1; }
 
@@ -32,7 +34,8 @@ fi
 # Validate go.mod version is represented in CI matrix (best-effort, non-fatal)
 GO_VERSION=$(grep "^go " go.mod | awk '{print $2}')
 if grep -q "go-version:" .github/workflows/ci.yml; then
-    if grep -q "go-version: \"${GO_VERSION}\"" .github/workflows/ci.yml; then
+    # Match version with or without quotes, and optionally within a YAML list [ ]
+    if grep -qE "go-version:.*[\"']?${GO_VERSION}[\"']?" .github/workflows/ci.yml; then
         echo " Go version ${GO_VERSION} is present in CI matrix"
     else
         echo " Warning: Go version mismatch between go.mod (${GO_VERSION}) and CI matrix"
