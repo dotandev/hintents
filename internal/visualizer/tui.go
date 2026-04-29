@@ -29,9 +29,6 @@ var (
 			Foreground(lipgloss.Color("#EE6FF8")).
 			Background(lipgloss.Color("#3E4452"))
 
-	metricStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#61AFEF"))
-
 	headerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#E5C07B")).
 			Bold(true).
@@ -57,8 +54,6 @@ type model struct {
 	filterInput    textinput.Model
 	filtering      bool
 	ready          bool
-	width          int
-	height         int
 }
 
 func NewTUI(root *decoder.CallNode) *model {
@@ -167,8 +162,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
 		if !m.ready {
 			m.traceViewport = viewport.New(msg.Width/2-2, msg.Height-8)
 			m.detailViewport = viewport.New(msg.Width/2-2, msg.Height-8)
