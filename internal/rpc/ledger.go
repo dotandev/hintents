@@ -89,6 +89,19 @@ func EncodeLedgerKey(key xdr.LedgerKey) (string, error) {
 	return base64.StdEncoding.EncodeToString(xdrBytes), nil
 }
 
+// EncodeLedgerKeys encodes a slice of LedgerKeys to base64 XDR.
+func EncodeLedgerKeys(keys []xdr.LedgerKey) ([]string, error) {
+	encoded := make([]string, 0, len(keys))
+	for _, key := range keys {
+		xdrKey, err := EncodeLedgerKey(key)
+		if err != nil {
+			return nil, err
+		}
+		encoded = append(encoded, xdrKey)
+	}
+	return encoded, nil
+}
+
 // EncodeLedgerEntry encodes a LedgerEntry to base64 XDR
 func EncodeLedgerEntry(entry xdr.LedgerEntry) (string, error) {
 	xdrBytes, err := entry.MarshalBinary()
