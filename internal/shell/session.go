@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/simulator"
 )
@@ -72,7 +73,7 @@ func (s *Session) Invoke(ctx context.Context, contractID, function string, args 
 	// Build transaction envelope for the invocation
 	envelopeXDR, err := s.buildInvocationEnvelope(contractID, function, args)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build envelope: %w", err)
+		return nil, errors.WrapValidationError(fmt.Sprintf("failed to build envelope: %v", err))
 	}
 
 	// Create simulation request
@@ -87,7 +88,7 @@ func (s *Session) Invoke(ctx context.Context, contractID, function string, args 
 	// Execute simulation
 	resp, err := s.runner.Run(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("simulation failed: %w", err)
+		return nil, errors.WrapSimulationFailed(err, "")
 	}
 
 	// Update ledger state based on simulation result
@@ -117,7 +118,7 @@ func (s *Session) buildInvocationEnvelope(contractID, function string, args []st
 	// 3. Setting contract ID, function name, and arguments
 	// 4. Encoding to base64 XDR
 
-	return "", fmt.Errorf("envelope building not yet implemented - requires stellar-sdk integration")
+	return "", errors.WrapValidationError("envelope building not yet implemented - requires stellar-sdk integration")
 }
 
 // updateLedgerState updates the session's ledger state based on simulation results
@@ -156,11 +157,11 @@ func (s *Session) SaveState(filename string) error {
 
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal state: %w", err)
+		return errors.WrapMarshalFailed(err)
 	}
 
 	if err := os.WriteFile(filename, data, 0644); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+		return errors.WrapValidationError(fmt.Sprintf("failed to write file: %v", err))
 	}
 
 	return nil
@@ -170,12 +171,12 @@ func (s *Session) SaveState(filename string) error {
 func (s *Session) LoadState(filename string) error {
 	data, err := os.ReadFile(filename)
 	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+		return errors.WrapValidationError(fmt.Sprintf("failed to read file: %v", err))
 	}
 
 	var state LedgerState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return fmt.Errorf("failed to unmarshal state: %w", err)
+		return errors.WrapUnmarshalFailed(err, "ledger state")
 	}
 
 	// Update session state
