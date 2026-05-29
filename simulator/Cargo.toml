@@ -21,7 +21,7 @@ nursery = "warn"
 # HostedContractEvent.failed_call field that this simulator relies on.
 # We accept any release in the 21-25 range so the binary stays compatible
 # with both mainnet protocol 21 and subsequent minor protocol bumps.
-soroban-env-host = { version = ">=21.0, <26" } # Updated to latest version
+soroban-env-host = { version = ">=21.0, <26", features = ["testutils"] } # Updated to latest version
 base64 = "0.21"
 clap = { version = "4.4", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }

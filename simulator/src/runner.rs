@@ -57,6 +57,18 @@ impl SimHost {
         host.set_diagnostic_level(DiagnosticLevel::Debug)
             .expect("failed to set diagnostic level");
 
+        // Hook memory_limit into the Budget tracking mechanism via reset_limits()
+        if let Some(mem_limit) = memory_limit {
+            // Get the current CPU limit to preserve it
+            let cpu_limit = host.budget_cloned()
+                .get_cpu_insns_remaining()
+                .unwrap_or(100_000_000);
+            // Reset both CPU and memory limits to enforce memory_limit during execution
+            if let Err(e) = host.budget_ref().reset_limits(cpu_limit, mem_limit) {
+                eprintln!("Warning: Failed to set memory limit: {:?}", e);
+            }
+        }
+
         Self {
             inner: host,
             ledger_snapshot: LedgerSnapshot::new(),
@@ -78,6 +90,18 @@ impl SimHost {
         let storage = Self::storage_from_snapshot(snapshot, &budget)?;
         let host = Host::with_storage_and_budget(storage, budget);
         host.set_diagnostic_level(DiagnosticLevel::Debug)?;
+
+        // Hook memory_limit into the Budget tracking mechanism via reset_limits()
+        if let Some(mem_limit) = memory_limit {
+            // Get the current CPU limit to preserve it
+            let cpu_limit = host.budget_cloned()
+                .get_cpu_insns_remaining()
+                .unwrap_or(100_000_000);
+            // Reset both CPU and memory limits to enforce memory_limit during execution
+            if let Err(e) = host.budget_ref().reset_limits(cpu_limit, mem_limit) {
+                eprintln!("Warning: Failed to set memory limit: {:?}", e);
+            }
+        }
 
         Ok(Self {
             inner: host,
