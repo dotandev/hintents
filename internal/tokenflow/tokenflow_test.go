@@ -4,9 +4,11 @@
 package tokenflow
 
 import (
+	"context"
 	"encoding/base64"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -14,6 +16,8 @@ import (
 )
 
 func TestBuildReport_SACTransferAndMint_FromResultMeta(t *testing.T) {
+	defer withTestTimeout(t, 5*time.Second)()
+
 	contract := bytes32(0xAA)
 	cid := xdr.ContractId(contract)
 	contractStr, err := strkey.Encode(strkey.VersionByteContract, cid[:])
@@ -65,6 +69,8 @@ func TestBuildReport_SACTransferAndMint_FromResultMeta(t *testing.T) {
 }
 
 func TestBuildReport_NativeXLMPayment_FromEnvelope(t *testing.T) {
+	defer withTestTimeout(t, 5*time.Second)()
+
 	src := bytes32(0x10)
 	dst := bytes32(0x20)
 
@@ -80,6 +86,20 @@ func TestBuildReport_NativeXLMPayment_FromEnvelope(t *testing.T) {
 	require.Equal(t, addrMuxed(src), tr.From)
 	require.Equal(t, addrMuxed(dst), tr.To)
 	require.Equal(t, big.NewInt(12_345_678), tr.Amount)
+}
+
+func withTestTimeout(t *testing.T, d time.Duration) func() {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	go func() {
+		<-ctx.Done()
+		if ctx.Err() == context.DeadlineExceeded {
+			t.Fatal("test timed out")
+		}
+	}()
+
+	return cancel
 }
 
 func encodeResultMetaWithDiagnosticEvents(t *testing.T, events []xdr.DiagnosticEvent) string {
