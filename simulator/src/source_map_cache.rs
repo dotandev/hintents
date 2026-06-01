@@ -17,10 +17,126 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread::{self, JoinHandle};
 
 /// Monotonically increasing counter used to generate unique temp-file names,
 /// preventing concurrent writes from clobbering each other's `.tmp` files.
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+struct PendingWrite {
+    write_id: u64,
+    entry: Arc<SourceMapCacheEntry>,
+}
+
+struct WriteRequest {
+    write_id: u64,
+    entry: Arc<SourceMapCacheEntry>,
+}
+
+enum WriteCommand {
+    Store(WriteRequest),
+    Flush(mpsc::Sender<Result<(), String>>),
+    Shutdown,
+}
+
+struct BackgroundWriter {
+    sender: mpsc::Sender<WriteCommand>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl BackgroundWriter {
+    fn new(
+        cache_dir: PathBuf,
+        max_cache_size: Arc<Mutex<Option<u64>>>,
+        pending_writes: Arc<Mutex<HashMap<String, PendingWrite>>>,
+    ) -> Self {
+        let (sender, receiver) = mpsc::channel();
+        let handle = thread::Builder::new()
+            .name("source-map-cache-writer".to_string())
+            .spawn(move || {
+                while let Ok(command) = receiver.recv() {
+                    match command {
+                        WriteCommand::Store(request) => {
+                            let wasm_hash = request.entry.wasm_hash.clone();
+                            let write_result = SourceMapCache::write_entry_to_disk(
+                                &cache_dir,
+                                request.entry.as_ref(),
+                            );
+
+                            match write_result {
+                                Ok(()) => {
+                                    println!("Cached source map for WASM: {}", &wasm_hash[..8]);
+                                    let max_size = max_cache_size
+                                        .lock()
+                                        .ok()
+                                        .and_then(|max_cache_size| *max_cache_size);
+                                    if let Some(max_size) = max_size {
+                                        if let Err(e) =
+                                            SourceMapCache::evict_if_needed_in_dir(&cache_dir, max_size)
+                                        {
+                                            eprintln!("Failed to evict cache entries: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "Failed to persist source map cache for WASM {}: {}",
+                                        &wasm_hash[..8],
+                                        e
+                                    );
+                                }
+                            }
+
+                            if let Ok(mut pending) = pending_writes.lock() {
+                                let should_remove = pending
+                                    .get(&wasm_hash)
+                                    .is_some_and(|pending| pending.write_id == request.write_id);
+                                if should_remove {
+                                    pending.remove(&wasm_hash);
+                                }
+                            }
+                        }
+                        WriteCommand::Flush(done) => {
+                            let _ = done.send(Ok(()));
+                        }
+                        WriteCommand::Shutdown => break,
+                    }
+                }
+            })
+            .expect("failed to spawn source map cache writer thread");
+
+        Self {
+            sender,
+            handle: Some(handle),
+        }
+    }
+
+    fn enqueue(&self, request: WriteRequest) -> Result<(), String> {
+        self.sender
+            .send(WriteCommand::Store(request))
+            .map_err(|e| format!("Failed to queue cache write: {}", e))
+    }
+
+    fn flush(&self) -> Result<(), String> {
+        let (done_tx, done_rx) = mpsc::channel();
+        self.sender
+            .send(WriteCommand::Flush(done_tx))
+            .map_err(|e| format!("Failed to queue cache flush: {}", e))?;
+        done_rx
+            .recv()
+            .map_err(|e| format!("Failed to wait for cache flush: {}", e))?
+    }
+}
+
+impl Drop for BackgroundWriter {
+    fn drop(&mut self) {
+        let _ = self.sender.send(WriteCommand::Shutdown);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
 
 // Inline OS-level advisory file locking using libc, which is a transitive
 // dependency of soroban-env-host. This avoids adding a new crate while still
@@ -97,27 +213,24 @@ pub struct SourceMapCacheEntry {
 /// Source map cache manager
 pub struct SourceMapCache {
     cache_dir: PathBuf,
-    max_cache_size: Option<u64>,
+    max_cache_size: Arc<Mutex<Option<u64>>>,
+    pending_writes: Arc<Mutex<HashMap<String, PendingWrite>>>,
+    next_write_id: AtomicU64,
+    writer: BackgroundWriter,
 }
 
 impl SourceMapCache {
     /// Creates a new SourceMapCache with the default cache directory
     pub fn new() -> Result<Self, String> {
         let cache_dir = Self::get_default_cache_dir()?;
-        Ok(Self {
-            cache_dir,
-            max_cache_size: None,
-        })
+        Self::build(cache_dir, None)
     }
 
     /// Creates a new SourceMapCache with a custom cache directory
     pub fn with_cache_dir(cache_dir: PathBuf) -> Result<Self, String> {
         fs::create_dir_all(&cache_dir)
             .map_err(|e| format!("Failed to create cache directory: {}", e))?;
-        Ok(Self {
-            cache_dir,
-            max_cache_size: None,
-        })
+        Self::build(cache_dir, None)
     }
 
     /// Creates a new SourceMapCache with a custom cache directory and max cache size
@@ -127,16 +240,36 @@ impl SourceMapCache {
     ) -> Result<Self, String> {
         fs::create_dir_all(&cache_dir)
             .map_err(|e| format!("Failed to create cache directory: {}", e))?;
-        Ok(Self {
-            cache_dir,
-            max_cache_size: Some(max_cache_size),
-        })
+        Self::build(cache_dir, Some(max_cache_size))
     }
 
     /// Sets the max cache size for this cache instance
-    pub fn with_max_cache_size(mut self, max_size: u64) -> Self {
-        self.max_cache_size = Some(max_size);
+    pub fn with_max_cache_size(self, max_size: u64) -> Self {
+        if let Ok(mut cache_size) = self.max_cache_size.lock() {
+            *cache_size = Some(max_size);
+        }
         self
+    }
+
+    fn build(cache_dir: PathBuf, max_cache_size: Option<u64>) -> Result<Self, String> {
+        fs::create_dir_all(&cache_dir)
+            .map_err(|e| format!("Failed to create cache directory: {}", e))?;
+
+        let max_cache_size = Arc::new(Mutex::new(max_cache_size));
+        let pending_writes = Arc::new(Mutex::new(HashMap::new()));
+        let writer = BackgroundWriter::new(
+            cache_dir.clone(),
+            Arc::clone(&max_cache_size),
+            Arc::clone(&pending_writes),
+        );
+
+        Ok(Self {
+            cache_dir,
+            max_cache_size,
+            pending_writes,
+            next_write_id: AtomicU64::new(0),
+            writer,
+        })
     }
 
     /// Gets the default cache directory (~/.erst/cache/sourcemaps)
@@ -189,6 +322,16 @@ impl SourceMapCache {
         if no_cache {
             println!("Cache bypassed via --no-cache flag. Re-parsing WASM symbols.");
             return None;
+        }
+
+        if let Ok(pending) = self.pending_writes.lock() {
+            if let Some(entry) = pending.get(wasm_hash) {
+                println!(
+                    "Cache hit! Loading source map from pending cache for WASM: {}",
+                    &wasm_hash[..8]
+                );
+                return Some(entry.entry.as_ref().clone());
+            }
         }
 
         let cache_path = self.get_cache_path(wasm_hash);
@@ -247,68 +390,31 @@ impl SourceMapCache {
     }
 
     /// Stores a source map entry in the cache.
-    /// Uses an exclusive OS-level file lock and atomic write (temp file + rename)
-    /// to prevent data corruption when multiple processes write concurrently.
+    /// Disk persistence is handed off to a background thread so the simulator
+    /// thread is not blocked on filesystem I/O.
     pub fn store(&self, entry: SourceMapCacheEntry) -> Result<(), String> {
-        // Ensure cache directory exists.
-        // On Windows, concurrent calls to create_dir_all can race and return
-        // AlreadyExists (os error 183) even though the directory now exists —
-        // treat that as success.
-        match fs::create_dir_all(&self.cache_dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(format!("Failed to create cache directory: {}", e)),
+        let entry = Arc::new(entry);
+        let write_id = self.next_write_id.fetch_add(1, Ordering::Relaxed);
+
+        {
+            let mut pending = self
+                .pending_writes
+                .lock()
+                .map_err(|_| "Failed to lock pending cache writes".to_string())?;
+            pending.insert(
+                entry.wasm_hash.clone(),
+                PendingWrite {
+                    write_id,
+                    entry: Arc::clone(&entry),
+                },
+            );
         }
 
-        let cache_path = self.get_cache_path(&entry.wasm_hash);
-
-        // Acquire an exclusive OS-level lock before writing.
-        let lock_file = Self::open_lock_file(&cache_path)
-            .map_err(|e| format!("Failed to open lock file {:?}: {}", cache_path, e))?;
-        flock::lock_exclusive(&lock_file).map_err(|e| {
-            format!(
-                "Failed to acquire exclusive lock on {:?}: {}",
-                cache_path, e
-            )
-        })?;
-
-        // Serialize the entry
-        let bytes = bincode::serialize(&entry)
-            .map_err(|e| format!("Failed to serialize cache entry: {}", e))?;
-
-        // Write atomically: write to a unique tmp file then rename to avoid
-        // readers observing a partially-written file and to prevent concurrent
-        // writers from clobbering each other's tmp file (critical on Windows
-        // where flock is a no-op).
-        let tmp_id = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let tmp_path = self
-            .cache_dir
-            .join(format!("{}.{}.tmp", entry.wasm_hash, tmp_id));
-        let write_result = (|| {
-            let mut file = File::create(&tmp_path)
-                .map_err(|e| format!("Failed to create temp cache file {:?}: {}", tmp_path, e))?;
-            file.write_all(&bytes)
-                .map_err(|e| format!("Failed to write temp cache file {:?}: {}", tmp_path, e))?;
-            fs::rename(&tmp_path, &cache_path).map_err(|e| {
-                format!(
-                    "Failed to rename temp cache file {:?} to {:?}: {}",
-                    tmp_path, cache_path, e
-                )
-            })?;
-            Ok::<(), String>(())
-        })();
-
-        // Clean up tmp file on failure.
-        if write_result.is_err() {
-            let _ = fs::remove_file(&tmp_path);
-        }
-
-        write_result?;
-
-        println!("Cached source map for WASM: {}", &entry.wasm_hash[..8]);
-
-        if let Some(max_size) = self.max_cache_size {
-            self.evict_if_needed(max_size)?;
+        if let Err(e) = self.writer.enqueue(WriteRequest { write_id, entry }) {
+            if let Ok(mut pending) = self.pending_writes.lock() {
+                pending.retain(|_, pending_entry| pending_entry.write_id != write_id);
+            }
+            return Err(e);
         }
 
         Ok(())
@@ -316,12 +422,16 @@ impl SourceMapCache {
 
     /// Evicts oldest cache entries if current size exceeds max_size
     fn evict_if_needed(&self, max_size: u64) -> Result<(), String> {
-        let current_size = self.get_cache_size()?;
+        Self::evict_if_needed_in_dir(&self.cache_dir, max_size)
+    }
+
+    fn evict_if_needed_in_dir(cache_dir: &Path, max_size: u64) -> Result<(), String> {
+        let current_size = Self::get_cache_size_in_dir(cache_dir)?;
         if current_size <= max_size {
             return Ok(());
         }
 
-        let entries = self.list_cached()?;
+        let entries = Self::list_cached_in_dir(cache_dir)?;
         if entries.is_empty() {
             return Ok(());
         }
@@ -337,7 +447,7 @@ impl SourceMapCache {
                 break;
             }
 
-            let cache_path = self.cache_dir.join(format!("{}.bin", entry.wasm_hash));
+            let cache_path = cache_dir.join(format!("{}.bin", entry.wasm_hash));
             let lock_path = SourceMapCache::get_lock_path(&cache_path);
 
             if cache_path.exists() {
@@ -361,6 +471,8 @@ impl SourceMapCache {
 
     /// Clears all cached source maps
     pub fn clear(&self) -> Result<usize, String> {
+        self.flush_pending_writes()?;
+
         if !self.cache_dir.exists() {
             return Ok(0);
         }
@@ -385,12 +497,17 @@ impl SourceMapCache {
     /// Returns the current cache size in bytes
     #[allow(dead_code)]
     pub fn get_cache_size(&self) -> Result<u64, String> {
-        if !self.cache_dir.exists() {
+        self.flush_pending_writes()?;
+        Self::get_cache_size_in_dir(&self.cache_dir)
+    }
+
+    fn get_cache_size_in_dir(cache_dir: &Path) -> Result<u64, String> {
+        if !cache_dir.exists() {
             return Ok(0);
         }
 
         let mut total_size = 0u64;
-        for entry in fs::read_dir(&self.cache_dir)
+        for entry in fs::read_dir(cache_dir)
             .map_err(|e| format!("Failed to read cache directory: {}", e))?
         {
             let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
@@ -408,12 +525,17 @@ impl SourceMapCache {
 
     /// Lists all cached entries (without loading full mappings)
     pub fn list_cached(&self) -> Result<Vec<CachedEntryInfo>, String> {
-        if !self.cache_dir.exists() {
+        self.flush_pending_writes()?;
+        Self::list_cached_in_dir(&self.cache_dir)
+    }
+
+    fn list_cached_in_dir(cache_dir: &Path) -> Result<Vec<CachedEntryInfo>, String> {
+        if !cache_dir.exists() {
             return Ok(Vec::new());
         }
 
         let mut entries = Vec::new();
-        for entry in fs::read_dir(&self.cache_dir)
+        for entry in fs::read_dir(cache_dir)
             .map_err(|e| format!("Failed to read cache directory: {}", e))?
         {
             let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
@@ -448,11 +570,76 @@ impl SourceMapCache {
     pub fn get_cache_dir(&self) -> &Path {
         &self.cache_dir
     }
+
+    fn flush_pending_writes(&self) -> Result<(), String> {
+        self.writer.flush()
+    }
+
+    fn write_entry_to_disk(cache_dir: &Path, entry: &SourceMapCacheEntry) -> Result<(), String> {
+        // Ensure cache directory exists.
+        // On Windows, concurrent calls to create_dir_all can race and return
+        // AlreadyExists (os error 183) even though the directory now exists —
+        // treat that as success.
+        match fs::create_dir_all(cache_dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("Failed to create cache directory: {}", e)),
+        }
+
+        let cache_path = cache_dir.join(format!("{}.bin", entry.wasm_hash));
+
+        // Acquire an exclusive OS-level lock before writing.
+        let lock_file = Self::open_lock_file(&cache_path)
+            .map_err(|e| format!("Failed to open lock file {:?}: {}", cache_path, e))?;
+        flock::lock_exclusive(&lock_file).map_err(|e| {
+            format!(
+                "Failed to acquire exclusive lock on {:?}: {}",
+                cache_path, e
+            )
+        })?;
+
+        let bytes = bincode::serialize(entry)
+            .map_err(|e| format!("Failed to serialize cache entry: {}", e))?;
+
+        // Write atomically: write to a unique tmp file then rename to avoid
+        // readers observing a partially-written file and to prevent concurrent
+        // writers from clobbering each other's tmp file (critical on Windows
+        // where flock is a no-op).
+        let tmp_id = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tmp_path = cache_dir.join(format!("{}.{}.tmp", entry.wasm_hash, tmp_id));
+        let write_result = (|| {
+            let mut file = File::create(&tmp_path)
+                .map_err(|e| format!("Failed to create temp cache file {:?}: {}", tmp_path, e))?;
+            file.write_all(&bytes)
+                .map_err(|e| format!("Failed to write temp cache file {:?}: {}", tmp_path, e))?;
+            fs::rename(&tmp_path, &cache_path).map_err(|e| {
+                format!(
+                    "Failed to rename temp cache file {:?} to {:?}: {}",
+                    tmp_path, cache_path, e
+                )
+            })?;
+            Ok::<(), String>(())
+        })();
+
+        let _ = flock::unlock(&lock_file);
+
+        if write_result.is_err() {
+            let _ = fs::remove_file(&tmp_path);
+        }
+
+        write_result
+    }
 }
 
 impl Default for SourceMapCache {
     fn default() -> Self {
         Self::new().expect("Failed to create default source map cache")
+    }
+}
+
+impl Drop for SourceMapCache {
+    fn drop(&mut self) {
+        let _ = self.writer.flush();
     }
 }
 
@@ -530,6 +717,7 @@ mod tests {
         assert_eq!(retrieved.wasm_hash, wasm_hash);
         assert!(retrieved.has_symbols);
         assert_eq!(retrieved.mappings.len(), 1);
+        assert_eq!(cache.list_cached().unwrap().len(), 1);
     }
 
     #[test]
@@ -564,6 +752,7 @@ mod tests {
         // With no_cache=true, it should return None even though cache exists
         let result = cache.get(&wasm_hash, true);
         assert!(result.is_none());
+        assert_eq!(cache.list_cached().unwrap().len(), 1);
     }
 
     #[test]
