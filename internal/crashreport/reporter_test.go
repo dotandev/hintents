@@ -45,13 +45,13 @@ func setEnv(t *testing.T, key, value string) {
 // ---- IsEnabled --------------------------------------------------------------
 
 func TestIsEnabled_DisabledByDefault(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	require.NoError(t, os.Unsetenv(envOptIn))
 	r := New(Config{Enabled: false})
 	assert.False(t, r.IsEnabled())
 }
 
 func TestIsEnabled_EnabledViaConfig(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	require.NoError(t, os.Unsetenv(envOptIn))
 	r := New(Config{Enabled: true})
 	assert.True(t, r.IsEnabled())
 }
@@ -83,13 +83,13 @@ func TestIsEnabled_EnvVar0(t *testing.T) {
 // ---- New / config -----------------------------------------------------------
 
 func TestNew_DefaultEndpoint(t *testing.T) {
-	_ = os.Unsetenv(envEndpoint)
+	require.NoError(t, os.Unsetenv(envEndpoint))
 	r := New(Config{})
 	assert.Equal(t, DefaultEndpoint, r.cfg.Endpoint)
 }
 
 func TestNew_CustomEndpointFromConfig(t *testing.T) {
-	_ = os.Unsetenv(envEndpoint)
+	require.NoError(t, os.Unsetenv(envEndpoint))
 	r := New(Config{Endpoint: "https://example.com/crash"})
 	assert.Equal(t, "https://example.com/crash", r.cfg.Endpoint)
 }
@@ -103,7 +103,7 @@ func TestNew_EndpointEnvVarOverridesConfig(t *testing.T) {
 // ---- Send -------------------------------------------------------------------
 
 func TestSend_NoOpWhenDisabled(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	require.NoError(t, os.Unsetenv(envOptIn))
 	srv := newTestServer(t, http.StatusOK, func(r *http.Request, body Report) {
 		t.Fatal("server should not be called when crash reporting is disabled")
 	})
@@ -215,7 +215,7 @@ func TestSend_NilStackOmittedFromPayload(t *testing.T) {
 // ---- buildReport ------------------------------------------------------------
 
 func TestBuildReport_FieldsPopulated(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	require.NoError(t, os.Unsetenv(envOptIn))
 	reporter := New(Config{Version: "2.0.0", CommitSHA: "deadbeef"})
 	report := reporter.buildReport(errors.New("something failed"), []byte("stack"), "erst session list")
 
@@ -286,39 +286,28 @@ func TestHandlePanic_ReportsStringPanic(t *testing.T) {
 
 // ---- Sentry DSN / env-var wiring --------------------------------------------
 
-// TestNew_SentryDSNFromEnv verifies that ERST_SENTRY_DSN is picked up by New
-// and stored in the config (Sentry init will fail with a fake DSN, which is
-// acceptable — we only verify the field is set, not that the SDK initialised).
 func TestNew_SentryDSNFromEnv(t *testing.T) {
 	setEnv(t, envSentryDSN, "https://fakekey@o0.ingest.sentry.io/0")
-	// Endpoint must be empty in config so the env-var DSN is the only sink.
 	r := New(Config{Endpoint: "unused"})
 	assert.Equal(t, "https://fakekey@o0.ingest.sentry.io/0", r.cfg.SentryDSN)
 }
 
-// TestNew_SentryDSNFromConfig verifies that a DSN supplied directly via Config
-// is stored and does not fall back to DefaultEndpoint when it is the only sink.
 func TestNew_SentryDSNFromConfig(t *testing.T) {
-	_ = os.Unsetenv(envSentryDSN)
-	_ = os.Unsetenv(envEndpoint)
+	require.NoError(t, os.Unsetenv(envSentryDSN))
+	require.NoError(t, os.Unsetenv(envEndpoint))
 	r := New(Config{SentryDSN: "https://fakekey@o0.ingest.sentry.io/1"})
 	assert.Equal(t, "https://fakekey@o0.ingest.sentry.io/1", r.cfg.SentryDSN)
-	// Endpoint should remain empty — DSN is present, no fallback needed.
 	assert.Equal(t, "", r.cfg.Endpoint)
 }
 
-// TestNew_DefaultEndpointWhenNoSinks verifies that DefaultEndpoint is used
-// when neither SentryDSN nor Endpoint is configured.
 func TestNew_DefaultEndpointWhenNoSinks(t *testing.T) {
-	_ = os.Unsetenv(envSentryDSN)
-	_ = os.Unsetenv(envEndpoint)
+	require.NoError(t, os.Unsetenv(envSentryDSN))
+	require.NoError(t, os.Unsetenv(envEndpoint))
 	r := New(Config{})
 	assert.Equal(t, DefaultEndpoint, r.cfg.Endpoint)
 	assert.Equal(t, "", r.cfg.SentryDSN)
 }
 
-// TestSend_SentrySkippedWhenInactive verifies that a reporter with an invalid
-// DSN (sentryActive=false) still successfully delivers to the custom endpoint.
 func TestSend_SentrySkippedWhenInactive(t *testing.T) {
 	setEnv(t, envOptIn, "true")
 
@@ -328,7 +317,6 @@ func TestSend_SentrySkippedWhenInactive(t *testing.T) {
 	})
 	defer srv.Close()
 
-	// Use a bad DSN so sentryActive stays false, but provide a working endpoint.
 	r := New(Config{
 		Enabled:   true,
 		SentryDSN: "not-a-dsn",
@@ -341,14 +329,12 @@ func TestSend_SentrySkippedWhenInactive(t *testing.T) {
 	assert.True(t, received, "custom endpoint should have been called")
 }
 
-// TestIsEnabled_EnvVarYes verifies the "yes" token is accepted.
 func TestIsEnabled_EnvVarYes(t *testing.T) {
 	setEnv(t, envOptIn, "yes")
 	r := New(Config{Enabled: false})
 	assert.True(t, r.IsEnabled())
 }
 
-// TestIsEnabled_EnvVarNo verifies the "no" token is accepted.
 func TestIsEnabled_EnvVarNo(t *testing.T) {
 	setEnv(t, envOptIn, "no")
 	r := New(Config{Enabled: true})
@@ -360,7 +346,6 @@ func TestIsEnabled_EnvVarNo(t *testing.T) {
 func TestSend_TimeoutDoesNotHangCLI(t *testing.T) {
 	setEnv(t, envOptIn, "true")
 
-	// Server that stalls just long enough to trigger the client timeout, then exits.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
@@ -370,7 +355,6 @@ func TestSend_TimeoutDoesNotHangCLI(t *testing.T) {
 	defer srv.Close()
 
 	reporter := New(Config{Enabled: true, Endpoint: srv.URL})
-	// Use a very short client timeout so the test completes quickly.
 	reporter.client.Timeout = 50 * time.Millisecond
 
 	var buf bytes.Buffer
@@ -393,7 +377,6 @@ func TestSend_NetworkFailureDoesNotPanic(t *testing.T) {
 	var buf bytes.Buffer
 	reporter.stderr = &buf
 
-	// Must not panic.
 	require.NotPanics(t, func() {
 		_ = reporter.Send(context.Background(), errors.New("crash"), nil, "")
 	})
