@@ -147,11 +147,7 @@ func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 	req := &SimulationRequest{
 		EnvelopeXdr:   b.envelopeXdr,
 		ResultMetaXdr: b.resultMetaXdr,
-	}
-
-	// Only set ledger entries if there are any
-	if len(b.ledgerEntries) > 0 {
-		req.LedgerEntries = b.ledgerEntries
+		LedgerEntries: b.ledgerEntries,
 	}
 
 	// Only set restore preamble if present
