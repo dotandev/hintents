@@ -51,13 +51,9 @@ impl SimHost {
         }
 
         if let Some((cpu, mem)) = budget_limits {
-            eprintln!(
-                "WARNING: custom budget_limits (cpu={cpu}, mem={mem}) cannot be applied \
-                 with the current soroban_env_host version — no public API exists to \
-                 override the instruction and memory limits. The simulator is falling \
-                 back to default mainnet budget limits. Results may not reflect the \
-                 requested resource constraints."
-            );
+            budget
+                .reset_limits(cpu, mem)
+                .expect("failed to apply custom budget limits");
         }
 
         // Host::with_storage_and_budget is available in recent versions
@@ -83,17 +79,14 @@ impl SimHost {
         memory_limit: Option<u64>,
         snapshot: &LedgerSnapshot,
     ) -> Result<Self, SimHostError> {
+        let budget = Budget::default();
+
         if let Some((cpu, mem)) = budget_limits {
-            eprintln!(
-                "WARNING: custom budget_limits (cpu={cpu}, mem={mem}) cannot be applied \
-                 with the current soroban_env_host version — no public API exists to \
-                 override the instruction and memory limits. The simulator is falling \
-                 back to default mainnet budget limits. Results may not reflect the \
-                 requested resource constraints."
-            );
+            budget
+                .reset_limits(cpu, mem)
+                .expect("failed to apply custom budget limits");
         }
 
-        let budget = Budget::default();
         let storage = Self::storage_from_snapshot(snapshot, &budget)?;
         let host = Host::with_storage_and_budget(storage, budget);
         host.set_diagnostic_level(DiagnosticLevel::Debug)?;
@@ -232,29 +225,40 @@ mod tests {
     }
 
     #[test]
-    fn test_budget_limits_warns_and_falls_back_to_defaults() {
-        // Custom budget_limits cannot be applied through the public soroban_env_host API.
-        // SimHost must not panic and must still produce a working host that uses the
-        // default mainnet budget (the warning is emitted to stderr).
-        let host = SimHost::new(Some((100_000_000, 50_000_000)), None, None);
-        assert!(
-            host.inner.budget_cloned().get_cpu_insns_consumed().is_ok(),
-            "host should be functional when custom budget_limits are requested"
+    fn test_budget_limits_applied() {
+        let cpu_limit = 100_000_000u64;
+        let mem_limit = 50_000_000u64;
+        let host = SimHost::new(Some((cpu_limit, mem_limit)), None, None);
+        let budget = host.inner.budget_cloned();
+        assert_eq!(
+            budget.get_cpu_insns_remaining().expect("cpu remaining should be readable"),
+            cpu_limit,
+            "cpu limit should match the requested value"
         );
-        assert!(
-            host.inner.budget_cloned().get_mem_bytes_consumed().is_ok(),
-            "mem budget counter should be readable after fallback to defaults"
+        assert_eq!(
+            budget.get_mem_bytes_remaining().expect("mem remaining should be readable"),
+            mem_limit,
+            "mem limit should match the requested value"
         );
     }
 
     #[test]
-    fn test_from_snapshot_budget_limits_warns_and_falls_back_to_defaults() {
+    fn test_from_snapshot_budget_limits_applied() {
+        let cpu_limit = 200_000_000u64;
+        let mem_limit = 80_000_000u64;
         let snapshot = LedgerSnapshot::new();
-        let host = SimHost::from_snapshot(Some((200_000_000, 80_000_000)), None, None, &snapshot)
+        let host = SimHost::from_snapshot(Some((cpu_limit, mem_limit)), None, None, &snapshot)
             .expect("from_snapshot should succeed with custom budget_limits");
-        assert!(
-            host.inner.budget_cloned().get_cpu_insns_consumed().is_ok(),
-            "host from snapshot should be functional when custom budget_limits are requested"
+        let budget = host.inner.budget_cloned();
+        assert_eq!(
+            budget.get_cpu_insns_remaining().expect("cpu remaining should be readable"),
+            cpu_limit,
+            "cpu limit from snapshot should match the requested value"
+        );
+        assert_eq!(
+            budget.get_mem_bytes_remaining().expect("mem remaining should be readable"),
+            mem_limit,
+            "mem limit from snapshot should match the requested value"
         );
     }
 
