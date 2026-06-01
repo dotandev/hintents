@@ -1,7 +1,7 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -177,14 +177,28 @@ impl GitRepository {
     fn make_relative_path(&self, file_path: &str) -> Option<String> {
         let path = Path::new(file_path);
 
-        if path.is_absolute() {
-            path.strip_prefix(&self.root_path)
-                .ok()
-                .and_then(|p| p.to_str())
-                .map(|s| s.to_string())
+        let relative = if path.is_absolute() {
+            path.strip_prefix(&self.root_path).ok()?
         } else {
-            Some(file_path.to_string())
-        }
+            path
+        };
+
+        Some(Self::to_url_path(relative))
+    }
+
+    /// Render a relative path as a URL fragment using `/` separators.
+    ///
+    /// Iterating over [`Path::components`] keeps this correct on Windows,
+    /// where the native separator is `\`; only the normal path segments are
+    /// retained, so prefixes, root, and `.`/`..` components are dropped.
+    fn to_url_path(path: &Path) -> String {
+        path.components()
+            .filter_map(|component| match component {
+                Component::Normal(segment) => segment.to_str(),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("/")
     }
 }
 
