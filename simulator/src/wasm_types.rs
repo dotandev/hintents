@@ -155,7 +155,8 @@ impl FunctionSignature {
 /// Try to build a `FunctionSignature` from a wasmparser `CompositeInnerType`.
 ///
 /// Returns `Err(TypeConversionError::NotAFunctionType)` if the composite type is
-/// a struct or array (GC proposal) rather than a plain function type.
+/// a struct, array (GC proposal), or continuation type (stack-switching proposal)
+/// rather than a plain function type.
 impl TryFrom<&CompositeInnerType> for FunctionSignature {
     type Error = TypeConversionError;
 
@@ -179,10 +180,10 @@ impl TryFrom<&CompositeInnerType> for FunctionSignature {
                 Ok(FunctionSignature::new(params, results))
             }
 
-            // Struct and array types from the GC proposal are not function types.
-            CompositeInnerType::Array(_) | CompositeInnerType::Struct(_) => {
-                Err(TypeConversionError::NotAFunctionType)
-            }
+            // Struct, array, and continuation types are not function types.
+            CompositeInnerType::Array(_)
+            | CompositeInnerType::Struct(_)
+            | CompositeInnerType::Cont(_) => Err(TypeConversionError::NotAFunctionType),
         }
     }
 }
@@ -214,8 +215,9 @@ impl SignatureDiff {
 
 /// Parsed type section containing function signatures.
 ///
-/// Non-function composite types (structs, arrays from the GC proposal) are
-/// silently skipped during parsing; only function types are stored.
+/// Non-function composite types (structs, arrays from the GC proposal, continuations
+/// from the stack-switching proposal) are silently skipped during parsing; only
+/// function types are stored.
 #[derive(Debug, Clone)]
 pub struct TypeSection {
     types: Vec<FunctionSignature>,
@@ -232,7 +234,7 @@ impl TypeSection {
     }
 
     /// Like [`parse`](Self::parse), but returns an error instead of skipping
-    /// non-function composite types (structs/arrays).
+    /// non-function composite types (structs/arrays/continuations).
     pub fn parse_strict(wasm_bytes: &[u8]) -> Result<Self, ParseError> {
         Self::parse_inner(wasm_bytes, true)
     }
