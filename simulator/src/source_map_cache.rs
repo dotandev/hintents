@@ -72,9 +72,9 @@ impl BackgroundWriter {
                                         .ok()
                                         .and_then(|max_cache_size| *max_cache_size);
                                     if let Some(max_size) = max_size {
-                                        if let Err(e) =
-                                            SourceMapCache::evict_if_needed_in_dir(&cache_dir, max_size)
-                                        {
+                                        if let Err(e) = SourceMapCache::evict_if_needed_in_dir(
+                                            &cache_dir, max_size,
+                                        ) {
                                             eprintln!("Failed to evict cache entries: {}", e);
                                         }
                                     }
@@ -507,8 +507,8 @@ impl SourceMapCache {
         }
 
         let mut total_size = 0u64;
-        for entry in fs::read_dir(cache_dir)
-            .map_err(|e| format!("Failed to read cache directory: {}", e))?
+        for entry in
+            fs::read_dir(cache_dir).map_err(|e| format!("Failed to read cache directory: {}", e))?
         {
             let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
             let path = entry.path();
@@ -535,8 +535,8 @@ impl SourceMapCache {
         }
 
         let mut entries = Vec::new();
-        for entry in fs::read_dir(cache_dir)
-            .map_err(|e| format!("Failed to read cache directory: {}", e))?
+        for entry in
+            fs::read_dir(cache_dir).map_err(|e| format!("Failed to read cache directory: {}", e))?
         {
             let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
             let path = entry.path();
