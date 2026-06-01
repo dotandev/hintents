@@ -50,9 +50,14 @@ impl SimHost {
             );
         }
 
-        if let Some((_cpu, _mem)) = budget_limits {
-            // Budget customization requires testutils feature or extended API
-            // Using default mainnet budget settings
+        if let Some((cpu, mem)) = budget_limits {
+            eprintln!(
+                "WARNING: custom budget_limits (cpu={cpu}, mem={mem}) cannot be applied \
+                 with the current soroban_env_host version — no public API exists to \
+                 override the instruction and memory limits. The simulator is falling \
+                 back to default mainnet budget limits. Results may not reflect the \
+                 requested resource constraints."
+            );
         }
 
         // Host::with_storage_and_budget is available in recent versions
@@ -78,6 +83,16 @@ impl SimHost {
         memory_limit: Option<u64>,
         snapshot: &LedgerSnapshot,
     ) -> Result<Self, SimHostError> {
+        if let Some((cpu, mem)) = budget_limits {
+            eprintln!(
+                "WARNING: custom budget_limits (cpu={cpu}, mem={mem}) cannot be applied \
+                 with the current soroban_env_host version — no public API exists to \
+                 override the instruction and memory limits. The simulator is falling \
+                 back to default mainnet budget limits. Results may not reflect the \
+                 requested resource constraints."
+            );
+        }
+
         let budget = Budget::default();
         let storage = Self::storage_from_snapshot(snapshot, &budget)?;
         let host = Host::with_storage_and_budget(storage, budget);
@@ -214,6 +229,33 @@ mod tests {
         let host = SimHost::new(None, None, None);
         // Basic assertion that host is functional
         assert!(host.inner.budget_cloned().get_cpu_insns_consumed().is_ok());
+    }
+
+    #[test]
+    fn test_budget_limits_warns_and_falls_back_to_defaults() {
+        // Custom budget_limits cannot be applied through the public soroban_env_host API.
+        // SimHost must not panic and must still produce a working host that uses the
+        // default mainnet budget (the warning is emitted to stderr).
+        let host = SimHost::new(Some((100_000_000, 50_000_000)), None, None);
+        assert!(
+            host.inner.budget_cloned().get_cpu_insns_consumed().is_ok(),
+            "host should be functional when custom budget_limits are requested"
+        );
+        assert!(
+            host.inner.budget_cloned().get_mem_bytes_consumed().is_ok(),
+            "mem budget counter should be readable after fallback to defaults"
+        );
+    }
+
+    #[test]
+    fn test_from_snapshot_budget_limits_warns_and_falls_back_to_defaults() {
+        let snapshot = LedgerSnapshot::new();
+        let host = SimHost::from_snapshot(Some((200_000_000, 80_000_000)), None, None, &snapshot)
+            .expect("from_snapshot should succeed with custom budget_limits");
+        assert!(
+            host.inner.budget_cloned().get_cpu_insns_consumed().is_ok(),
+            "host from snapshot should be functional when custom budget_limits are requested"
+        );
     }
 
     #[test]
