@@ -85,7 +85,7 @@ impl SimHost {
 
         Ok(Self {
             inner: host,
-            ledger_snapshot: snapshot.clone(),
+            ledger_snapshot: snapshot.fork(),
             budget_limits,
             calibration,
             memory_limit,
@@ -107,7 +107,7 @@ impl SimHost {
 
     /// Captures the current host storage as a reusable ledger snapshot.
     pub fn capture_snapshot(&self) -> Result<LedgerSnapshot, SimHostError> {
-        Ok(self.ledger_snapshot.clone())
+        Ok(self.ledger_snapshot.fork())
     }
 
     /// Returns the host events that have been emitted so far.
@@ -130,7 +130,7 @@ impl SimHost {
             .to_xdr(Limits::none())
             .map_err(|e| SnapshotError::XdrEncoding(format!("Failed to encode key: {e}")))?;
         self.ledger_snapshot.insert(key_bytes, entry);
-        let snapshot = self.ledger_snapshot.clone();
+        let snapshot = self.ledger_snapshot.fork();
         self.restore_from_snapshot(&snapshot)
     }
 

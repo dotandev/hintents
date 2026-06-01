@@ -361,10 +361,8 @@ fn main() {
 
     let mut buffer = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut buffer) {
-        let _err_msg = format!("Failed to read stdin: {e}");
         let res = SimulationResponse {
             status: "error".to_string(),
-            //             error: Some(err_msg.clone()),
             error: Some(format!("Failed to read stdin: {e}")),
             error_code: None,
             lcov_report: None,
@@ -381,13 +379,13 @@ fn main() {
             wasm_offset: None,
             linear_memory_dump: None,
         };
+        tracing::error!("Failed to read stdin: {}", e);
         if let Ok(json) = serde_json::to_string(&res) {
             println!("{}", json);
         } else {
             eprintln!("Failed to serialize error response");
             println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
         }
-        eprintln!("Failed to read stdin: {e}");
         return;
     }
 
@@ -446,35 +444,35 @@ fn main() {
         }
     };
 
-    eprintln!(
-        "Debug: Received ResultMetaXdr len: {}",
-        request.result_meta_xdr.len()
-    );
-
-    if request.result_meta_xdr.is_empty() {
-        eprintln!("Warning: ResultMetaXdr is empty. Host storage may be incomplete.");
+    // Decode ResultMeta XDR
+    let _result_meta = if request.result_meta_xdr.is_empty() {
+        tracing::warn!("ResultMetaXdr is empty; host storage will be empty");
+        None
     } else {
         match base64::engine::general_purpose::STANDARD.decode(&request.result_meta_xdr) {
             Ok(bytes) => {
                 if bytes.is_empty() {
-                    eprintln!("Warning: ResultMetaXdr decoded to 0 bytes.");
+                    tracing::warn!("ResultMeta decoded to 0 bytes");
+                    None
                 } else {
                     match soroban_env_host::xdr::TransactionResultMeta::from_xdr(
                         &bytes,
                         soroban_env_host::xdr::Limits::none(),
                     ) {
-                        Ok(_) => {}
+                        Ok(meta) => Some(meta),
                         Err(e) => {
-                            eprintln!(
-                                "Warning: Failed to parse ResultMeta XDR: {}. Proceeding with empty storage.",
-                                e
-                            );
+                            tracing::warn!("Failed to parse ResultMeta XDR: {}", e);
+                            None
                         }
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Warning: Failed to decode ResultMeta Base64: {e}. Proceeding with empty storage.");
+                tracing::warn!(
+                    "Failed to decode ResultMeta base64, proceeding with empty storage: {}",
+                    e
+                );
+                None
             }
         }
     };
@@ -488,15 +486,15 @@ fn main() {
                 }
                 let mapper = SourceMapper::new_with_options(wasm_bytes, request.no_cache);
                 if mapper.has_debug_symbols() {
-                    eprintln!("Debug symbols found in WASM. SourceMapper initialized.");
+                    tracing::info!("Debug symbols found in WASM");
                     Some(mapper)
                 } else {
-                    eprintln!("No debug symbols found in WASM. SourceMapper not used.");
+                    tracing::info!("No debug symbols found in WASM");
                     None
                 }
             }
             Err(e) => {
-                eprintln!("Failed to decode WASM base64: {e}");
+                tracing::warn!("Failed to decode WASM base64: {}", e);
                 None
             }
         }
@@ -612,6 +610,7 @@ fn main() {
         if let Err(e) =
             inferno::flamegraph::from_reader(&mut options, folded_data.as_bytes(), &mut result_vec)
         {
+            tracing::warn!("Failed to generate flamegraph: {}", e);
             eprintln!("Failed to generate flamegraph: {e}");
         } else {
             flamegraph_svg = Some(String::from_utf8_lossy(&result_vec).to_string());

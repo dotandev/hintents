@@ -17,31 +17,25 @@ import (
 
 var (
 	encoder     *zstd.Encoder
+	encoderErr  error
 	decoder     *zstd.Decoder
+	decoderErr  error
 	encoderOnce sync.Once
 	decoderOnce sync.Once
 )
 
-func getEncoder() *zstd.Encoder {
+func getEncoder() (*zstd.Encoder, error) {
 	encoderOnce.Do(func() {
-		var err error
-		encoder, err = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
-		if err != nil {
-			panic(fmt.Sprintf("bridge: failed to create zstd encoder: %v", err))
-		}
+		encoder, encoderErr = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	})
-	return encoder
+	return encoder, encoderErr
 }
 
-func getDecoder() *zstd.Decoder {
+func getDecoder() (*zstd.Decoder, error) {
 	decoderOnce.Do(func() {
-		var err error
-		decoder, err = zstd.NewReader(nil)
-		if err != nil {
-			panic(fmt.Sprintf("bridge: failed to create zstd decoder: %v", err))
-		}
+		decoder, decoderErr = zstd.NewReader(nil)
 	})
-	return decoder
+	return decoder, decoderErr
 }
 
 // CompressLedgerEntries serialises entries to JSON and compresses with Zstd.
@@ -51,12 +45,20 @@ func CompressLedgerEntries(entries map[string]string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bridge: marshal ledger entries: %w", err)
 	}
-	return getEncoder().EncodeAll(raw, make([]byte, 0, len(raw)/4)), nil
+	enc, err := getEncoder()
+	if err != nil {
+		return nil, fmt.Errorf("bridge: init zstd encoder: %w", err)
+	}
+	return enc.EncodeAll(raw, make([]byte, 0, len(raw)/4)), nil
 }
 
 // DecompressLedgerEntries decompresses a Zstd blob produced by CompressLedgerEntries.
 func DecompressLedgerEntries(compressed []byte) (map[string]string, error) {
-	raw, err := getDecoder().DecodeAll(compressed, make([]byte, 0, len(compressed)*4))
+	dec, err := getDecoder()
+	if err != nil {
+		return nil, fmt.Errorf("bridge: init zstd decoder: %w", err)
+	}
+	raw, err := dec.DecodeAll(compressed, make([]byte, 0, len(compressed)*4))
 	if err != nil {
 		return nil, fmt.Errorf("bridge: decompress ledger entries: %w", err)
 	}

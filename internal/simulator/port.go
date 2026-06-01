@@ -27,7 +27,13 @@ type PortedTransactionState struct {
 }
 
 // PortTransactionState translates ledger footprints and parameters from a source network to a target network.
-func PortTransactionState(sourceHeader *rpc.LedgerHeaderResponse, sourceEntries map[string]string, config PortConfig) (*PortedTransactionState, error) {
+func PortTransactionState(sourceHeader *rpc.LedgerHeaderResponse, sourceEntries map[string]string, config PortConfig) (result *PortedTransactionState, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in PortTransactionState: %v", r)
+		}
+	}()
+
 	if sourceHeader == nil {
 		return nil, errors.New("source header is required")
 	}

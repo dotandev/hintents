@@ -1,7 +1,7 @@
 .PHONY: build test lint lint-strict lint-unused test-unused validate-ci validate-interface clean
 .PHONY: rust-lint rust-lint-strict rust-test rust-build lint-all-strict
 .PHONY: build test lint validate-errors clean bench bench-rpc bench-sim bench-profile bench-perf-regression
-.PHONY: fmt fmt-go fmt-rust pre-commit
+.PHONY: fmt fmt-go fmt-rust check-fmt check-fmt-go check-fmt-rust pre-commit
 
 # Build variables
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -144,6 +144,26 @@ fmt-rust:
 # Format everything (Go + Rust)
 fmt: fmt-go fmt-rust
 	@echo "✓ All formatting done"
+
+# Check Go formatting without modifying files
+check-fmt-go:
+	@echo "Checking Go formatting..."
+	@if [ -n "$$(gofmt -l .)" ]; then \
+		echo "❌ Go files are not formatted. Run 'make fmt-go' to fix:"; \
+		gofmt -l .; \
+		exit 1; \
+	fi
+	@echo "✓ Go formatting check passed"
+
+# Check Rust formatting without modifying files
+check-fmt-rust:
+	@echo "Checking Rust formatting..."
+	@cd simulator && cargo fmt --check
+	@echo "✓ Rust formatting check passed"
+
+# Check all formatting (Go + Rust)
+check-fmt: check-fmt-go check-fmt-rust
+	@echo "✓ All formatting checks passed"
 
 # ──────────────────────────────────────────────
 # Pre-commit setup
