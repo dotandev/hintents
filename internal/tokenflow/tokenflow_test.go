@@ -19,8 +19,8 @@ func TestBuildReport_SACTransferAndMint_FromResultMeta(t *testing.T) {
 	contractStr, err := strkey.Encode(strkey.VersionByteContract, cid[:])
 	require.NoError(t, err)
 
-	fromAddr := scAddressAccount(bytes32(0x01))
-	toAddr := scAddressAccount(bytes32(0x02))
+	fromAddr := scAddressAccount(t, bytes32(0x01))
+	toAddr := scAddressAccount(t, bytes32(0x02))
 
 	transferEvent := diagnosticEvent(
 		cid,
@@ -33,7 +33,7 @@ func TestBuildReport_SACTransferAndMint_FromResultMeta(t *testing.T) {
 		true,
 	)
 
-	mintTo := scAddressAccount(bytes32(0x03))
+	mintTo := scAddressAccount(t, bytes32(0x03))
 	mintEvent := diagnosticEvent(
 		cid,
 		[]xdr.ScVal{
@@ -53,14 +53,14 @@ func TestBuildReport_SACTransferAndMint_FromResultMeta(t *testing.T) {
 	require.Equal(t, KindTransfer, r.Agg[0].Kind)
 	require.Equal(t, contractStr, r.Agg[0].Token.ID)
 	require.Equal(t, "SAC", r.Agg[0].Token.Symbol)
-	require.Equal(t, addrString(fromAddr), r.Agg[0].From)
-	require.Equal(t, addrString(toAddr), r.Agg[0].To)
+	require.Equal(t, addrString(t, fromAddr), r.Agg[0].From)
+	require.Equal(t, addrString(t, toAddr), r.Agg[0].To)
 	require.Equal(t, big.NewInt(50), r.Agg[0].Amount)
 
 	require.Equal(t, KindMint, r.Agg[1].Kind)
 	require.Equal(t, contractStr, r.Agg[1].Token.ID)
 	require.Equal(t, "MINT", r.Agg[1].From)
-	require.Equal(t, addrString(mintTo), r.Agg[1].To)
+	require.Equal(t, addrString(t, mintTo), r.Agg[1].To)
 	require.Equal(t, big.NewInt(7), r.Agg[1].Amount)
 }
 
@@ -68,7 +68,7 @@ func TestBuildReport_NativeXLMPayment_FromEnvelope(t *testing.T) {
 	src := bytes32(0x10)
 	dst := bytes32(0x20)
 
-	envB64 := encodeEnvelopeWithNativePayment(src, dst, 12_345_678) // 1.2345678 XLM
+	envB64 := encodeEnvelopeWithNativePayment(t, src, dst, 12_345_678) // 1.2345678 XLM
 	r, err := BuildReport(envB64, "")
 	require.NoError(t, err)
 	require.Len(t, r.Agg, 1)
@@ -77,8 +77,8 @@ func TestBuildReport_NativeXLMPayment_FromEnvelope(t *testing.T) {
 	require.Equal(t, KindTransfer, tr.Kind)
 	require.Equal(t, "XLM", tr.Token.Symbol)
 	require.Equal(t, "", tr.Token.ID)
-	require.Equal(t, addrMuxed(src), tr.From)
-	require.Equal(t, addrMuxed(dst), tr.To)
+	require.Equal(t, addrMuxed(t, src), tr.From)
+	require.Equal(t, addrMuxed(t, dst), tr.To)
 	require.Equal(t, big.NewInt(12_345_678), tr.Amount)
 }
 
@@ -124,14 +124,16 @@ func encodeResultMetaWithDiagnosticEvents(t *testing.T, events []xdr.DiagnosticE
 	return base64.StdEncoding.EncodeToString(b)
 }
 
-func encodeEnvelopeWithNativePayment(src [32]byte, dst [32]byte, stroops int64) string {
+func encodeEnvelopeWithNativePayment(t *testing.T, src [32]byte, dst [32]byte, stroops int64) string {
+	t.Helper()
+
 	srcMux, err := xdr.NewMuxedAccount(xdr.CryptoKeyTypeKeyTypeEd25519, xdr.Uint256(src))
 	if err != nil {
-		panic(err)
+		t.Fatalf("new muxed source account: %v", err)
 	}
 	dstMux, err := xdr.NewMuxedAccount(xdr.CryptoKeyTypeKeyTypeEd25519, xdr.Uint256(dst))
 	if err != nil {
-		panic(err)
+		t.Fatalf("new muxed destination account: %v", err)
 	}
 
 	payment := xdr.PaymentOp{
@@ -165,7 +167,7 @@ func encodeEnvelopeWithNativePayment(src [32]byte, dst [32]byte, stroops int64) 
 
 	b, err := env.MarshalBinary()
 	if err != nil {
-		panic(err)
+		t.Fatalf("marshal envelope: %v", err)
 	}
 	return base64.StdEncoding.EncodeToString(b)
 }
@@ -206,10 +208,12 @@ func scU128(v uint64) xdr.ScVal {
 	return xdr.ScVal{Type: xdr.ScValTypeScvU128, U128: &parts}
 }
 
-func scAddressAccount(pk [32]byte) xdr.ScAddress {
+func scAddressAccount(t *testing.T, pk [32]byte) xdr.ScAddress {
+	t.Helper()
+
 	acc, err := xdr.NewAccountId(xdr.PublicKeyTypePublicKeyTypeEd25519, xdr.Uint256(pk))
 	if err != nil {
-		panic(err)
+		t.Fatalf("new account id: %v", err)
 	}
 	a := xdr.AccountId(acc)
 	return xdr.ScAddress{
@@ -226,23 +230,27 @@ func bytes32(fill byte) [32]byte {
 	return b
 }
 
-func addrString(a xdr.ScAddress) string {
+func addrString(t *testing.T, a xdr.ScAddress) string {
+	t.Helper()
+
 	s, err := a.String()
 	if err != nil {
-		panic(err)
+		t.Fatalf("address string: %v", err)
 	}
 	return s
 }
 
-func addrMuxed(pk [32]byte) string {
+func addrMuxed(t *testing.T, pk [32]byte) string {
+	t.Helper()
+
 	m, err := xdr.NewMuxedAccount(xdr.CryptoKeyTypeKeyTypeEd25519, xdr.Uint256(pk))
 	if err != nil {
-		panic(err)
+		t.Fatalf("new muxed account: %v", err)
 	}
 	ma := xdr.MuxedAccount(m)
 	s, err := (&ma).GetAddress()
 	if err != nil {
-		panic(err)
+		t.Fatalf("muxed account address: %v", err)
 	}
 	return s
 }
