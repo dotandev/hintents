@@ -470,7 +470,6 @@ mod tests {
             index: 3,
             source: TypeConversionError::NotAFunctionType,
         };
-
         assert!(conv_err.to_string().contains("3"));
     }
 }
