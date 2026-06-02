@@ -17,7 +17,7 @@ import (
 //	req, err := NewSimulationRequestBuilder().
 //		WithEnvelopeXDR("AAAAAgAAAA...").
 //		WithResultMetaXDR("AAAAAQAAA...").
-//		WithLedgerEntry("key1", "value1").
+//		WithLedgerEntry("a2V5MQ==", "dmFsdWUx").
 //		Build()
 type SimulationRequestBuilder struct {
 	envelopeXdr               string
@@ -52,7 +52,8 @@ func (b *SimulationRequestBuilder) WithResultMetaXDR(xdr string) *SimulationRequ
 }
 
 // WithLedgerEntry adds a single ledger entry to the snapshot.
-// The key and value should both be XDR encoded.
+// The key and value should both be valid base64-encoded XDR strings.
+// Malformed base64 entries are caught at build time rather than during simulation.
 func (b *SimulationRequestBuilder) WithLedgerEntry(key, value string) *SimulationRequestBuilder {
 	if key == "" {
 		b.errors = append(b.errors, "ledger entry key cannot be empty")
@@ -62,12 +63,21 @@ func (b *SimulationRequestBuilder) WithLedgerEntry(key, value string) *Simulatio
 		b.errors = append(b.errors, fmt.Sprintf("ledger entry value for key '%s' cannot be empty", key))
 		return b
 	}
+	if !isValidBase64(key) {
+		b.errors = append(b.errors, fmt.Sprintf("ledger entry key '%s' is not valid base64", key))
+		return b
+	}
+	if !isValidBase64(value) {
+		b.errors = append(b.errors, fmt.Sprintf("ledger entry value for key '%s' is not valid base64", key))
+		return b
+	}
 	b.ledgerEntries[key] = value
 	return b
 }
 
 // WithLedgerEntries sets multiple ledger entries at once.
 // This replaces any previously set ledger entries.
+// Each key and value must be valid base64-encoded XDR.
 func (b *SimulationRequestBuilder) WithLedgerEntries(entries map[string]string) *SimulationRequestBuilder {
 	if entries == nil {
 		b.ledgerEntries = make(map[string]string)
@@ -82,6 +92,14 @@ func (b *SimulationRequestBuilder) WithLedgerEntries(entries map[string]string) 
 		}
 		if value == "" {
 			b.errors = append(b.errors, fmt.Sprintf("ledger entry value for key '%s' cannot be empty", key))
+			continue
+		}
+		if !isValidBase64(key) {
+			b.errors = append(b.errors, fmt.Sprintf("ledger entry key '%s' is not valid base64", key))
+			continue
+		}
+		if !isValidBase64(value) {
+			b.errors = append(b.errors, fmt.Sprintf("ledger entry value for key '%s' is not valid base64", key))
 			continue
 		}
 	}
@@ -110,7 +128,13 @@ func (b *SimulationRequestBuilder) WithOptimizationAdvisor(enable bool) *Simulat
 
 // Build constructs and validates the final SimulationRequest.
 // Returns an error if required fields are missing or validation fails.
-func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
+func (b *SimulationRequestBuilder) Build() (req *SimulationRequest, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in SimulationRequestBuilder.Build: %v", r)
+		}
+	}()
+
 	// Check for any errors collected during building
 	if len(b.errors) > 0 {
 		return nil, errors.WrapValidationError(fmt.Sprintf("%v", b.errors))
@@ -126,7 +150,7 @@ func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 	}
 
 	// Build the request
-	req := &SimulationRequest{
+	req = &SimulationRequest{
 		EnvelopeXdr:   b.envelopeXdr,
 		ResultMetaXdr: b.resultMetaXdr,
 	}

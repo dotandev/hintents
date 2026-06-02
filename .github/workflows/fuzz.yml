@@ -18,17 +18,32 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust Nightly Toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install Rust Stable Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Go modules and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Cargo dependencies and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            simulator/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('simulator/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Reclaim runner temp space before fuzz build
         run: bash ./scripts/ci-clean-build-space.sh
-
-      - name: Cache Cargo Registry
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ./simulator
-          cache-targets: false
 
       - name: Execute LLVM SanitizerCoverage Pass
         working-directory: ./simulator

@@ -1,7 +1,7 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -79,7 +79,9 @@ impl GitRepository {
             // non-existent path — either way we continue climbing.
             match std::fs::symlink_metadata(&git_dir) {
                 Ok(meta) => {
-                    if meta.is_dir() || meta.file_type().is_symlink() {
+                    if (meta.is_dir() || meta.file_type().is_symlink())
+                        && Self::is_valid_git_repo(&current)
+                    {
                         return Some(current);
                     }
                 }
@@ -92,6 +94,17 @@ impl GitRepository {
                 return None;
             }
         }
+    }
+
+    fn is_valid_git_repo(repo_path: &Path) -> bool {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .arg("rev-parse")
+            .arg("--git-dir")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 
     fn get_remote_url(repo_path: &Path) -> Option<String> {
@@ -177,14 +190,28 @@ impl GitRepository {
     fn make_relative_path(&self, file_path: &str) -> Option<String> {
         let path = Path::new(file_path);
 
-        if path.is_absolute() {
-            path.strip_prefix(&self.root_path)
-                .ok()
-                .and_then(|p| p.to_str())
-                .map(|s| s.to_string())
+        let relative = if path.is_absolute() {
+            path.strip_prefix(&self.root_path).ok()?
         } else {
-            Some(file_path.to_string())
-        }
+            path
+        };
+
+        Some(Self::to_url_path(relative))
+    }
+
+    /// Render a relative path as a URL fragment using `/` separators.
+    ///
+    /// Iterating over [`Path::components`] keeps this correct on Windows,
+    /// where the native separator is `\`; only the normal path segments are
+    /// retained, so prefixes, root, and `.`/`..` components are dropped.
+    fn to_url_path(path: &Path) -> String {
+        path.components()
+            .filter_map(|component| match component {
+                Component::Normal(segment) => segment.to_str(),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("/")
     }
 }
 
@@ -192,6 +219,7 @@ impl GitRepository {
 mod tests {
     use super::*;
     use std::fs;
+    use std::io;
     use tempfile::TempDir;
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -199,6 +227,19 @@ mod tests {
     /// Create a fresh temporary directory and return its handle.
     fn tmp() -> TempDir {
         TempDir::new().expect("failed to create temp dir")
+    }
+
+    fn git_init(repo_dir: &Path) -> io::Result<()> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo_dir)
+            .arg("init")
+            .output()?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other("git init failed"))
+        }
     }
 
     /// Build a `SearchConfig` with the given timeout in milliseconds.
@@ -260,7 +301,7 @@ mod tests {
     #[test]
     fn test_find_git_root_in_current_dir() {
         let root = tmp();
-        fs::create_dir(root.path().join(".git")).unwrap();
+        git_init(root.path()).unwrap();
 
         let found = GitRepository::find_git_root(root.path(), &SearchConfig::default());
         assert_eq!(found.as_deref(), Some(root.path()));
@@ -270,7 +311,7 @@ mod tests {
     #[test]
     fn test_find_git_root_in_parent() {
         let root = tmp();
-        fs::create_dir(root.path().join(".git")).unwrap();
+        git_init(root.path()).unwrap();
 
         let nested = root.path().join("a").join("b");
         fs::create_dir_all(&nested).unwrap();
@@ -295,7 +336,7 @@ mod tests {
     #[test]
     fn test_find_git_root_timeout() {
         let root = tmp();
-        fs::create_dir(root.path().join(".git")).unwrap();
+        git_init(root.path()).unwrap();
 
         // Immediate deadline — the search must never succeed.
         let found = GitRepository::find_git_root(root.path(), &cfg_ms(0));
@@ -308,7 +349,8 @@ mod tests {
     fn test_find_git_root_symlink() {
         let root = tmp();
         let real_git = root.path().join("actual_git_dir");
-        fs::create_dir(&real_git).unwrap();
+        git_init(root.path()).unwrap();
+        fs::rename(root.path().join(".git"), &real_git).unwrap();
 
         let git_link = root.path().join(".git");
         std::os::unix::fs::symlink(&real_git, &git_link).unwrap();

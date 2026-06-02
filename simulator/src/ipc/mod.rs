@@ -2,188 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod decompress;
+pub mod types;
 pub mod validate;
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::io::Write;
+pub use types::IpcError;
 
-/// Identifies the kind of streaming frame emitted to stdout.
+/// Binds a TCP listener to `addr` and returns it.
+///
+/// If the socket cannot be established (e.g. the port is already in use or
+/// the address is invalid) the function returns an `Err(IpcError::PortBindingFailed)`
+/// with the original `std::io::Error` preserved as `source`, so the CLI can
+/// inspect `ErrorKind` and report the failure with the appropriate exit code.
 #[allow(dead_code)]
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum FrameType {
-    /// Intermediate ledger snapshot produced during simulation.
-    Snapshot,
-    /// Terminal frame; payload is the complete SimulationResponse JSON.
-    Final,
-    /// Response to a FETCH_SNAPSHOT command from the Go bridge.
-    FetchResponse,
-}
-
-/// A single newline-delimited JSON (NDJSON) frame written to stdout.
-#[allow(dead_code)]
-#[derive(Debug, Serialize, Deserialize)]
-pub struct StreamFrame {
-    #[serde(rename = "type")]
-    pub frame_type: FrameType,
-    pub seq: u32,
-    pub data: serde_json::Value,
-}
-
-#[allow(dead_code)]
-/// Control commands accepted from the Go bridge in SimulationRequest payloads.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum BridgeControlCommand {
-    RollbackAndResume,
-}
-
-impl StreamFrame {
-    #[allow(dead_code)]
-    pub fn emit(&self) {
-        match serde_json::to_string(self) {
-            Ok(line) => {
-                let stdout = std::io::stdout();
-                let mut handle = stdout.lock();
-                let _ = writeln!(handle, "{line}");
-            }
-            Err(e) => {
-                eprintln!("bridge: failed to serialize StreamFrame: {e}");
-            }
-        }
-    }
-}
-
-#[allow(dead_code)]
-pub fn emit_snapshot_frame(seq: u32, data: serde_json::Value) {
-    StreamFrame {
-        frame_type: FrameType::Snapshot,
-        seq,
-        data,
-    }
-    .emit();
-}
-
-#[allow(dead_code)]
-pub fn emit_final_frame(seq: u32, data: serde_json::Value) {
-    StreamFrame {
-        frame_type: FrameType::Final,
-        seq,
-        data,
-    }
-    .emit();
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[allow(dead_code)]
-pub enum CommandOpcode {
-    FetchSnapshot,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct CommandFrame {
-    pub op: CommandOpcode,
-    pub id: u32,
-    #[serde(default = "default_batch_size")]
-    pub batch_size: u32,
-}
-
-#[allow(dead_code)]
-fn default_batch_size() -> u32 {
-    1
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SnapshotEntry {
-    pub seq: u32,
-    pub data: serde_json::Value,
-}
-
-#[derive(Debug, Serialize)]
-struct FetchResponseFrame {
-    #[serde(rename = "type")]
-    frame_type: FrameType,
-    seq: u32,
-    data: FetchResponseData,
-}
-
-#[derive(Debug, Serialize)]
-struct FetchResponseData {
-    pub snapshots: Vec<SnapshotEntry>,
-}
-
-#[derive(Debug, Default)]
-#[allow(dead_code)]
-pub struct SnapshotRegistry {
-    entries: HashMap<u32, serde_json::Value>,
-}
-
-impl SnapshotRegistry {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[allow(dead_code)]
-    pub fn insert(&mut self, seq: u32, data: serde_json::Value) {
-        self.entries.insert(seq, data);
-    }
-
-    #[allow(dead_code)]
-    pub fn fetch(&self, id: u32, batch_size: u32) -> Vec<SnapshotEntry> {
-        let count = batch_size.clamp(1, 5);
-        (id..id.saturating_add(count))
-            .filter_map(|seq| {
-                self.entries.get(&seq).map(|data| SnapshotEntry {
-                    seq,
-                    data: data.clone(),
-                })
-            })
-            .collect()
-    }
-}
-
-#[allow(dead_code)]
-pub fn handle_stdin_command(registry: &SnapshotRegistry) {
-    use std::io::BufRead;
-    let stdin = std::io::stdin();
-    let mut line = String::new();
-    if stdin.lock().read_line(&mut line).unwrap_or(0) == 0 {
-        return;
-    }
-    let cmd: CommandFrame = match serde_json::from_str(line.trim()) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("ipc: failed to parse command: {e}");
-            return;
-        }
-    };
-    match cmd.op {
-        CommandOpcode::FetchSnapshot => {
-            let snapshots = registry.fetch(cmd.id, cmd.batch_size);
-            let response = FetchResponseFrame {
-                frame_type: FrameType::FetchResponse,
-                seq: cmd.id,
-                data: FetchResponseData { snapshots },
-            };
-            match serde_json::to_string(&response) {
-                Ok(json_line) => {
-                    let stdout = std::io::stdout();
-                    let mut handle = stdout.lock();
-                    let _ = writeln!(handle, "{json_line}");
-                }
-                Err(e) => eprintln!("ipc: failed to serialize fetch response: {e}"),
-            }
-        }
-    }
+pub fn start_ipc_bridge<A: std::net::ToSocketAddrs>(
+    addr: A,
+) -> Result<std::net::TcpListener, IpcError> {
+    std::net::TcpListener::bind(addr).map_err(|source| IpcError::PortBindingFailed { source })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::types::*;
 
     #[test]
     fn test_frame_type_serialization() {
@@ -260,5 +99,36 @@ mod tests {
     fn test_command_frame_default_batch_size() {
         let cmd: CommandFrame = serde_json::from_str(r#"{"op":"FETCH_SNAPSHOT","id":7}"#).unwrap();
         assert_eq!(cmd.batch_size, 1);
+    }
+
+    #[test]
+    fn test_parse_command_frame_invalid_json_returns_error() {
+        let result = parse_command_frame("{invalid-json}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_start_ipc_bridge_success() {
+        // port 0 lets the OS pick a free port — always succeeds
+        let result = super::start_ipc_bridge("127.0.0.1:0");
+        assert!(result.is_ok(), "expected successful bind: {:?}", result);
+    }
+
+    #[test]
+    fn test_start_ipc_bridge_addr_in_use_returns_error() {
+        // Bind two listeners to the same port to force EADDRINUSE
+        let first = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = first.local_addr().unwrap().port();
+        let addr = format!("127.0.0.1:{port}");
+        let result = super::start_ipc_bridge(addr.as_str());
+        assert!(
+            result.is_err(),
+            "expected Err when port is already bound, got Ok"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("IPC bridge could not bind"),
+            "unexpected error message: {err_msg}"
+        );
     }
 }

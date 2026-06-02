@@ -49,9 +49,7 @@ RUN go mod download
 COPY . .
 
 # Build Go binary statically for target architecture
-ENV CGO_ENABLED=0
-ENV GOOS=${TARGETOS}
-ENV GOARCH=${TARGETARCH}
+ENV CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH}
 RUN go build -ldflags="-s -w" -o erst cmd/erst/main.go
 
 # Stage 3: Final Runtime Image

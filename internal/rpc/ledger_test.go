@@ -6,6 +6,13 @@ package rpc
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,33 +135,25 @@ func TestLedgerKeyFromEntry_Account(t *testing.T) {
 }
 
 func TestLedgerKeyFromEntry_ContractData(t *testing.T) {
-	// TODO: Fix xdr.Uint32Ptr and xdr.Uint64Ptr compatibility issues
-	t.Skip("Skipping due to xdr compatibility issues with recent stellar-go version")
-	/*
-		contractID := xdr.Hash([32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32})
-		keyVal := xdr.ScVal{Type: xdr.ScValTypeScvU32, U32: uint32Ptr(42)}
+	contractID := xdr.Hash([32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32})
 
-		entry := xdr.LedgerEntry{
-			Data: xdr.LedgerEntryData{
-				Type: xdr.LedgerEntryTypeContractData,
-				ContractData: &xdr.ContractDataEntry{
-					Contract:   xdr.ScAddress{Type: xdr.ScAddressTypeScAddressTypeContract, ContractId: (*xdr.ContractId)(&contractID)},
-					Key:        keyVal,
-					Durability: xdr.ContractDataDurabilityPersistent,
-					Val:        xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: uint64Ptr(1000)},
-				},
+	entry := xdr.LedgerEntry{
+		Data: xdr.LedgerEntryData{
+			Type: xdr.LedgerEntryTypeContractData,
+			ContractData: &xdr.ContractDataEntry{
+				Contract:   xdr.ScAddress{Type: xdr.ScAddressTypeScAddressTypeContract, ContractId: (*xdr.ContractId)(&contractID)},
+				Key:        xdr.ScVal{Type: xdr.ScValTypeScvU32, U32: uint32Ptr(42)},
+				Durability: xdr.ContractDataDurabilityPersistent,
+				Val:        xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: uint64Ptr(1000)},
 			},
-		}
+		},
+	}
 
-		key := ledgerKeyFromEntry(entry)
-		if key == nil {
-			t.Fatal("Expected non-nil key")
-		}
-
-		if key.Type != xdr.LedgerEntryTypeContractData {
-			t.Errorf("Expected ContractData type, got %v", key.Type)
-		}
-	*/
+	key := ledgerKeyFromEntry(entry)
+	require.NotNil(t, key)
+	assert.Equal(t, xdr.LedgerEntryTypeContractData, key.Type)
+	require.NotNil(t, key.ContractData)
+	assert.Equal(t, xdr.ContractDataDurabilityPersistent, key.ContractData.Durability)
 }
 
 func TestLedgerKeyFromEntry_ContractCodeLedger(t *testing.T) {
@@ -596,4 +595,232 @@ func uint32Ptr(i uint32) *xdr.Uint32 {
 func uint64Ptr(i uint64) *xdr.Uint64 {
 	v := xdr.Uint64(i)
 	return &v
+}
+
+// =============================================================================
+// Offline Ledger Mock Tests (simulator/mock.go format)
+// =============================================================================
+
+// ledgerOverrideManifest mirrors simulator.LedgerOverrideManifest. The helpers
+// below duplicate simulator/mock.go because importing that package would create
+// an import cycle (simulator/port.go imports rpc).
+type ledgerOverrideManifest struct {
+	LedgerEntries map[string]string `json:"ledger_entries,omitempty"`
+}
+
+func loadLedgerOverrideManifest(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var manifest ledgerOverrideManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, err
+	}
+
+	return manifest.LedgerEntries, nil
+}
+
+func parseLedgerOverrideFlags(entries []string) (map[string]string, error) {
+	overrides := make(map[string]string)
+	for _, entry := range entries {
+		parts := strings.SplitN(entry, ":", 2)
+		if len(parts) != 2 || parts[0] == "" {
+			return nil, fmt.Errorf("invalid ledger override format: %q, expected key:value", entry)
+		}
+		overrides[parts[0]] = parts[1]
+	}
+	return overrides, nil
+}
+
+func mergeLedgerOverrides(base map[string]string, overrides map[string]string) map[string]string {
+	if len(overrides) == 0 {
+		return base
+	}
+	if base == nil {
+		base = make(map[string]string)
+	}
+	for key, value := range overrides {
+		base[key] = value
+	}
+	return base
+}
+
+func makeContractDataLedgerPair(t *testing.T) (keyXDR, entryXDR string) {
+	t.Helper()
+
+	contractID := xdr.Hash([32]byte{9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31})
+	entry := xdr.LedgerEntry{
+		LastModifiedLedgerSeq: 54321,
+		Data: xdr.LedgerEntryData{
+			Type: xdr.LedgerEntryTypeContractData,
+			ContractData: &xdr.ContractDataEntry{
+				Contract:   xdr.ScAddress{Type: xdr.ScAddressTypeScAddressTypeContract, ContractId: (*xdr.ContractId)(&contractID)},
+				Key:        xdr.ScVal{Type: xdr.ScValTypeScvU32, U32: uint32Ptr(7)},
+				Durability: xdr.ContractDataDurabilityPersistent,
+				Val:        xdr.ScVal{Type: xdr.ScValTypeScvU64, U64: uint64Ptr(9001)},
+			},
+		},
+	}
+
+	key := ledgerKeyFromEntry(entry)
+	require.NotNil(t, key)
+
+	var err error
+	keyXDR, err = EncodeLedgerKey(*key)
+	require.NoError(t, err)
+	entryXDR, err = EncodeLedgerEntry(entry)
+	require.NoError(t, err)
+	return keyXDR, entryXDR
+}
+
+func TestLedgerOverrideManifest_LoadAndMerge(t *testing.T) {
+	keyXDR, entryXDR := makeContractDataLedgerPair(t)
+
+	manifestPath := filepath.Join(t.TempDir(), "ledger_override.json")
+	manifest := ledgerOverrideManifest{
+		LedgerEntries: map[string]string{
+			keyXDR: entryXDR,
+		},
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(manifestPath, data, 0644))
+
+	loaded, err := loadLedgerOverrideManifest(manifestPath)
+	require.NoError(t, err)
+	require.Equal(t, entryXDR, loaded[keyXDR])
+
+	flagOverrides, err := parseLedgerOverrideFlags([]string{
+		"overrideKey:overrideValue",
+	})
+	require.NoError(t, err)
+
+	merged := mergeLedgerOverrides(loaded, flagOverrides)
+	require.Equal(t, entryXDR, merged[keyXDR])
+	require.Equal(t, "overrideValue", merged["overrideKey"])
+}
+
+func TestGetLedgerEntries_OfflineMockOverrides(t *testing.T) {
+	keyXDR, entryXDR := makeContractDataLedgerPair(t)
+
+	overrides, err := parseLedgerOverrideFlags([]string{
+		keyXDR + ":" + entryXDR,
+	})
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req GetLedgerEntriesRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+
+		reqKeys := req.Params[0].([]interface{})
+		entries := make([]LedgerEntryResult, len(reqKeys))
+		for i, key := range reqKeys {
+			keyStr := key.(string)
+			value, ok := overrides[keyStr]
+			if !ok {
+				t.Fatalf("unexpected ledger key requested: %s", keyStr)
+			}
+			entries[i] = LedgerEntryResult{
+				Key:                keyStr,
+				Xdr:                value,
+				LastModifiedLedger: 54321,
+				LiveUntilLedger:    54400,
+			}
+		}
+
+		resp := GetLedgerEntriesResponse{Jsonrpc: "2.0", ID: 1}
+		resp.Result.Entries = entries
+		resp.Result.LatestLedger = 54321
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
+	}))
+	defer server.Close()
+
+	client := &Client{
+		Network:      Testnet,
+		HorizonURL:   server.URL,
+		SorobanURL:   server.URL,
+		CacheEnabled: false,
+		AltURLs:      []string{server.URL},
+	}
+
+	result, err := client.GetLedgerEntries(context.Background(), []string{keyXDR})
+	require.NoError(t, err)
+	require.Equal(t, entryXDR, result[keyXDR])
+}
+
+func TestGetLedgerEntries_OfflineMockManifestMerge(t *testing.T) {
+	baseKey, baseEntry := makeContractDataLedgerPair(t)
+	accountID := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
+	accountKey := xdr.LedgerKey{
+		Type: xdr.LedgerEntryTypeAccount,
+		Account: &xdr.LedgerKeyAccount{
+			AccountId: accountID,
+		},
+	}
+	accountKeyXDR, err := EncodeLedgerKey(accountKey)
+	require.NoError(t, err)
+	accountEntryXDR := buildValidEntryB64(accountKeyXDR)
+
+	manifestPath := filepath.Join(t.TempDir(), "ledger_override.json")
+	manifest := ledgerOverrideManifest{
+		LedgerEntries: map[string]string{
+			baseKey: baseEntry,
+		},
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(manifestPath, data, 0644))
+
+	manifestEntries, err := loadLedgerOverrideManifest(manifestPath)
+	require.NoError(t, err)
+
+	flagOverrides, err := parseLedgerOverrideFlags([]string{
+		accountKeyXDR + ":" + accountEntryXDR,
+	})
+	require.NoError(t, err)
+
+	overrides := mergeLedgerOverrides(manifestEntries, flagOverrides)
+	require.Len(t, overrides, 2)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req GetLedgerEntriesRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+
+		reqKeys := req.Params[0].([]interface{})
+		entries := make([]LedgerEntryResult, len(reqKeys))
+		for i, key := range reqKeys {
+			keyStr := key.(string)
+			value, ok := overrides[keyStr]
+			require.True(t, ok, "missing override for key %s", keyStr)
+			entries[i] = LedgerEntryResult{
+				Key:                keyStr,
+				Xdr:                value,
+				LastModifiedLedger: 100,
+				LiveUntilLedger:    200,
+			}
+		}
+
+		resp := GetLedgerEntriesResponse{Jsonrpc: "2.0", ID: 1}
+		resp.Result.Entries = entries
+		resp.Result.LatestLedger = 100
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
+	}))
+	defer server.Close()
+
+	client := &Client{
+		Network:      Testnet,
+		HorizonURL:   server.URL,
+		SorobanURL:   server.URL,
+		CacheEnabled: false,
+		AltURLs:      []string{server.URL},
+	}
+
+	result, err := client.GetLedgerEntries(context.Background(), []string{baseKey, accountKeyXDR})
+	require.NoError(t, err)
+	require.Equal(t, baseEntry, result[baseKey])
+	require.Equal(t, accountEntryXDR, result[accountKeyXDR])
 }

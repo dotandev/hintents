@@ -309,8 +309,10 @@ pub fn parse_frame_body(body: &str) -> (Option<String>, Option<u32>, Option<u64>
 
     // Detect `func[N]` pattern with regex.
     if let Some(caps) = RE_FUNC_INDEX.captures(name_part) {
-        let idx: u32 = caps["idx"].parse().unwrap_or(0);
-        return (None, Some(idx), wasm_offset);
+        if let Ok(idx) = caps["idx"].parse::<u32>() {
+            return (None, Some(idx), wasm_offset);
+        }
+        // Parse failure: fall through and treat the body as a symbol name.
     }
 
     // Otherwise treat the name part as a symbol name.

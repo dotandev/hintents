@@ -105,16 +105,18 @@ func runAuditSign(cmd *cobra.Command, args []string) error {
 		return errors.WrapValidationError(fmt.Sprintf("failed to retrieve public key: %v", err))
 	}
 
-	auditLog := SignedAuditLog{
-		Version:   "1.0.0",
-		Timestamp: time.Now().UTC(),
-		TraceHash: hex.EncodeToString(hash[:]),
-		Signature: hex.EncodeToString(signature),
-		PublicKey: hex.EncodeToString(publicKey),
-		Payload:   json.RawMessage(payloadBytes),
+	// Build the envelope as a plain map so marshalCanonical can sort all keys,
+	// including nested ones, deterministically.
+	envelope := map[string]interface{}{
+		"version":    "1.0.0",
+		"timestamp":  time.Now().UTC().Format(time.RFC3339Nano),
+		"trace_hash": hex.EncodeToString(hash[:]),
+		"signature":  hex.EncodeToString(signature),
+		"public_key": hex.EncodeToString(publicKey),
+		"payload":    payload, // already decoded interface{}; canonical encoder will sort its keys
 	}
 
-	output, err := json.MarshalIndent(auditLog, "", "  ")
+	output, err := marshalCanonical(envelope)
 	if err != nil {
 		return errors.WrapMarshalFailed(err)
 	}

@@ -2397,6 +2397,7 @@ dependencies = [
  "libloading",
  "object",
  "once_cell",
+ "pem-rfc7468",
  "rand",
  "regex",
  "serde",

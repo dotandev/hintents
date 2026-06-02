@@ -4,12 +4,17 @@
 package lsp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
 	"github.com/dotandev/hintents/internal/visualizer"
+	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
 
@@ -17,6 +22,9 @@ import (
 type Server struct {
 	mu        sync.RWMutex
 	documents map[protocol.DocumentURI]string
+
+	connMu sync.Mutex
+	conn   jsonrpc2.Conn
 }
 
 // NewServer creates a new LSP backend server.
@@ -24,6 +32,138 @@ func NewServer() *Server {
 	return &Server{
 		documents: make(map[protocol.DocumentURI]string),
 	}
+}
+
+// Run serves LSP requests over the provided JSON-RPC stream until the context
+// is cancelled or the client disconnects. The main event loop listens for
+// context cancellation so JSON-RPC connections and internal channels close
+// cleanly instead of leaving orphan processes behind.
+func (s *Server) Run(ctx context.Context, r io.Reader, w io.Writer) error {
+	stream := jsonrpc2.NewStream(&readWriteCloser{Reader: r, Writer: w})
+	conn := jsonrpc2.NewConn(stream)
+
+	s.connMu.Lock()
+	s.conn = conn
+	s.connMu.Unlock()
+
+	conn.Go(ctx, s.handler())
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.closeConnection()
+			<-conn.Done()
+			if err := conn.Err(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
+				return err
+			}
+			return ctx.Err()
+		case <-conn.Done():
+			if err := conn.Err(); err != nil && !errors.Is(err, io.EOF) {
+				return err
+			}
+			return nil
+		}
+	}
+}
+
+func (s *Server) handler() jsonrpc2.Handler {
+	return func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+		if ctx.Err() != nil {
+			return reply(ctx, nil, protocol.ErrRequestCancelled)
+		}
+
+		dec := json.NewDecoder(bytes.NewReader(req.Params()))
+
+		switch req.Method() {
+		case protocol.MethodInitialize:
+			var params protocol.InitializeParams
+			if err := dec.Decode(&params); err != nil {
+				return reply(ctx, nil, fmt.Errorf("%w: %v", jsonrpc2.ErrParse, err))
+			}
+			resp, err := s.Initialize(ctx, &params)
+			return reply(ctx, resp, err)
+
+		case protocol.MethodInitialized:
+			var params protocol.InitializedParams
+			if err := dec.Decode(&params); err != nil {
+				return reply(ctx, nil, fmt.Errorf("%w: %v", jsonrpc2.ErrParse, err))
+			}
+			return reply(ctx, nil, s.Initialized(ctx, &params))
+
+		case protocol.MethodShutdown:
+			if len(req.Params()) > 0 {
+				return reply(ctx, nil, fmt.Errorf("expected no params: %w", jsonrpc2.ErrInvalidParams))
+			}
+			return reply(ctx, nil, s.Shutdown(ctx))
+
+		case protocol.MethodExit:
+			if len(req.Params()) > 0 {
+				return reply(ctx, nil, fmt.Errorf("expected no params: %w", jsonrpc2.ErrInvalidParams))
+			}
+			err := s.Exit(ctx)
+			_ = reply(ctx, nil, err)
+			return err
+
+		case protocol.MethodTextDocumentDidOpen:
+			var params protocol.DidOpenTextDocumentParams
+			if err := dec.Decode(&params); err != nil {
+				return reply(ctx, nil, fmt.Errorf("%w: %v", jsonrpc2.ErrParse, err))
+			}
+			return reply(ctx, nil, s.DidOpen(ctx, &params))
+
+		case protocol.MethodTextDocumentDidChange:
+			var params protocol.DidChangeTextDocumentParams
+			if err := dec.Decode(&params); err != nil {
+				return reply(ctx, nil, fmt.Errorf("%w: %v", jsonrpc2.ErrParse, err))
+			}
+			return reply(ctx, nil, s.DidChange(ctx, &params))
+
+		case protocol.MethodTextDocumentDidClose:
+			var params protocol.DidCloseTextDocumentParams
+			if err := dec.Decode(&params); err != nil {
+				return reply(ctx, nil, fmt.Errorf("%w: %v", jsonrpc2.ErrParse, err))
+			}
+			return reply(ctx, nil, s.DidClose(ctx, &params))
+
+		case protocol.MethodTextDocumentHover:
+			var params protocol.HoverParams
+			if err := dec.Decode(&params); err != nil {
+				return reply(ctx, nil, fmt.Errorf("%w: %v", jsonrpc2.ErrParse, err))
+			}
+			resp, err := s.Hover(ctx, &params)
+			return reply(ctx, resp, err)
+
+		default:
+			return reply(ctx, nil, jsonrpc2.ErrMethodNotFound)
+		}
+	}
+}
+
+func (s *Server) closeConnection() {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+
+	if s.conn == nil {
+		return
+	}
+
+	_ = s.conn.Close()
+	s.conn = nil
+}
+
+func (s *Server) clearDocuments() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.documents = make(map[protocol.DocumentURI]string)
+}
+
+type readWriteCloser struct {
+	io.Reader
+	io.Writer
+}
+
+func (r *readWriteCloser) Close() error {
+	return nil
 }
 
 // Initialize validates the LSP initialization request and advertises capabilities.
@@ -46,11 +186,13 @@ func (s *Server) Initialized(ctx context.Context, params *protocol.InitializedPa
 
 // Shutdown ends the current LSP session.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.clearDocuments()
 	return nil
 }
 
 // Exit is called when the LSP client exits.
 func (s *Server) Exit(ctx context.Context) error {
+	s.closeConnection()
 	return nil
 }
 

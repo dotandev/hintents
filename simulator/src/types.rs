@@ -134,7 +134,7 @@ pub struct BudgetUsage {
     pub memory_usage_percent: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct StructuredError {
     pub error_type: String,
     pub message: String,

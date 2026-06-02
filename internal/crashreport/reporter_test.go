@@ -4,6 +4,7 @@
 package crashreport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -351,4 +353,78 @@ func TestIsEnabled_EnvVarNo(t *testing.T) {
 	setEnv(t, envOptIn, "no")
 	r := New(Config{Enabled: true})
 	assert.False(t, r.IsEnabled())
+}
+
+// ---- Resilience: timeout and network failure ---------------------------------
+
+func TestSend_TimeoutDoesNotHangCLI(t *testing.T) {
+	setEnv(t, envOptIn, "true")
+
+	// Server that stalls just long enough to trigger the client timeout, then exits.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(500 * time.Millisecond):
+		}
+	}))
+	defer srv.Close()
+
+	reporter := New(Config{Enabled: true, Endpoint: srv.URL})
+	// Use a very short client timeout so the test completes quickly.
+	reporter.client.Timeout = 50 * time.Millisecond
+
+	var buf bytes.Buffer
+	reporter.stderr = &buf
+
+	start := time.Now()
+	err := reporter.Send(context.Background(), errors.New("crash"), nil, "")
+	elapsed := time.Since(start)
+
+	require.Error(t, err, "should return an error on timeout")
+	assert.Less(t, elapsed, 5*time.Second, "Send should not block longer than the timeout")
+	assert.Contains(t, buf.String(), "warning: failed to submit crash report")
+}
+
+func TestSend_NetworkFailureDoesNotPanic(t *testing.T) {
+	setEnv(t, envOptIn, "true")
+
+	reporter := New(Config{Enabled: true, Endpoint: "http://localhost:0/unreachable"})
+
+	var buf bytes.Buffer
+	reporter.stderr = &buf
+
+	// Must not panic.
+	require.NotPanics(t, func() {
+		_ = reporter.Send(context.Background(), errors.New("crash"), nil, "")
+	})
+}
+
+func TestSend_WarningEmittedOnFailure(t *testing.T) {
+	setEnv(t, envOptIn, "true")
+
+	srv := newTestServer(t, http.StatusInternalServerError, nil)
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	reporter := New(Config{Enabled: true, Endpoint: srv.URL})
+	reporter.stderr = &buf
+
+	err := reporter.Send(context.Background(), errors.New("crash"), nil, "")
+	require.Error(t, err)
+	assert.Contains(t, buf.String(), "warning: failed to submit crash report")
+}
+
+func TestSend_NoWarningOnSuccess(t *testing.T) {
+	setEnv(t, envOptIn, "true")
+
+	srv := newTestServer(t, http.StatusOK, nil)
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	reporter := New(Config{Enabled: true, Endpoint: srv.URL})
+	reporter.stderr = &buf
+
+	err := reporter.Send(context.Background(), errors.New("crash"), nil, "")
+	require.NoError(t, err)
+	assert.Empty(t, buf.String(), "no warning should be emitted on success")
 }
