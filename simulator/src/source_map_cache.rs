@@ -5,7 +5,8 @@
 //!
 //! This module provides caching of parsed source map mappings to speed up
 //! repetitive debugging sessions. Cached mappings are stored in
-//! ~/.erst/cache/sourcemaps indexed by WASM SHA256 hash.
+//! ~/.erst/cache/sourcemaps indexed by WASM SHA256 hash, optionally combined
+//! with the source file's modification time when loading from disk.
 
 #![allow(dead_code)]
 
@@ -17,6 +18,7 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::UNIX_EPOCH;
 
 /// Monotonically increasing counter used to generate unique temp-file names,
 /// preventing concurrent writes from clobbering each other's `.tmp` files.
@@ -84,8 +86,13 @@ pub const CACHE_DIR_NAME: &str = "sourcemaps";
 /// Cache entry containing parsed source mappings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceMapCacheEntry {
-    /// The WASM hash this entry corresponds to
+    /// The cache key this entry corresponds to (WASM content hash, optionally
+    /// mixed with source file mtime via [`SourceMapCache::compute_cache_key`]).
     pub wasm_hash: String,
+    /// Source WASM file modification time (seconds since Unix epoch) when the
+    /// entry was created. Used to invalidate stale cache after recompilation.
+    #[serde(default)]
+    pub wasm_mtime: Option<u64>,
     /// Whether the WASM had debug symbols
     pub has_symbols: bool,
     /// Cached mappings from wasm offset to source location
@@ -130,19 +137,62 @@ impl SourceMapCache {
         self
     }
 
-    /// Gets the default cache directory (~/.erst/cache/sourcemaps)
+    /// Gets the default cache directory (~/.erst/cache/sourcemaps).
+    /// Falls back to the OS temp directory when the home directory is unavailable.
     fn get_default_cache_dir() -> Result<PathBuf, String> {
-        let home_dir =
-            dirs::home_dir().ok_or_else(|| "Failed to determine home directory".to_string())?;
-        Ok(home_dir.join(".erst").join("cache").join(CACHE_DIR_NAME))
+        if let Some(home_dir) = dirs::home_dir() {
+            return Ok(home_dir.join(".erst").join("cache").join(CACHE_DIR_NAME));
+        }
+        // Home directory unavailable; use the OS temp directory as a fallback.
+        let temp_cache = std::env::temp_dir()
+            .join("erst")
+            .join("cache")
+            .join(CACHE_DIR_NAME);
+        fs::create_dir_all(&temp_cache).map_err(|e| {
+            format!(
+                "Failed to create cache directory in temp dir {:?}: {e}",
+                temp_cache
+            )
+        })?;
+        Ok(temp_cache)
     }
 
-    /// Computes SHA256 hash of WASM bytes
+    /// Computes SHA256 hash of WASM bytes (content only, no mtime).
     pub fn compute_wasm_hash(wasm_bytes: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(wasm_bytes);
         let result = hasher.finalize();
         hex::encode(result)
+    }
+
+    /// Reads the modification time of a WASM file as seconds since Unix epoch.
+    pub fn wasm_mtime_from_path(path: &Path) -> Option<u64> {
+        fs::metadata(path).ok().and_then(|meta| {
+            meta.modified().ok().and_then(|modified| {
+                modified
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|duration| duration.as_secs())
+            })
+        })
+    }
+
+    /// Computes the cache key for WASM bytes, optionally incorporating file mtime.
+    ///
+    /// When `wasm_mtime` is provided the mtime is mixed into the hash so that a
+    /// recompiled `.wasm` file with the same path but a newer modification time
+    /// produces a distinct cache key and does not reuse stale mappings.
+    pub fn compute_cache_key(wasm_bytes: &[u8], wasm_mtime: Option<u64>) -> String {
+        let content_hash = Self::compute_wasm_hash(wasm_bytes);
+        match wasm_mtime {
+            None => content_hash,
+            Some(mtime) => {
+                let mut hasher = Sha256::new();
+                hasher.update(content_hash.as_bytes());
+                hasher.update(mtime.to_le_bytes());
+                hex::encode(hasher.finalize())
+            }
+        }
     }
 
     /// Gets the cache file path for a given WASM hash
@@ -176,13 +226,24 @@ impl SourceMapCache {
     /// Gets a cached source map entry if it exists and is valid.
     /// When `no_cache` is true, skips the cache and returns None immediately,
     /// forcing the caller to re-parse WASM symbols from scratch.
-    pub fn get(&self, wasm_hash: &str, no_cache: bool) -> Option<SourceMapCacheEntry> {
+    pub fn get(&self, cache_key: &str, no_cache: bool) -> Option<SourceMapCacheEntry> {
+        self.get_with_mtime(cache_key, None, no_cache)
+    }
+
+    /// Like [`Self::get`], but rejects entries whose stored mtime does not match
+    /// `expected_mtime` when an expected value is provided.
+    pub fn get_with_mtime(
+        &self,
+        cache_key: &str,
+        expected_mtime: Option<u64>,
+        no_cache: bool,
+    ) -> Option<SourceMapCacheEntry> {
         if no_cache {
             println!("Cache bypassed via --no-cache flag. Re-parsing WASM symbols.");
             return None;
         }
 
-        let cache_path = self.get_cache_path(wasm_hash);
+        let cache_path = self.get_cache_path(cache_key);
 
         if !cache_path.exists() {
             return None;
@@ -219,9 +280,23 @@ impl SourceMapCache {
             return None;
         };
 
-        let result = match bincode::deserialize(&bytes) {
+        let result = match bincode::deserialize::<SourceMapCacheEntry>(&bytes) {
             Ok(entry) => {
-                println!("Cache hit! Loading source map from cache for WASM: {}", &wasm_hash[..8]);
+                if let Some(expected_mtime) = expected_mtime {
+                    if entry.wasm_mtime != Some(expected_mtime) {
+                        println!(
+                            "Cache miss: WASM file mtime changed (expected {}, found {:?})",
+                            expected_mtime, entry.wasm_mtime
+                        );
+                        let _ = flock::unlock(&lock_file);
+                        return None;
+                    }
+                }
+
+                println!(
+                    "Cache hit! Loading source map from cache for WASM: {}",
+                    &cache_key[..8.min(cache_key.len())]
+                );
                 Some(entry)
             }
             Err(e) => {
@@ -412,6 +487,7 @@ impl SourceMapCache {
 
                             entries.push(CachedEntryInfo {
                                 wasm_hash: cache_entry.wasm_hash,
+                                wasm_mtime: cache_entry.wasm_mtime,
                                 has_symbols: cache_entry.has_symbols,
                                 mappings_count: cache_entry.mappings.len() as u64,
                                 created_at: cache_entry.created_at,
@@ -434,7 +510,18 @@ impl SourceMapCache {
 
 impl Default for SourceMapCache {
     fn default() -> Self {
-        Self::new().expect("Failed to create default source map cache")
+        Self::new().unwrap_or_else(|e| {
+            eprintln!(
+                "Warning: source map cache unavailable ({e}); falling back to temp directory"
+            );
+            Self {
+                cache_dir: std::env::temp_dir()
+                    .join("erst")
+                    .join("cache")
+                    .join(CACHE_DIR_NAME),
+                max_cache_size: None,
+            }
+        })
     }
 }
 
@@ -442,6 +529,7 @@ impl Default for SourceMapCache {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedEntryInfo {
     pub wasm_hash: String,
+    pub wasm_mtime: Option<u64>,
     pub has_symbols: bool,
     pub mappings_count: u64,
     pub created_at: u64,
@@ -479,6 +567,63 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_cache_key_without_mtime_matches_content_hash() {
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        let content_hash = SourceMapCache::compute_wasm_hash(&wasm_bytes);
+        let cache_key = SourceMapCache::compute_cache_key(&wasm_bytes, None);
+        assert_eq!(cache_key, content_hash);
+    }
+
+    #[test]
+    fn test_compute_cache_key_changes_with_mtime() {
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        let key1 = SourceMapCache::compute_cache_key(&wasm_bytes, Some(1_000));
+        let key2 = SourceMapCache::compute_cache_key(&wasm_bytes, Some(2_000));
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_wasm_mtime_from_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let wasm_path = temp_dir.path().join("contract.wasm");
+        fs::write(&wasm_path, b"\x00asm").unwrap();
+
+        let mtime = SourceMapCache::wasm_mtime_from_path(&wasm_path);
+        assert!(mtime.is_some());
+    }
+
+    #[test]
+    fn test_cache_invalidates_on_mtime_change() {
+        let (cache, _temp) = create_test_cache();
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        let mtime1 = 1_700_000_000u64;
+        let mtime2 = 1_700_000_100u64;
+
+        let cache_key = SourceMapCache::compute_cache_key(&wasm_bytes, Some(mtime1));
+        let entry = SourceMapCacheEntry {
+            wasm_hash: cache_key.clone(),
+            wasm_mtime: Some(mtime1),
+            has_symbols: true,
+            mappings: HashMap::new(),
+            created_at: 1_234_567_890,
+        };
+
+        cache.store(entry).unwrap();
+
+        assert!(cache
+            .get_with_mtime(&cache_key, Some(mtime1), false)
+            .is_some());
+        assert!(cache
+            .get_with_mtime(&cache_key, Some(mtime2), false)
+            .is_none());
+
+        let new_key = SourceMapCache::compute_cache_key(&wasm_bytes, Some(mtime2));
+        assert!(cache
+            .get_with_mtime(&new_key, Some(mtime2), false)
+            .is_none());
+    }
+
+    #[test]
     fn test_store_and_get() {
         let (cache, _temp) = create_test_cache();
 
@@ -499,6 +644,7 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash: wasm_hash.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings,
             created_at: 1_234_567_890,
@@ -531,6 +677,7 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash: wasm_hash.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings: HashMap::new(),
             created_at: 1_234_567_890,
@@ -554,6 +701,7 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash: wasm_hash.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings: HashMap::new(),
             created_at: 1_234_567_890,
@@ -591,6 +739,7 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash,
+            wasm_mtime: None,
             has_symbols: true,
             mappings,
             created_at: 1_234_567_890,
@@ -614,6 +763,7 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash: wasm_hash.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings: HashMap::new(),
             created_at: 1_234_567_890,
@@ -650,6 +800,7 @@ mod tests {
 
         let entry1 = SourceMapCacheEntry {
             wasm_hash: wasm_hash1.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings: mappings1,
             created_at: 1000,
@@ -679,6 +830,7 @@ mod tests {
 
         let entry2 = SourceMapCacheEntry {
             wasm_hash: wasm_hash2.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings: mappings2,
             created_at: 2000,
@@ -720,6 +872,7 @@ mod tests {
 
             let entry = SourceMapCacheEntry {
                 wasm_hash,
+                wasm_mtime: None,
                 has_symbols: true,
                 mappings,
                 created_at: 1000 + i,
@@ -749,6 +902,7 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash,
+            wasm_mtime: None,
             has_symbols: true,
             mappings: HashMap::new(),
             created_at: 1_234_567_890,
@@ -783,6 +937,7 @@ mod tests {
 
             let entry = SourceMapCacheEntry {
                 wasm_hash,
+                wasm_mtime: None,
                 has_symbols: true,
                 mappings,
                 created_at: 1000 + i,

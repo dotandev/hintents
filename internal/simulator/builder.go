@@ -128,7 +128,13 @@ func (b *SimulationRequestBuilder) WithOptimizationAdvisor(enable bool) *Simulat
 
 // Build constructs and validates the final SimulationRequest.
 // Returns an error if required fields are missing or validation fails.
-func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
+func (b *SimulationRequestBuilder) Build() (req *SimulationRequest, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in SimulationRequestBuilder.Build: %v", r)
+		}
+	}()
+
 	// Check for any errors collected during building
 	if len(b.errors) > 0 {
 		return nil, errors.WrapValidationError(fmt.Sprintf("%v", b.errors))
@@ -144,7 +150,7 @@ func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 	}
 
 	// Build the request
-	req := &SimulationRequest{
+	req = &SimulationRequest{
 		EnvelopeXdr:   b.envelopeXdr,
 		ResultMetaXdr: b.resultMetaXdr,
 	}

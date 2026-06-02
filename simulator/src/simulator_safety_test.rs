@@ -43,6 +43,38 @@ fn init_logger() {
     }
 }
 
+fn format_response_json(response: &SimulationResponse) -> String {
+    match serde_json::to_string(response) {
+        Ok(json) => json,
+        Err(err) => {
+            let fallback = serde_json::json!({
+                "status": "error",
+                "error": format!("Failed to serialize response: {}", err),
+            });
+            serde_json::to_string(&fallback).unwrap_or_else(|_| {
+                "{\"status\":\"error\",\"error\":\"Failed to serialize response\"}"
+                    .to_string()
+            })
+        }
+    }
+}
+
+fn format_structured_error_json(structured_error: &StructuredError) -> String {
+    match serde_json::to_string(structured_error) {
+        Ok(json) => json,
+        Err(err) => {
+            let fallback = serde_json::json!({
+                "error_type": "Serialization",
+                "message": format!("Failed to serialize structured error: {}", err),
+            });
+            serde_json::to_string(&fallback).unwrap_or_else(|_| {
+                "{\"error_type\":\"Serialization\",\"message\":\"Failed to serialize structured error\"}"
+                    .to_string()
+            })
+        }
+    }
+}
+
 fn send_error(msg: String) {
     let res = SimulationResponse {
         status: "error".to_string(),
@@ -56,7 +88,7 @@ fn send_error(msg: String) {
         budget_usage: None,
         source_location: None,
     };
-    println!("{}", serde_json::to_string(&res).unwrap());
+    println!("{}", format_response_json(&res));
     std::process::exit(1);
 }
 
@@ -157,7 +189,7 @@ fn main() {
             budget_usage: None,
             source_location: None,
         };
-        println!("{}", serde_json::to_string(&res).unwrap());
+        println!("{}", format_response_json(&res));
         warn!("Failed to read stdin: {}", e);
         return;
     }
@@ -178,7 +210,7 @@ fn main() {
                 budget_usage: None,
                 source_location: None,
             };
-            println!("{}", serde_json::to_string(&res).unwrap());
+            println!("{}", format_response_json(&res));
             return;
         }
     };
@@ -429,7 +461,7 @@ fn main() {
                 source_location: None,
             };
 
-            println!("{}", serde_json::to_string(&response).unwrap());
+            println!("{}", format_response_json(&response));
         }
         Ok(Err(host_error)) => {
             // Host error during execution (e.g., contract trap, validation failure)
@@ -444,7 +476,7 @@ fn main() {
 
             let response = SimulationResponse {
                 status: "error".to_string(),
-                error: Some(serde_json::to_string(&structured_error).unwrap()),
+                error: Some(format_structured_error_json(&structured_error)),
                 events: vec![],
                 diagnostic_events: vec![],
                 categorized_events: vec![],
@@ -454,7 +486,7 @@ fn main() {
                 budget_usage: None,
                 source_location: None,
             };
-            println!("{}", serde_json::to_string(&response).unwrap());
+            println!("{}", format_response_json(&response));
         }
         Err(panic_info) => {
             let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
@@ -477,7 +509,7 @@ fn main() {
                 budget_usage: None,
                 source_location: None,
             };
-            println!("{}", serde_json::to_string(&response).unwrap());
+            println!("{}", format_response_json(&response));
         }
     }
 }
