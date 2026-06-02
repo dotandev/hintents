@@ -70,9 +70,7 @@ fn test_concurrency_source_map_cache() {
     }
 
     for handle in handles {
-        handle
-            .join()
-            .unwrap_or_else(|err| panic!("thread panicked: {err:?}"));
+        handle.join().unwrap_or_else(|err| panic!("thread panicked: {err:?}"));
     }
 
     // Final state should be readable

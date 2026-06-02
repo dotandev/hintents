@@ -144,15 +144,9 @@ impl SourceMapCache {
             return Ok(home_dir.join(".erst").join("cache").join(CACHE_DIR_NAME));
         }
         // Home directory unavailable; use the OS temp directory as a fallback.
-        let temp_cache = std::env::temp_dir()
-            .join("erst")
-            .join("cache")
-            .join(CACHE_DIR_NAME);
+        let temp_cache = std::env::temp_dir().join("erst").join("cache").join(CACHE_DIR_NAME);
         fs::create_dir_all(&temp_cache).map_err(|e| {
-            format!(
-                "Failed to create cache directory in temp dir {:?}: {e}",
-                temp_cache
-            )
+            format!("Failed to create cache directory in temp dir {:?}: {e}", temp_cache)
         })?;
         Ok(temp_cache)
     }
@@ -169,10 +163,7 @@ impl SourceMapCache {
     pub fn wasm_mtime_from_path(path: &Path) -> Option<u64> {
         fs::metadata(path).ok().and_then(|meta| {
             meta.modified().ok().and_then(|modified| {
-                modified
-                    .duration_since(UNIX_EPOCH)
-                    .ok()
-                    .map(|duration| duration.as_secs())
+                modified.duration_since(UNIX_EPOCH).ok().map(|duration| duration.as_secs())
             })
         })
     }
@@ -515,10 +506,7 @@ impl Default for SourceMapCache {
                 "Warning: source map cache unavailable ({e}); falling back to temp directory"
             );
             Self {
-                cache_dir: std::env::temp_dir()
-                    .join("erst")
-                    .join("cache")
-                    .join(CACHE_DIR_NAME),
+                cache_dir: std::env::temp_dir().join("erst").join("cache").join(CACHE_DIR_NAME),
                 max_cache_size: None,
             }
         })
@@ -610,17 +598,11 @@ mod tests {
 
         cache.store(entry).unwrap();
 
-        assert!(cache
-            .get_with_mtime(&cache_key, Some(mtime1), false)
-            .is_some());
-        assert!(cache
-            .get_with_mtime(&cache_key, Some(mtime2), false)
-            .is_none());
+        assert!(cache.get_with_mtime(&cache_key, Some(mtime1), false).is_some());
+        assert!(cache.get_with_mtime(&cache_key, Some(mtime2), false).is_none());
 
         let new_key = SourceMapCache::compute_cache_key(&wasm_bytes, Some(mtime2));
-        assert!(cache
-            .get_with_mtime(&new_key, Some(mtime2), false)
-            .is_none());
+        assert!(cache.get_with_mtime(&new_key, Some(mtime2), false).is_none());
     }
 
     #[test]

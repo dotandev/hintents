@@ -180,11 +180,8 @@ impl GitRepository {
     fn make_relative_path(&self, file_path: &str) -> Option<String> {
         let path = Path::new(file_path);
 
-        let relative = if path.is_absolute() {
-            path.strip_prefix(&self.root_path).ok()?
-        } else {
-            path
-        };
+        let relative =
+            if path.is_absolute() { path.strip_prefix(&self.root_path).ok()? } else { path };
 
         Some(Self::to_url_path(relative))
     }

@@ -112,10 +112,7 @@ mod tests {
         let port = first.local_addr().unwrap().port();
         let addr = format!("127.0.0.1:{port}");
         let result = super::start_ipc_bridge(addr.as_str());
-        assert!(
-            result.is_err(),
-            "expected Err when port is already bound, got Ok"
-        );
+        assert!(result.is_err(), "expected Err when port is already bound, got Ok");
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("IPC bridge could not bind"),

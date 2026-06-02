@@ -60,10 +60,7 @@ pub struct LedgerSnapshot {
 impl LedgerSnapshot {
     /// Creates a new empty ledger snapshot.
     pub fn new() -> Self {
-        Self {
-            base: Arc::new(HashMap::new()),
-            delta: Arc::new(HashMap::new()),
-        }
+        Self { base: Arc::new(HashMap::new()), delta: Arc::new(HashMap::new()) }
     }
 
     /// Creates a ledger snapshot from base64-encoded XDR key-value pairs.
@@ -101,10 +98,7 @@ impl LedgerSnapshot {
             decoded_entries.insert(key_bytes, entry);
         }
 
-        Ok(Self {
-            base: Arc::new(decoded_entries),
-            delta: Arc::new(HashMap::new()),
-        })
+        Ok(Self { base: Arc::new(decoded_entries), delta: Arc::new(HashMap::new()) })
     }
 
     /// Serializes the snapshot into a compact binary format.
@@ -151,10 +145,7 @@ impl LedgerSnapshot {
             entries.insert(wire_entry.key, entry);
         }
 
-        Ok(Self {
-            base: Arc::new(entries),
-            delta: Arc::new(HashMap::new()),
-        })
+        Ok(Self { base: Arc::new(entries), delta: Arc::new(HashMap::new()) })
     }
 
     /// Returns the number of entries in the snapshot.
@@ -245,10 +236,7 @@ impl LedgerSnapshot {
     pub fn fork(&self) -> Self {
         // If delta is empty, just clone the Arc (cheap)
         if self.delta.is_empty() {
-            return Self {
-                base: Arc::clone(&self.base),
-                delta: Arc::new(HashMap::new()),
-            };
+            return Self { base: Arc::clone(&self.base), delta: Arc::new(HashMap::new()) };
         }
 
         // Merge delta into base to create a new shared base
@@ -264,10 +252,7 @@ impl LedgerSnapshot {
             }
         }
 
-        Self {
-            base: Arc::new(merged),
-            delta: Arc::new(HashMap::new()),
-        }
+        Self { base: Arc::new(merged), delta: Arc::new(HashMap::new()) }
     }
 }
 

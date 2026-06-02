@@ -134,10 +134,7 @@ impl SnapshotRegistry {
         let count = batch_size.clamp(1, 5);
         (id..id.saturating_add(count))
             .filter_map(|seq| {
-                self.entries.get(&seq).map(|data| SnapshotEntry {
-                    seq,
-                    data: data.clone(),
-                })
+                self.entries.get(&seq).map(|data| SnapshotEntry { seq, data: data.clone() })
             })
             .collect()
     }
@@ -145,22 +142,12 @@ impl SnapshotRegistry {
 
 #[allow(dead_code)]
 pub fn emit_snapshot_frame(seq: u32, data: serde_json::Value) {
-    StreamFrame {
-        frame_type: FrameType::Snapshot,
-        seq,
-        data,
-    }
-    .emit();
+    StreamFrame { frame_type: FrameType::Snapshot, seq, data }.emit();
 }
 
 #[allow(dead_code)]
 pub fn emit_final_frame(seq: u32, data: serde_json::Value) {
-    StreamFrame {
-        frame_type: FrameType::Final,
-        seq,
-        data,
-    }
-    .emit();
+    StreamFrame { frame_type: FrameType::Final, seq, data }.emit();
 }
 
 #[allow(dead_code)]
