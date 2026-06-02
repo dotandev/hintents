@@ -28,10 +28,7 @@ pub fn validate_request(input: &str) -> Result<Value, String> {
     let instance: Value = serde_json::from_str(input).map_err(|e| e.to_string())?;
 
     // validate against the schema
-    let errors: Vec<String> = validator
-        .iter_errors(&instance)
-        .map(|e| e.to_string())
-        .collect();
+    let errors: Vec<String> = validator.iter_errors(&instance).map(|e| e.to_string()).collect();
     if !errors.is_empty() {
         return Err(errors.join(", "));
     }

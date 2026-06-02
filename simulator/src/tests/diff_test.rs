@@ -96,18 +96,9 @@ mod tests {
         let (before, after) = mixed_snapshots();
         let diff = diff_snapshots(&before, &after);
         let unchanged = KEY_UNCHANGED.to_vec();
-        assert!(
-            !diff.inserted.contains(&unchanged),
-            "unchanged key must not appear in `inserted`"
-        );
-        assert!(
-            !diff.modified.contains(&unchanged),
-            "unchanged key must not appear in `modified`"
-        );
-        assert!(
-            !diff.deleted.contains(&unchanged),
-            "unchanged key must not appear in `deleted`"
-        );
+        assert!(!diff.inserted.contains(&unchanged), "unchanged key must not appear in `inserted`");
+        assert!(!diff.modified.contains(&unchanged), "unchanged key must not appear in `modified`");
+        assert!(!diff.deleted.contains(&unchanged), "unchanged key must not appear in `deleted`");
     }
 
     // ------------------------------------------------------------------
@@ -292,10 +283,7 @@ mod state_diff_tests {
         let diff = state_diff(&before, &after);
 
         let hex_key = hex::encode(&key);
-        assert!(
-            !diff.new_keys.contains(&hex_key),
-            "unchanged key must not appear in `new_keys`"
-        );
+        assert!(!diff.new_keys.contains(&hex_key), "unchanged key must not appear in `new_keys`");
         assert!(
             !diff.modified_keys.contains(&hex_key),
             "unchanged key must not appear in `modified_keys`"

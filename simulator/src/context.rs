@@ -135,10 +135,7 @@ impl SimulationContext {
         let snapshot = self.host.capture_snapshot()?;
         self.snapshots.insert(
             snapshot_id.into(),
-            SnapshotState {
-                ledger: snapshot,
-                event_count: self.committed_events.len(),
-            },
+            SnapshotState { ledger: snapshot, event_count: self.committed_events.len() },
         );
         Ok(())
     }
@@ -226,9 +223,7 @@ mod tests {
             .inner
             .log_from_slice("snapshot boundary", &[])
             .expect("boundary event should be recorded");
-        context
-            .capture_snapshot("snap-a")
-            .expect("snapshot should save");
+        context.capture_snapshot("snap-a").expect("snapshot should save");
 
         let second_key = contract_data_key(8, 2);
         let second_entry = contract_data_entry(8, 2, 22, 2);
@@ -244,21 +239,13 @@ mod tests {
         let before_rollback_events = context.events().expect("events should load");
         assert_eq!(before_rollback_events.len(), 2);
 
-        context
-            .rollback_to("snap-a")
-            .expect("rollback should succeed");
+        context.rollback_to("snap-a").expect("rollback should succeed");
 
-        let restored_snapshot = context
-            .host()
-            .capture_snapshot()
-            .expect("restored snapshot should be readable");
+        let restored_snapshot =
+            context.host().capture_snapshot().expect("restored snapshot should be readable");
         assert_eq!(restored_snapshot.len(), 1);
-        assert!(restored_snapshot
-            .get(&first_key.to_xdr(Limits::none()).unwrap())
-            .is_some());
-        assert!(restored_snapshot
-            .get(&second_key.to_xdr(Limits::none()).unwrap())
-            .is_none());
+        assert!(restored_snapshot.get(&first_key.to_xdr(Limits::none()).unwrap()).is_some());
+        assert!(restored_snapshot.get(&second_key.to_xdr(Limits::none()).unwrap()).is_none());
 
         let after_rollback_events = context.events().expect("events should load");
         assert_eq!(after_rollback_events.len(), 1);
@@ -266,13 +253,9 @@ mod tests {
         context
             .set_ledger_entry(second_key.as_ref().clone(), second_entry.as_ref().clone())
             .expect("re-executing from rollback point should work");
-        let replayed_snapshot = context
-            .host()
-            .capture_snapshot()
-            .expect("replayed snapshot should be readable");
+        let replayed_snapshot =
+            context.host().capture_snapshot().expect("replayed snapshot should be readable");
         assert_eq!(replayed_snapshot.len(), 2);
-        assert!(replayed_snapshot
-            .get(&second_key.to_xdr(Limits::none()).unwrap())
-            .is_some());
+        assert!(replayed_snapshot.get(&second_key.to_xdr(Limits::none()).unwrap()).is_some());
     }
 }

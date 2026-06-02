@@ -15,11 +15,7 @@ struct SnapshotRegistry {
 
 impl SnapshotRegistry {
     fn record(&mut self, step: usize) -> SnapshotFrame {
-        let frame = SnapshotFrame {
-            snapshot_id: format!("snap-{step:04}"),
-            label: "Final",
-            step,
-        };
+        let frame = SnapshotFrame { snapshot_id: format!("snap-{step:04}"), label: "Final", step };
         self.frames.push(frame.clone());
         frame
     }
@@ -67,18 +63,12 @@ fn final_snapshot_is_preserved_before_trap() {
 fn error_message_links_to_snapshot_id() {
     let (_registry, final_snapshot, err) = execute_with_forced_trap(6, 2);
     let expected = format!("snapshot_id={}", final_snapshot.snapshot_id);
-    assert!(
-        err.contains(&expected),
-        "error message must include linked snapshot id; got: {err}"
-    );
+    assert!(err.contains(&expected), "error message must include linked snapshot id; got: {err}");
 }
 
 #[test]
 fn panic_fixture_contract_contains_trap_marker() {
     let src = include_str!("../../tests/fixtures/contracts/panic.rust");
     assert!(src.contains("panic!"), "fixture must intentionally panic");
-    assert!(
-        src.contains("panic_with_snapshot"),
-        "fixture should expose panic entrypoint"
-    );
+    assert!(src.contains("panic_with_snapshot"), "fixture should expose panic entrypoint");
 }

@@ -39,15 +39,13 @@ use tracing_subscriber::{fmt, EnvFilter};
 const ERR_MEMORY_LIMIT_EXCEEDED: &str = "ERR_MEMORY_LIMIT_EXCEEDED";
 
 fn init_logger() {
-    let use_json = env::var("ERST_LOG_FORMAT")
-        .map(|val| val.to_lowercase() == "json")
-        .unwrap_or(false);
+    let use_json =
+        env::var("ERST_LOG_FORMAT").map(|val| val.to_lowercase() == "json").unwrap_or(false);
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    let subscriber = fmt::Subscriber::builder()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr);
+    let subscriber =
+        fmt::Subscriber::builder().with_env_filter(filter).with_writer(std::io::stderr);
 
     if use_json {
         subscriber.json().flatten_event(true).init();
@@ -106,11 +104,8 @@ impl CoverageTracker {
 }
 
 fn generate_lcov_report(coverage: &CoverageTracker, source_file: &str) -> String {
-    let mut functions: Vec<(&str, u64)> = coverage
-        .invoked_functions
-        .iter()
-        .map(|(name, count)| (name.as_str(), *count))
-        .collect();
+    let mut functions: Vec<(&str, u64)> =
+        coverage.invoked_functions.iter().map(|(name, count)| (name.as_str(), *count)).collect();
     functions.sort_by_key(|&(a, _)| a);
 
     let mut report = String::new();
@@ -203,10 +198,7 @@ fn execute_operations(
                 check_memory_limit_or_panic(host, memory_limit);
             }
             _ => {
-                logs.push(format!(
-                    "Skipping non-Soroban operation: {:?}",
-                    op.body.name()
-                ));
+                logs.push(format!("Skipping non-Soroban operation: {:?}", op.body.name()));
                 check_memory_limit_or_panic(host, memory_limit);
             }
         }
@@ -216,10 +208,8 @@ fn execute_operations(
 
 /// Encode an ScVal to base64-encoded XDR, matching Soroban CLI output format.
 fn scval_to_xdr_base64(val: &soroban_env_host::xdr::ScVal) -> String {
-    base64::engine::general_purpose::STANDARD.encode(
-        val.to_xdr(soroban_env_host::xdr::Limits::none())
-            .unwrap_or_default(),
-    )
+    base64::engine::general_purpose::STANDARD
+        .encode(val.to_xdr(soroban_env_host::xdr::Limits::none()).unwrap_or_default())
 }
 
 /// Encode a contract ID to lowercase hex, matching Soroban CLI output format.
@@ -304,11 +294,8 @@ fn categorize_events(
             let contract_id = e.event.contract_id.as_ref().map(|id| format!("{id:?}"));
             let (topics, data) = match &e.event.body {
                 soroban_env_host::xdr::ContractEventBody::V0(v0) => {
-                    let topics = v0
-                        .topics
-                        .iter()
-                        .map(|t| format!("{t:?}"))
-                        .collect::<Vec<String>>();
+                    let topics =
+                        v0.topics.iter().map(|t| format!("{t:?}")).collect::<Vec<String>>();
                     let data = format!("{:?}", v0.data);
                     (topics, data)
                 }
@@ -446,10 +433,7 @@ fn main() {
         }
     };
 
-    eprintln!(
-        "Debug: Received ResultMetaXdr len: {}",
-        request.result_meta_xdr.len()
-    );
+    eprintln!("Debug: Received ResultMetaXdr len: {}", request.result_meta_xdr.len());
 
     if request.result_meta_xdr.is_empty() {
         eprintln!("Warning: ResultMetaXdr is empty. Host storage may be incomplete.");
@@ -505,11 +489,8 @@ fn main() {
     };
 
     // Initialize Host
-    let mut sim_host = runner::SimHost::new(
-        None,
-        request.resource_calibration.clone(),
-        request.memory_limit,
-    );
+    let mut sim_host =
+        runner::SimHost::new(None, request.resource_calibration.clone(), request.memory_limit);
 
     // --- START: Local WASM Loading Integration (Issue #70) ---
     if let Some(path) = &request.wasm_path {
@@ -564,13 +545,7 @@ fn main() {
     // Wrap the operation execution in panic protection
     let mut coverage = CoverageTracker::default();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        execute_operations(
-            host,
-            operations,
-            &request,
-            request.memory_limit,
-            &mut coverage,
-        )
+        execute_operations(host, operations, &request, request.memory_limit, &mut coverage)
     }));
 
     let budget = host.budget_cloned();
@@ -621,10 +596,7 @@ fn main() {
     let mut lcov_report = None;
     let mut lcov_report_path = None;
     if request.enable_coverage {
-        let source_file = request
-            .wasm_path
-            .clone()
-            .unwrap_or_else(|| "contract.wasm".to_string());
+        let source_file = request.wasm_path.clone().unwrap_or_else(|| "contract.wasm".to_string());
         let report = generate_lcov_report(&coverage, &source_file);
         if let Some(path) = request.coverage_lcov_path.clone() {
             match fs::write(&path, &report) {
@@ -643,63 +615,63 @@ fn main() {
 
     match result {
         Ok(Ok(exec_logs)) => {
-            let (events, diagnostic_events): (Vec<String>, Vec<DiagnosticEvent>) =
-                match sim_host.inner.get_events() {
-                    Ok(evs) => {
-                        let mut raw_events: Vec<String> = Vec::with_capacity(evs.0.len());
-                        let diag_events: Vec<DiagnosticEvent> = (evs.0)
-                            .iter()
-                            .map(|event| {
-                                let event_type = match event.event.type_ {
-                                    soroban_env_host::xdr::ContractEventType::Contract => {
-                                        "contract".to_string()
-                                    }
-                                    soroban_env_host::xdr::ContractEventType::System => {
-                                        "system".to_string()
-                                    }
-                                    soroban_env_host::xdr::ContractEventType::Diagnostic => {
-                                        "diagnostic".to_string()
-                                    }
-                                };
-
-                                let contract_id =
-                                    event.event.contract_id.as_ref().map(contract_id_to_hex);
-
-                                let (topics, data) = match &event.event.body {
-                                    soroban_env_host::xdr::ContractEventBody::V0(v0) => {
-                                        let topics: Vec<String> =
-                                            v0.topics.iter().map(scval_to_xdr_base64).collect();
-                                        let data = scval_to_xdr_base64(&v0.data);
-                                        (topics, data)
-                                    }
-                                };
-
-                                let wasm_instruction = extract_wasm_instruction(&topics, &data);
-                                let metadata =
-                                    events::build_snapshot_metadata(cpu_insns, topics.len() as u32);
-                                raw_events
-                                    .push(format!("{:?} [snapshot_id={}]", event, metadata.id));
-                                DiagnosticEvent {
-                                    event_type,
-                                    contract_id,
-                                    topics,
-                                    data,
-                                    in_successful_contract_call: !event.failed_call,
-                                    snapshot_id: Some(metadata.id.clone()),
-                                    snapshot_metadata: Some(metadata),
-                                    wasm_instruction,
-                                    cpu: Some(cpu_insns),
-                                    mem: Some(mem_bytes),
+            let (events, diagnostic_events): (Vec<String>, Vec<DiagnosticEvent>) = match sim_host
+                .inner
+                .get_events()
+            {
+                Ok(evs) => {
+                    let mut raw_events: Vec<String> = Vec::with_capacity(evs.0.len());
+                    let diag_events: Vec<DiagnosticEvent> = (evs.0)
+                        .iter()
+                        .map(|event| {
+                            let event_type = match event.event.type_ {
+                                soroban_env_host::xdr::ContractEventType::Contract => {
+                                    "contract".to_string()
                                 }
-                            })
-                            .collect();
-                        (raw_events, diag_events)
-                    }
-                    Err(_) => (
-                        vec!["Failed to retrieve events".to_string()],
-                        Vec::<DiagnosticEvent>::new(),
-                    ),
-                };
+                                soroban_env_host::xdr::ContractEventType::System => {
+                                    "system".to_string()
+                                }
+                                soroban_env_host::xdr::ContractEventType::Diagnostic => {
+                                    "diagnostic".to_string()
+                                }
+                            };
+
+                            let contract_id =
+                                event.event.contract_id.as_ref().map(contract_id_to_hex);
+
+                            let (topics, data) = match &event.event.body {
+                                soroban_env_host::xdr::ContractEventBody::V0(v0) => {
+                                    let topics: Vec<String> =
+                                        v0.topics.iter().map(scval_to_xdr_base64).collect();
+                                    let data = scval_to_xdr_base64(&v0.data);
+                                    (topics, data)
+                                }
+                            };
+
+                            let wasm_instruction = extract_wasm_instruction(&topics, &data);
+                            let metadata =
+                                events::build_snapshot_metadata(cpu_insns, topics.len() as u32);
+                            raw_events.push(format!("{:?} [snapshot_id={}]", event, metadata.id));
+                            DiagnosticEvent {
+                                event_type,
+                                contract_id,
+                                topics,
+                                data,
+                                in_successful_contract_call: !event.failed_call,
+                                snapshot_id: Some(metadata.id.clone()),
+                                snapshot_metadata: Some(metadata),
+                                wasm_instruction,
+                                cpu: Some(cpu_insns),
+                                mem: Some(mem_bytes),
+                            }
+                        })
+                        .collect();
+                    (raw_events, diag_events)
+                }
+                Err(_) => {
+                    (vec!["Failed to retrieve events".to_string()], Vec::<DiagnosticEvent>::new())
+                }
+            };
 
             let categorized_events = match host.get_events() {
                 Ok(evs) => categorize_events(&evs, Some(cpu_insns), Some(mem_bytes)),
@@ -812,11 +784,7 @@ fn main() {
 
             let wasm_trace = WasmStackTrace::from_host_error(&error_debug, source_mapper.as_ref());
 
-            if wasm_trace
-                .frames
-                .iter()
-                .any(|f| f.source_location.is_some())
-            {
+            if wasm_trace.frames.iter().any(|f| f.source_location.is_some()) {
                 eprintln!("Source locations resolved for HostError trace.");
             } else {
                 eprintln!("No source locations resolved for HostError trace.");
@@ -834,9 +802,7 @@ fn main() {
             };
 
             let _source_location = wasm_trace.offset().and_then(|offset| {
-                source_mapper
-                    .as_ref()
-                    .and_then(|m| m.map_wasm_offset_to_source(offset))
+                source_mapper.as_ref().and_then(|m| m.map_wasm_offset_to_source(offset))
             });
 
             let _final_logs = [
@@ -892,10 +858,7 @@ fn main() {
                     host_error, point
                 )
             } else {
-                format!(
-                    "Contract execution failed with host error: {:?}",
-                    host_error
-                )
+                format!("Contract execution failed with host error: {:?}", host_error)
             };
 
             let structured_error = StructuredError {
@@ -919,12 +882,10 @@ fn main() {
 
             let response = SimulationResponse {
                 status: "error".to_string(),
-                error: Some(
-                    serde_json::to_string(&structured_error).unwrap_or_else(|e| {
-                        eprintln!("Failed to serialize structured error: {}", e);
-                        format!("Internal error during error serialization: {}", e)
-                    }),
-                ),
+                error: Some(serde_json::to_string(&structured_error).unwrap_or_else(|e| {
+                    eprintln!("Failed to serialize structured error: {}", e);
+                    format!("Internal error during error serialization: {}", e)
+                })),
                 error_code: None,
                 lcov_report: lcov_report.clone(),
                 lcov_report_path: lcov_report_path.clone(),
@@ -964,11 +925,7 @@ fn main() {
             if let Some(ref mapper) = source_mapper {
                 eprintln!("Attempting to resolve sources for Panic trace...");
                 wasm_trace.resolve_sources(mapper);
-                if wasm_trace
-                    .frames
-                    .iter()
-                    .any(|f| f.source_location.is_some())
-                {
+                if wasm_trace.frames.iter().any(|f| f.source_location.is_some()) {
                     eprintln!("Source locations resolved for Panic trace.");
                 } else {
                     eprintln!("No source locations resolved for Panic trace.");
@@ -1044,9 +1001,7 @@ fn extract_wasm_offset(error_msg: &str) -> Option<u64> {
     for line in error_msg.lines() {
         if let Some(pos) = line.find("@ 0x") {
             let hex_part = &line[pos + 4..];
-            let end = hex_part
-                .find(|c: char| !c.is_ascii_hexdigit())
-                .unwrap_or(hex_part.len());
+            let end = hex_part.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(hex_part.len());
             if let Ok(offset) = u64::from_str_radix(&hex_part[..end], 16) {
                 return Some(offset);
             }
@@ -1200,10 +1155,8 @@ mod tests {
 
     #[test]
     fn test_decode_vm_traps() {
-        assert!(
-            decode_error("Error: Wasm Trap: out of bounds memory access")
-                .contains("VM Trap: Out of Bounds Access")
-        );
+        assert!(decode_error("Error: Wasm Trap: out of bounds memory access")
+            .contains("VM Trap: Out of Bounds Access"));
         assert!(decode_error("Panic: unreachable").contains("VM Trap: Unreachable Instruction"));
         assert!(decode_error("integer divide by zero").contains("VM Trap: Division by Zero"));
         assert!(decode_error("stack overflow occurred").contains("VM Trap: Stack Overflow"));
@@ -1353,11 +1306,7 @@ mod tests {
     fn test_missing_ledger_entry_includes_key_id() {
         let raw = "HostError: storage get failed LedgerKey(ContractData(hash=abc123, key=Symbol(\"balance\")))";
         let msg = decode_error(raw);
-        assert!(
-            msg.contains("Key ID:"),
-            "expected Key ID in message, got: {}",
-            msg
-        );
+        assert!(msg.contains("Key ID:"), "expected Key ID in message, got: {}", msg);
         assert!(
             msg.contains("LedgerKey(ContractData"),
             "expected key content in message, got: {}",
@@ -1383,19 +1332,13 @@ mod tests {
     #[test]
     fn test_extract_missing_key_id_ledger_key() {
         let raw = "HostError LedgerKey(ContractData(abc))";
-        assert_eq!(
-            extract_missing_key_id(raw),
-            Some("LedgerKey(ContractData(abc))".to_string())
-        );
+        assert_eq!(extract_missing_key_id(raw), Some("LedgerKey(ContractData(abc))".to_string()));
     }
 
     #[test]
     fn test_extract_missing_key_id_explicit_key_label() {
         let raw = "error: not found, key = \"GABC123/balance\"";
-        assert_eq!(
-            extract_missing_key_id(raw),
-            Some("GABC123/balance".to_string())
-        );
+        assert_eq!(extract_missing_key_id(raw), Some("GABC123/balance".to_string()));
     }
 
     #[test]
@@ -1406,12 +1349,8 @@ mod tests {
     #[test]
     fn test_generate_lcov_report_contains_function_hits() {
         let mut coverage = CoverageTracker::default();
-        coverage
-            .invoked_functions
-            .insert("InvokeContract::\"transfer\"".to_string(), 3);
-        coverage
-            .invoked_functions
-            .insert("InvokeContract::\"init\"".to_string(), 1);
+        coverage.invoked_functions.insert("InvokeContract::\"transfer\"".to_string(), 3);
+        coverage.invoked_functions.insert("InvokeContract::\"init\"".to_string(), 1);
 
         let report = generate_lcov_report(&coverage, "/tmp/contract.wasm");
         assert!(report.contains("SF:/tmp/contract.wasm"));

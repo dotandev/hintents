@@ -47,11 +47,7 @@ fn build_wasm_fixture() -> Vec<u8> {
 /// Emits a DWARF32/v4 `.debug_line` section using `gimli::write` where
 /// `CRASH_ADDR` → `src/test.rs` line 42.
 fn build_debug_line_section() -> Vec<u8> {
-    let encoding = gimli::Encoding {
-        format: gimli::Format::Dwarf32,
-        version: 4,
-        address_size: 4,
-    };
+    let encoding = gimli::Encoding { format: gimli::Format::Dwarf32, version: 4, address_size: 4 };
 
     // The compilation directory is empty; the comp_file carries the full relative path.
     let comp_dir = LineString::String(b"".to_vec());
@@ -173,10 +169,7 @@ fn source_map_known_crash_wasm_yields_src_test_rs_42() {
     let wasm = build_wasm_fixture();
     let mapper = SourceMapper::new(wasm);
 
-    assert!(
-        mapper.has_debug_symbols(),
-        "fixture WASM must be detected as carrying debug symbols"
-    );
+    assert!(mapper.has_debug_symbols(), "fixture WASM must be detected as carrying debug symbols");
 
     let loc = mapper
         .map_wasm_offset_to_source(CRASH_ADDR)
@@ -195,9 +188,8 @@ fn wasm_fixture_dwarf_content_is_canonical() {
     let wasm = build_wasm_fixture();
 
     let obj = object::File::parse(wasm.as_slice()).expect("fixture must be a valid WASM binary");
-    let section = obj
-        .section_by_name(".debug_line")
-        .expect("fixture must have a .debug_line section");
+    let section =
+        obj.section_by_name(".debug_line").expect("fixture must have a .debug_line section");
     let data = section.data().expect(".debug_line data must be readable");
 
     let debug_line = gimli::DebugLine::new(data, LittleEndian);
@@ -215,9 +207,8 @@ fn wasm_fixture_dwarf_content_is_canonical() {
 
     while let Some((header, row)) = rows.next_row().expect("row iteration must not fail") {
         if row.address() == CRASH_ADDR {
-            let file_entry = header
-                .file(row.file_index())
-                .expect("row must reference a valid file entry");
+            let file_entry =
+                header.file(row.file_index()).expect("row must reference a valid file entry");
             let raw_name = match file_entry.path_name() {
                 gimli::AttributeValue::String(s) => s.slice(),
                 other => panic!("unexpected path_name form: {:?}", other),
@@ -241,11 +232,7 @@ fn wasm_fixture_dwarf_content_is_canonical() {
         }
     }
 
-    assert!(
-        found,
-        "address {:#x} not found in the .debug_line table",
-        CRASH_ADDR
-    );
+    assert!(found, "address {:#x} not found in the .debug_line table", CRASH_ADDR);
 }
 
 /// Control: a WASM without debug sections must yield `None` from both

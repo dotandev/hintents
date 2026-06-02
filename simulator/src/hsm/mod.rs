@@ -121,10 +121,7 @@ impl SignerFactory {
                 let mock_hsm = mock::MockHsm::from_config(&mock_config)?;
                 Ok(Box::new(mock_hsm))
             }
-            other => Err(SignerError::Config(format!(
-                "Unsupported signer type: {}",
-                other
-            ))),
+            other => Err(SignerError::Config(format!("Unsupported signer type: {}", other))),
         }
     }
 
@@ -163,13 +160,8 @@ impl SignerConfig {
         let algorithm =
             std::env::var("ERST_SIGNER_ALGORITHM").unwrap_or_else(|_| "ed25519".to_string());
 
-        let mut config = SignerConfig {
-            signer_type,
-            algorithm,
-            software: None,
-            pkcs11: None,
-            mock: None,
-        };
+        let mut config =
+            SignerConfig { signer_type, algorithm, software: None, pkcs11: None, mock: None };
 
         match config.signer_type.as_str() {
             "software" => {
@@ -248,9 +240,7 @@ impl Pkcs11SignerConfig {
             module_path,
             pin,
             token_label: std::env::var("ERST_PKCS11_TOKEN_LABEL").ok(),
-            slot_index: std::env::var("ERST_PKCS11_SLOT")
-                .ok()
-                .and_then(|s| s.parse().ok()),
+            slot_index: std::env::var("ERST_PKCS11_SLOT").ok().and_then(|s| s.parse().ok()),
             key_label: std::env::var("ERST_PKCS11_KEY_LABEL").ok(),
             key_id_hex: std::env::var("ERST_PKCS11_KEY_ID").ok(),
             piv_slot: std::env::var("ERST_PKCS11_PIV_SLOT").ok(),
@@ -274,11 +264,7 @@ pub struct MockHsmConfig {
 
 impl Default for MockHsmConfig {
     fn default() -> Self {
-        Self {
-            latency_ms: 0,
-            failure_rate: 0.0,
-            seed_hex: None,
-        }
+        Self { latency_ms: 0, failure_rate: 0.0, seed_hex: None }
     }
 }
 
@@ -305,19 +291,14 @@ mod tests {
 
     #[test]
     fn test_public_key_display() {
-        let pubkey = PublicKey {
-            algorithm: "ed25519".to_string(),
-            spki_bytes: vec![0x01, 0x02, 0x03],
-        };
+        let pubkey =
+            PublicKey { algorithm: "ed25519".to_string(), spki_bytes: vec![0x01, 0x02, 0x03] };
         assert_eq!(pubkey.to_string(), "ed25519:010203");
     }
 
     #[test]
     fn test_signature_display() {
-        let sig = Signature {
-            algorithm: "ed25519".to_string(),
-            bytes: vec![0x04, 0x05, 0x06],
-        };
+        let sig = Signature { algorithm: "ed25519".to_string(), bytes: vec![0x04, 0x05, 0x06] };
         assert_eq!(sig.to_string(), "ed25519:040506");
     }
 

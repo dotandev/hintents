@@ -88,12 +88,7 @@ impl WasmStackTrace {
             || error_debug.contains("ScError")
             || error_debug.contains("Error(WasmVm");
 
-        WasmStackTrace {
-            trap_kind,
-            raw_message: error_debug.to_string(),
-            frames,
-            soroban_wrapped,
-        }
+        WasmStackTrace { trap_kind, raw_message: error_debug.to_string(), frames, soroban_wrapped }
     }
 
     /// Build a trace from a panic payload.
@@ -248,14 +243,7 @@ fn try_parse_numbered_frame(line: &str, mapper: Option<&SourceMapper>) -> Option
     let source_location =
         wasm_offset.and_then(|o| mapper.and_then(|m| m.map_wasm_offset_to_source(o)));
 
-    Some(StackFrame {
-        index,
-        func_index,
-        func_name,
-        wasm_offset,
-        module: None,
-        source_location,
-    })
+    Some(StackFrame { index, func_index, func_name, wasm_offset, module: None, source_location })
 }
 
 /// Parse a bare frame line without a leading index.
@@ -301,11 +289,7 @@ pub fn parse_frame_body(body: &str) -> (Option<String>, Option<u32>, Option<u64>
     });
 
     // Strip the offset portion to get the name part.
-    let name_part = if let Some(at) = body.find(" @ ") {
-        body[..at].trim()
-    } else {
-        body.trim()
-    };
+    let name_part = if let Some(at) = body.find(" @ ") { body[..at].trim() } else { body.trim() };
 
     // Detect `func[N]` pattern with regex.
     if let Some(caps) = RE_FUNC_INDEX.captures(name_part) {
@@ -316,11 +300,7 @@ pub fn parse_frame_body(body: &str) -> (Option<String>, Option<u32>, Option<u64>
     }
 
     // Otherwise treat the name part as a symbol name.
-    let func_name = if name_part.is_empty() {
-        None
-    } else {
-        Some(name_part.to_string())
-    };
+    let func_name = if name_part.is_empty() { None } else { Some(name_part.to_string()) };
 
     (func_name, None, wasm_offset)
 }
@@ -406,10 +386,7 @@ mod tests {
             "trace:\n  0: soroban_token::transfer @ 0x100\n  1: soroban_sdk::invoke @ 0x200";
         let frames = extract_frames(input, None);
         assert_eq!(frames.len(), 2);
-        assert_eq!(
-            frames[0].func_name,
-            Some("soroban_token::transfer".to_string())
-        );
+        assert_eq!(frames[0].func_name, Some("soroban_token::transfer".to_string()));
         assert_eq!(frames[0].wasm_offset, Some(0x100));
     }
 
@@ -523,10 +500,7 @@ mod tests {
 
     #[test]
     fn test_classify_table_access() {
-        assert_eq!(
-            classify_trap("out of bounds table access"),
-            TrapKind::OutOfBoundsTableAccess
-        );
+        assert_eq!(classify_trap("out of bounds table access"), TrapKind::OutOfBoundsTableAccess);
     }
 
     #[test]
@@ -568,10 +542,7 @@ mod tests {
         let input = "  0: my_contract::do_thing";
         let frames = extract_frames(input, None);
         assert_eq!(frames.len(), 1);
-        assert_eq!(
-            frames[0].func_name.as_deref(),
-            Some("my_contract::do_thing")
-        );
+        assert_eq!(frames[0].func_name.as_deref(), Some("my_contract::do_thing"));
         assert!(frames[0].wasm_offset.is_none());
     }
 

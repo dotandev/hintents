@@ -7,8 +7,7 @@ use soroban_env_host::{DiagnosticLevel, Host};
 
 fn make_host() -> Host {
     let host = Host::default();
-    host.set_diagnostic_level(DiagnosticLevel::Debug)
-        .expect("failed to set diagnostic level");
+    host.set_diagnostic_level(DiagnosticLevel::Debug).expect("failed to set diagnostic level");
     host
 }
 
@@ -49,10 +48,7 @@ fn contract_id_encodes_as_hex_without_debug_formatting() {
                 .to_xdr(soroban_env_host::xdr::Limits::none())
                 .expect("contract_id must serialize to XDR");
             let hex_id = hex::encode(&bytes);
-            assert!(
-                !hex_id.contains("Hash"),
-                "contract_id must not contain Rust Debug formatting"
-            );
+            assert!(!hex_id.contains("Hash"), "contract_id must not contain Rust Debug formatting");
             assert!(!hex_id.is_empty(), "contract_id hex must not be empty");
         }
     }

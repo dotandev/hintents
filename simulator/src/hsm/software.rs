@@ -31,9 +31,7 @@ fn validate_and_decode_pem(pem_data: &str) -> Result<Vec<u8>, SignerError> {
     }
 
     if der_bytes.is_empty() {
-        return Err(SignerError::Crypto(
-            "Decoded DER bytes are empty".to_string(),
-        ));
+        return Err(SignerError::Crypto("Decoded DER bytes are empty".to_string()));
     }
 
     if der_bytes[0] != 0x30 {
@@ -65,10 +63,7 @@ impl SoftwareSigner {
         let signing_key = SigningKey::from_pkcs8_der(&der_bytes)
             .map_err(|e| SignerError::Crypto(format!("Failed to parse private key: {}", e)))?;
 
-        Ok(Self {
-            signing_key,
-            algorithm: "ed25519".to_string(),
-        })
+        Ok(Self { signing_key, algorithm: "ed25519".to_string() })
     }
 
     /// Create a software signer from configuration
@@ -96,10 +91,7 @@ impl SoftwareSigner {
             .map_err(|e| SignerError::Crypto(format!("Failed to serialize private key: {}", e)))?
             .to_string();
 
-        let signer = Self {
-            signing_key,
-            algorithm: "ed25519".to_string(),
-        };
+        let signer = Self { signing_key, algorithm: "ed25519".to_string() };
 
         Ok((signer, pem_data))
     }
@@ -115,20 +107,14 @@ impl Signer for SoftwareSigner {
     async fn sign(&self, data: &[u8]) -> Result<Signature, SignerError> {
         let signature = self.signing_key.sign(data);
 
-        Ok(Signature {
-            algorithm: self.algorithm.clone(),
-            bytes: signature.to_bytes().to_vec(),
-        })
+        Ok(Signature { algorithm: self.algorithm.clone(), bytes: signature.to_bytes().to_vec() })
     }
 
     async fn public_key(&self) -> Result<PublicKey, SignerError> {
         let verifying_key = self.signing_key.verifying_key();
         let spki_bytes = verifying_key.to_bytes().to_vec();
 
-        Ok(PublicKey {
-            algorithm: self.algorithm.clone(),
-            spki_bytes,
-        })
+        Ok(PublicKey { algorithm: self.algorithm.clone(), spki_bytes })
     }
 
     fn signer_info(&self) -> SignerInfo {
@@ -173,10 +159,7 @@ impl Secp256k1SoftwareSigner {
         let signing_key = k256::ecdsa::SigningKey::from_pkcs8_der(&der_bytes)
             .map_err(|e| SignerError::Crypto(format!("Failed to parse private key: {}", e)))?;
 
-        Ok(Self {
-            signing_key,
-            algorithm: "secp256k1".to_string(),
-        })
+        Ok(Self { signing_key, algorithm: "secp256k1".to_string() })
     }
 
     /// Create a secp256k1 software signer from configuration
@@ -203,10 +186,7 @@ impl Secp256k1SoftwareSigner {
             .map_err(|e| SignerError::Crypto(format!("Failed to serialize private key: {}", e)))?
             .to_string();
 
-        let signer = Self {
-            signing_key,
-            algorithm: "secp256k1".to_string(),
-        };
+        let signer = Self { signing_key, algorithm: "secp256k1".to_string() };
 
         Ok((signer, pem_data))
     }
@@ -224,20 +204,14 @@ impl Signer for Secp256k1SoftwareSigner {
 
         let signature: k256::ecdsa::Signature = self.signing_key.sign(data);
 
-        Ok(Signature {
-            algorithm: self.algorithm.clone(),
-            bytes: signature.to_bytes().to_vec(),
-        })
+        Ok(Signature { algorithm: self.algorithm.clone(), bytes: signature.to_bytes().to_vec() })
     }
 
     async fn public_key(&self) -> Result<PublicKey, SignerError> {
         let verifying_key = self.signing_key.verifying_key();
         let spki_bytes = verifying_key.to_encoded_point(false).as_bytes().to_vec();
 
-        Ok(PublicKey {
-            algorithm: self.algorithm.clone(),
-            spki_bytes,
-        })
+        Ok(PublicKey { algorithm: self.algorithm.clone(), spki_bytes })
     }
 
     fn signer_info(&self) -> SignerInfo {

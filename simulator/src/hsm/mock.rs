@@ -28,9 +28,7 @@ impl MockHsm {
             let seed_bytes = hex::decode(seed_hex)
                 .map_err(|e| SignerError::Config(format!("Invalid seed hex: {}", e)))?;
             if seed_bytes.len() != 32 {
-                return Err(SignerError::Config(
-                    "Seed must be exactly 32 bytes".to_string(),
-                ));
+                return Err(SignerError::Config("Seed must be exactly 32 bytes".to_string()));
             }
             let seed: [u8; 32] = seed_bytes
                 .try_into()
@@ -41,11 +39,7 @@ impl MockHsm {
             SigningKey::generate(&mut csprng)
         };
 
-        Ok(Self {
-            signing_key,
-            config,
-            sign_call_count: AtomicU64::new(0),
-        })
+        Ok(Self { signing_key, config, sign_call_count: AtomicU64::new(0) })
     }
 
     /// Create a MockHSM from configuration with defaults.
@@ -96,10 +90,7 @@ impl Signer for MockHsm {
 
         let signature = self.signing_key.sign(data);
 
-        Ok(Signature {
-            algorithm: "ed25519".to_string(),
-            bytes: signature.to_bytes().to_vec(),
-        })
+        Ok(Signature { algorithm: "ed25519".to_string(), bytes: signature.to_bytes().to_vec() })
     }
 
     async fn public_key(&self) -> Result<PublicKey, SignerError> {
@@ -112,30 +103,17 @@ impl Signer for MockHsm {
         let verifying_key = self.signing_key.verifying_key();
         let spki_bytes = verifying_key.to_bytes().to_vec();
 
-        Ok(PublicKey {
-            algorithm: "ed25519".to_string(),
-            spki_bytes,
-        })
+        Ok(PublicKey { algorithm: "ed25519".to_string(), spki_bytes })
     }
 
     fn signer_info(&self) -> SignerInfo {
         let mut metadata = HashMap::new();
         metadata.insert("implementation".to_string(), "mock".to_string());
         metadata.insert("latency_ms".to_string(), self.config.latency_ms.to_string());
-        metadata.insert(
-            "failure_rate".to_string(),
-            self.config.failure_rate.to_string(),
-        );
-        metadata.insert(
-            "sign_call_count".to_string(),
-            self.sign_call_count().to_string(),
-        );
+        metadata.insert("failure_rate".to_string(), self.config.failure_rate.to_string());
+        metadata.insert("sign_call_count".to_string(), self.sign_call_count().to_string());
 
-        SignerInfo {
-            signer_type: "mock".to_string(),
-            algorithm: "ed25519".to_string(),
-            metadata,
-        }
+        SignerInfo { signer_type: "mock".to_string(), algorithm: "ed25519".to_string(), metadata }
     }
 }
 
@@ -144,11 +122,7 @@ mod tests {
     use super::*;
 
     fn default_config() -> MockHsmConfig {
-        MockHsmConfig {
-            latency_ms: 0,
-            failure_rate: 0.0,
-            seed_hex: None,
-        }
+        MockHsmConfig { latency_ms: 0, failure_rate: 0.0, seed_hex: None }
     }
 
     #[tokio::test]
@@ -196,11 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_hsm_failure_rate_always_fail() {
-        let config = MockHsmConfig {
-            latency_ms: 0,
-            failure_rate: 1.0,
-            seed_hex: None,
-        };
+        let config = MockHsmConfig { latency_ms: 0, failure_rate: 1.0, seed_hex: None };
         let hsm = MockHsm::new(config).unwrap();
 
         let result = hsm.sign(b"test").await;
@@ -215,11 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_hsm_failure_rate_never_fail() {
-        let config = MockHsmConfig {
-            latency_ms: 0,
-            failure_rate: 0.0,
-            seed_hex: None,
-        };
+        let config = MockHsmConfig { latency_ms: 0, failure_rate: 0.0, seed_hex: None };
         let hsm = MockHsm::new(config).unwrap();
 
         for _ in 0..10 {
@@ -244,11 +210,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_hsm_signer_info() {
-        let config = MockHsmConfig {
-            latency_ms: 100,
-            failure_rate: 0.5,
-            seed_hex: None,
-        };
+        let config = MockHsmConfig { latency_ms: 100, failure_rate: 0.5, seed_hex: None };
         let hsm = MockHsm::new(config).unwrap();
 
         let info = hsm.signer_info();
@@ -273,11 +235,8 @@ mod tests {
 
     #[test]
     fn test_mock_hsm_wrong_seed_length() {
-        let config = MockHsmConfig {
-            latency_ms: 0,
-            failure_rate: 0.0,
-            seed_hex: Some("00".to_string()),
-        };
+        let config =
+            MockHsmConfig { latency_ms: 0, failure_rate: 0.0, seed_hex: Some("00".to_string()) };
 
         let result = MockHsm::new(config);
         assert!(result.is_err());

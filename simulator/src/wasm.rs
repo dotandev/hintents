@@ -51,10 +51,7 @@ pub fn load_wasm_from_path(path: &str) -> Result<Vec<u8>, WasmLoadError> {
     bytes.append(&mut rest);
 
     if bytes.len() > MAX_WASM_SIZE {
-        return Err(WasmLoadError::TooLarge {
-            size: bytes.len(),
-            limit: MAX_WASM_SIZE,
-        });
+        return Err(WasmLoadError::TooLarge { size: bytes.len(), limit: MAX_WASM_SIZE });
     }
 
     Ok(bytes)

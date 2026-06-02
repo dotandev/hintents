@@ -58,8 +58,7 @@ impl SimHost {
         // Host::with_storage_and_budget is available in recent versions
         let host = Host::with_storage_and_budget(Storage::default(), budget);
 
-        host.set_diagnostic_level(DiagnosticLevel::Debug)
-            .expect("failed to set diagnostic level");
+        host.set_diagnostic_level(DiagnosticLevel::Debug).expect("failed to set diagnostic level");
 
         Self {
             inner: host,
@@ -149,10 +148,7 @@ impl SimHost {
             storage_map = storage_map.insert(key, Some((Rc::new(entry.clone()), None)), budget)?;
         }
 
-        Ok(Storage::with_enforcing_footprint_and_map(
-            Footprint(footprint_map),
-            storage_map,
-        ))
+        Ok(Storage::with_enforcing_footprint_and_map(Footprint(footprint_map), storage_map))
     }
 
     /// Set the contract ID for execution context.
@@ -223,8 +219,7 @@ mod tests {
         let hash = Hash([0u8; 32]);
         host.set_contract_id(hash);
 
-        host.set_fn_name("add")
-            .expect("failed to set function name");
+        host.set_fn_name("add").expect("failed to set function name");
     }
 
     #[test]
@@ -285,23 +280,14 @@ mod tests {
         });
         host.set_ledger_entry(second_key.as_ref().clone(), second_entry.as_ref().clone())
             .expect("mutated entry should be stored");
-        host.inner
-            .log_from_slice("after snapshot", &[])
-            .expect("later event should be recorded");
+        host.inner.log_from_slice("after snapshot", &[]).expect("later event should be recorded");
 
-        host.restore_from_snapshot(&snapshot)
-            .expect("restoring snapshot should succeed");
+        host.restore_from_snapshot(&snapshot).expect("restoring snapshot should succeed");
 
-        let restored = host
-            .capture_snapshot()
-            .expect("restored snapshot should capture");
+        let restored = host.capture_snapshot().expect("restored snapshot should capture");
         assert_eq!(restored.len(), 1);
-        assert!(restored
-            .get(&first_key.to_xdr(Limits::none()).unwrap())
-            .is_some());
-        assert!(restored
-            .get(&second_key.to_xdr(Limits::none()).unwrap())
-            .is_none());
+        assert!(restored.get(&first_key.to_xdr(Limits::none()).unwrap()).is_some());
+        assert!(restored.get(&second_key.to_xdr(Limits::none()).unwrap()).is_none());
         assert!(
             host.events().expect("events should read").0.is_empty(),
             "fresh host should not retain post-rollback host events"

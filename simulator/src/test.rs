@@ -100,8 +100,7 @@ mod ledger_state_injection_tests {
     /// Helper to create a test Host
     fn create_test_host() -> soroban_env_host::Host {
         let host = soroban_env_host::Host::default();
-        host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug)
-            .unwrap();
+        host.set_diagnostic_level(soroban_env_host::DiagnosticLevel::Debug).unwrap();
         host
     }
 
@@ -138,10 +137,7 @@ mod ledger_state_injection_tests {
     fn test_decode_ledger_key_invalid_base64() {
         let result = decode_ledger_key("not-valid-base64!!!");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Failed to decode base64"));
+        assert!(result.unwrap_err().to_string().contains("Failed to decode base64"));
     }
 
     #[test]
@@ -150,10 +146,7 @@ mod ledger_state_injection_tests {
         let invalid_xdr = base64::engine::general_purpose::STANDARD.encode(b"invalid xdr data");
         let result = decode_ledger_key(&invalid_xdr);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Failed to parse XDR"));
+        assert!(result.unwrap_err().to_string().contains("Failed to parse XDR"));
     }
 
     #[test]
@@ -190,10 +183,7 @@ mod ledger_state_injection_tests {
     fn test_decode_ledger_entry_invalid_base64() {
         let result = decode_ledger_entry("invalid-base64@@@");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Failed to decode base64"));
+        assert!(result.unwrap_err().to_string().contains("Failed to decode base64"));
     }
 
     #[test]
@@ -236,9 +226,7 @@ mod ledger_state_injection_tests {
         let code_hash = Hash([4u8; 32]);
         let wasm_code = vec![0x00, 0x61, 0x73, 0x6d]; // WASM magic number
 
-        let key = LedgerKey::ContractCode(LedgerKeyContractCode {
-            hash: code_hash.clone(),
-        });
+        let key = LedgerKey::ContractCode(LedgerKeyContractCode { hash: code_hash.clone() });
 
         let entry = LedgerEntry {
             last_modified_ledger_seq: 200,
@@ -327,9 +315,7 @@ mod ledger_state_injection_tests {
         // Inject should fail due to type mismatch
         let result = inject_ledger_entry(&host, &key, &entry);
         assert!(result.is_err(), "Should fail on type mismatch");
-        assert!(result
-            .unwrap_err()
-            .contains("Mismatched LedgerKey and LedgerEntry types"));
+        assert!(result.unwrap_err().contains("Mismatched LedgerKey and LedgerEntry types"));
     }
 
     #[test]
@@ -363,9 +349,7 @@ mod ledger_state_injection_tests {
             ),
             // ContractCode entry
             (
-                LedgerKey::ContractCode(LedgerKeyContractCode {
-                    hash: Hash([11u8; 32]),
-                }),
+                LedgerKey::ContractCode(LedgerKeyContractCode { hash: Hash([11u8; 32]) }),
                 LedgerEntry {
                     last_modified_ledger_seq: 200,
                     data: LedgerEntryData::ContractCode(ContractCodeEntry {
@@ -467,12 +451,10 @@ mod contract_execution_tests {
     fn simulate_host_error() -> Result<Vec<String>, soroban_env_host::HostError> {
         // This would be a real HostError in actual implementation
         use soroban_env_host::HostError;
-        Err(HostError::from(
-            soroban_env_host::Error::from_type_and_code(
-                soroban_env_host::xdr::ScErrorType::Budget,
-                soroban_env_host::xdr::ScErrorCode::ExceededLimit,
-            ),
-        ))
+        Err(HostError::from(soroban_env_host::Error::from_type_and_code(
+            soroban_env_host::xdr::ScErrorType::Budget,
+            soroban_env_host::xdr::ScErrorCode::ExceededLimit,
+        )))
     }
 
     #[test]
@@ -564,12 +546,7 @@ mod contract_execution_tests {
         let result = std::panic::catch_unwind(|| {
             let balance = 100;
             let amount = 150;
-            assert!(
-                balance >= amount,
-                "Insufficient balance: {} < {}",
-                balance,
-                amount
-            );
+            assert!(balance >= amount, "Insufficient balance: {} < {}", balance, amount);
         });
 
         assert!(result.is_err(), "Failed assertion should panic");
@@ -652,10 +629,7 @@ mod contract_execution_tests {
 
     #[test]
     fn test_logs_preserved_before_panic() {
-        let mut logs = vec![
-            "Host initialized".to_string(),
-            "Loaded 5 ledger entries".to_string(),
-        ];
+        let mut logs = vec!["Host initialized".to_string(), "Loaded 5 ledger entries".to_string()];
 
         // Create a closure that adds logs then panics
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -842,11 +816,8 @@ mod contract_execution_tests {
     #[test]
     fn test_efficient_contract_analysis() {
         let advisor = GasOptimizationAdvisor::new();
-        let metrics = BudgetMetrics {
-            cpu_instructions: 5000,
-            memory_bytes: 2500,
-            total_operations: 5,
-        };
+        let metrics =
+            BudgetMetrics { cpu_instructions: 5000, memory_bytes: 2500, total_operations: 5 };
 
         let report = advisor.analyze(&metrics);
 
@@ -887,22 +858,14 @@ mod contract_execution_tests {
             .iter()
             .any(|t| t.category.contains("CPU") || t.category.contains("Budget")));
 
-        assert!(report
-            .tips
-            .iter()
-            .any(|t| t.message.contains("50") && t.message.contains("%")));
+        assert!(report.tips.iter().any(|t| t.message.contains("50") && t.message.contains("%")));
 
         println!("Inefficient Contract Report:");
         println!("Efficiency: {:.1}%", report.overall_efficiency);
         println!("Comparison: {}", report.comparison_to_baseline);
         println!("Optimization Tips:");
         for (i, tip) in report.tips.iter().enumerate() {
-            println!(
-                "{}. [{}] {}",
-                i + 1,
-                tip.severity.to_uppercase(),
-                tip.category
-            );
+            println!("{}. [{}] {}", i + 1, tip.severity.to_uppercase(), tip.category);
             println!("   {}", tip.message);
             println!("   Potential Savings: {}", tip.estimated_savings);
             if let Some(location) = &tip.code_location {
@@ -1068,12 +1031,7 @@ mod contract_execution_tests {
         println!("Status: {}", report.comparison_to_baseline);
         println!("Optimization Tips:");
         for (i, tip) in report.tips.iter().enumerate() {
-            println!(
-                "{}. [{}] {}",
-                i + 1,
-                tip.severity.to_uppercase(),
-                tip.category
-            );
+            println!("{}. [{}] {}", i + 1, tip.severity.to_uppercase(), tip.category);
             println!("   {}", tip.message);
             println!("   Potential Savings: {}", tip.estimated_savings);
             if let Some(location) = &tip.code_location {

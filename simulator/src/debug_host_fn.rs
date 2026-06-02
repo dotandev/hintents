@@ -42,27 +42,24 @@ pub fn extract_debug_logs(events: &Events) -> Vec<String> {
 
 fn decode_log_data(data: &ScVal) -> String {
     match data {
-        ScVal::String(ScString(s)) => std::str::from_utf8(s.as_slice())
-            .unwrap_or("<invalid UTF-8>")
-            .to_string(),
-        ScVal::Vec(Some(items)) => items
-            .0
-            .iter()
-            .map(scval_to_display)
-            .collect::<Vec<_>>()
-            .join(" "),
+        ScVal::String(ScString(s)) => {
+            std::str::from_utf8(s.as_slice()).unwrap_or("<invalid UTF-8>").to_string()
+        }
+        ScVal::Vec(Some(items)) => {
+            items.0.iter().map(scval_to_display).collect::<Vec<_>>().join(" ")
+        }
         other => scval_to_display(other),
     }
 }
 
 fn scval_to_display(val: &ScVal) -> String {
     match val {
-        ScVal::String(ScString(s)) => std::str::from_utf8(s.as_slice())
-            .unwrap_or("<invalid UTF-8>")
-            .to_string(),
-        ScVal::Symbol(s) => std::str::from_utf8(s.as_slice())
-            .unwrap_or("<invalid symbol>")
-            .to_string(),
+        ScVal::String(ScString(s)) => {
+            std::str::from_utf8(s.as_slice()).unwrap_or("<invalid UTF-8>").to_string()
+        }
+        ScVal::Symbol(s) => {
+            std::str::from_utf8(s.as_slice()).unwrap_or("<invalid symbol>").to_string()
+        }
         ScVal::I32(n) => n.to_string(),
         ScVal::U32(n) => n.to_string(),
         ScVal::I64(n) => n.to_string(),

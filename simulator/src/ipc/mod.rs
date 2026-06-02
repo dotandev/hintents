@@ -57,22 +57,12 @@ impl StreamFrame {
 
 #[allow(dead_code)]
 pub fn emit_snapshot_frame(seq: u32, data: serde_json::Value) {
-    StreamFrame {
-        frame_type: FrameType::Snapshot,
-        seq,
-        data,
-    }
-    .emit();
+    StreamFrame { frame_type: FrameType::Snapshot, seq, data }.emit();
 }
 
 #[allow(dead_code)]
 pub fn emit_final_frame(seq: u32, data: serde_json::Value) {
-    StreamFrame {
-        frame_type: FrameType::Final,
-        seq,
-        data,
-    }
-    .emit();
+    StreamFrame { frame_type: FrameType::Final, seq, data }.emit();
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -137,10 +127,7 @@ impl SnapshotRegistry {
         let count = batch_size.clamp(1, 5);
         (id..id.saturating_add(count))
             .filter_map(|seq| {
-                self.entries.get(&seq).map(|data| SnapshotEntry {
-                    seq,
-                    data: data.clone(),
-                })
+                self.entries.get(&seq).map(|data| SnapshotEntry { seq, data: data.clone() })
             })
             .collect()
     }
@@ -187,18 +174,9 @@ mod tests {
 
     #[test]
     fn test_frame_type_serialization() {
-        assert_eq!(
-            serde_json::to_string(&FrameType::Snapshot).unwrap(),
-            "\"snapshot\""
-        );
-        assert_eq!(
-            serde_json::to_string(&FrameType::Final).unwrap(),
-            "\"final\""
-        );
-        assert_eq!(
-            serde_json::to_string(&FrameType::FetchResponse).unwrap(),
-            "\"fetchresponse\""
-        );
+        assert_eq!(serde_json::to_string(&FrameType::Snapshot).unwrap(), "\"snapshot\"");
+        assert_eq!(serde_json::to_string(&FrameType::Final).unwrap(), "\"final\"");
+        assert_eq!(serde_json::to_string(&FrameType::FetchResponse).unwrap(), "\"fetchresponse\"");
     }
 
     #[test]

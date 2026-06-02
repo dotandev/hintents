@@ -52,11 +52,7 @@ impl SourceMapper {
             Vec::new()
         };
 
-        Self {
-            has_symbols,
-            line_cache,
-            git_repo,
-        }
+        Self { has_symbols, line_cache, git_repo }
     }
 
     /// Backward-compatible constructor used by tests.
@@ -83,11 +79,8 @@ impl SourceMapper {
     fn build_line_cache(wasm_bytes: &[u8]) -> Result<Vec<CachedLineEntry>, String> {
         let obj_file = object::File::parse(wasm_bytes)
             .map_err(|err| format!("failed to parse wasm object: {err}"))?;
-        let endian = if obj_file.is_little_endian() {
-            RunTimeEndian::Little
-        } else {
-            RunTimeEndian::Big
-        };
+        let endian =
+            if obj_file.is_little_endian() { RunTimeEndian::Little } else { RunTimeEndian::Big };
 
         let dwarf_sections = Dwarf::load(|id: SectionId| -> Result<Cow<'_, [u8]>, gimli::Error> {
             if let Some(section) = obj_file.section_by_name(id.name()) {
@@ -188,11 +181,7 @@ impl SourceMapper {
                 }
 
                 if let Some((start, location)) = pending.take() {
-                    cache.push(CachedLineEntry {
-                        start,
-                        end: None,
-                        location,
-                    });
+                    cache.push(CachedLineEntry { start, end: None, location });
                 }
             }
         }
@@ -235,10 +224,7 @@ impl SourceMapper {
             return None;
         }
 
-        let idx = match self
-            .line_cache
-            .binary_search_by_key(&wasm_offset, |entry| entry.start)
-        {
+        let idx = match self.line_cache.binary_search_by_key(&wasm_offset, |entry| entry.start) {
             Ok(index) => index,
             Err(0) => return None,
             Err(index) => index.saturating_sub(1),
@@ -268,18 +254,10 @@ impl SourceMapper {
         line: u32,
         column: Option<u32>,
     ) -> SourceLocation {
-        let github_link = self
-            .git_repo
-            .as_ref()
-            .and_then(|repo| repo.generate_file_link(&file, line));
+        let github_link =
+            self.git_repo.as_ref().and_then(|repo| repo.generate_file_link(&file, line));
 
-        SourceLocation {
-            file,
-            line,
-            column,
-            column_end: None,
-            github_link,
-        }
+        SourceLocation { file, line, column, column_end: None, github_link }
     }
 
     pub fn has_debug_symbols(&self) -> bool {
@@ -294,11 +272,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn mapper_with_cache(entries: Vec<CachedLineEntry>) -> SourceMapper {
-        SourceMapper {
-            has_symbols: true,
-            line_cache: entries,
-            git_repo: None,
-        }
+        SourceMapper { has_symbols: true, line_cache: entries, git_repo: None }
     }
 
     #[test]

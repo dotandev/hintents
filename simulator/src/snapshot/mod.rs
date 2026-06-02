@@ -57,10 +57,7 @@ pub struct LedgerSnapshot {
 impl LedgerSnapshot {
     /// Creates a new empty ledger snapshot.
     pub fn new() -> Self {
-        Self {
-            base: Arc::new(HashMap::new()),
-            delta: HashMap::new(),
-        }
+        Self { base: Arc::new(HashMap::new()), delta: HashMap::new() }
     }
 
     /// Creates a ledger snapshot from base64-encoded XDR key-value pairs.
@@ -98,10 +95,7 @@ impl LedgerSnapshot {
             decoded_entries.insert(key_bytes, entry);
         }
 
-        Ok(Self {
-            base: Arc::new(decoded_entries),
-            delta: HashMap::new(),
-        })
+        Ok(Self { base: Arc::new(decoded_entries), delta: HashMap::new() })
     }
 
     /// Serializes the snapshot into a compact binary format.
@@ -117,10 +111,7 @@ impl LedgerSnapshot {
                     SnapshotError::XdrEncoding(format!("Failed to encode entry: {e}"))
                 })?;
 
-                Ok(SnapshotWireEntry {
-                    key: key.clone(),
-                    entry,
-                })
+                Ok(SnapshotWireEntry { key: key.clone(), entry })
             })
             .collect::<Result<Vec<_>, SnapshotError>>()?;
 
@@ -129,10 +120,7 @@ impl LedgerSnapshot {
         entries.sort_by(|left, right| left.key.cmp(&right.key));
 
         snapshot_bincode_options()
-            .serialize(&SnapshotWireFormat {
-                version: SNAPSHOT_FORMAT_VERSION,
-                entries,
-            })
+            .serialize(&SnapshotWireFormat { version: SNAPSHOT_FORMAT_VERSION, entries })
             .map_err(|e| SnapshotError::BinaryEncoding(e.to_string()))
     }
 
@@ -154,10 +142,7 @@ impl LedgerSnapshot {
             entries.insert(wire_entry.key, entry);
         }
 
-        Ok(Self {
-            base: Arc::new(entries),
-            delta: HashMap::new(),
-        })
+        Ok(Self { base: Arc::new(entries), delta: HashMap::new() })
     }
 
     /// Returns the number of entries in the snapshot.
@@ -286,11 +271,7 @@ pub fn diff_snapshots(before: &LedgerSnapshot, after: &LedgerSnapshot) -> StateD
     modified.sort_unstable();
     deleted.sort_unstable();
 
-    StateDiff {
-        inserted,
-        modified,
-        deleted,
-    }
+    StateDiff { inserted, modified, deleted }
 }
 
 /// Errors that can occur during snapshot operations.
@@ -320,9 +301,7 @@ pub enum SnapshotError {
 }
 
 fn snapshot_bincode_options() -> impl Options {
-    bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .with_big_endian()
+    bincode::DefaultOptions::new().with_fixint_encoding().with_big_endian()
 }
 
 /// Decodes a base64-encoded LedgerKey XDR string.
@@ -335,9 +314,7 @@ fn snapshot_bincode_options() -> impl Options {
 /// * `Err(SnapshotError)` - Decoding or parsing failed
 pub fn decode_ledger_key(key_xdr: &str) -> Result<LedgerKey, SnapshotError> {
     if key_xdr.is_empty() {
-        return Err(SnapshotError::Base64Decode(
-            "LedgerKey: empty payload".to_string(),
-        ));
+        return Err(SnapshotError::Base64Decode("LedgerKey: empty payload".to_string()));
     }
 
     let bytes = base64::engine::general_purpose::STANDARD
@@ -345,9 +322,7 @@ pub fn decode_ledger_key(key_xdr: &str) -> Result<LedgerKey, SnapshotError> {
         .map_err(|e| SnapshotError::Base64Decode(format!("LedgerKey: {e}")))?;
 
     if bytes.is_empty() {
-        return Err(SnapshotError::Base64Decode(
-            "LedgerKey: decoded payload is empty".to_string(),
-        ));
+        return Err(SnapshotError::Base64Decode("LedgerKey: decoded payload is empty".to_string()));
     }
 
     LedgerKey::from_xdr(bytes, Limits::none())
@@ -364,9 +339,7 @@ pub fn decode_ledger_key(key_xdr: &str) -> Result<LedgerKey, SnapshotError> {
 /// * `Err(SnapshotError)` - Decoding or parsing failed
 pub fn decode_ledger_entry(entry_xdr: &str) -> Result<LedgerEntry, SnapshotError> {
     if entry_xdr.is_empty() {
-        return Err(SnapshotError::Base64Decode(
-            "LedgerEntry: empty payload".to_string(),
-        ));
+        return Err(SnapshotError::Base64Decode("LedgerEntry: empty payload".to_string()));
     }
 
     let bytes = base64::engine::general_purpose::STANDARD
@@ -399,11 +372,7 @@ impl LoadStats {
     /// Creates new load statistics.
     #[allow(dead_code)]
     pub fn new(loaded: usize, failed: usize, total: usize) -> Self {
-        Self {
-            loaded_count: loaded,
-            failed_count: failed,
-            total_count: total,
-        }
+        Self { loaded_count: loaded, failed_count: failed, total_count: total }
     }
 
     /// Returns true if all entries were loaded successfully.
@@ -448,27 +417,18 @@ mod tests {
     fn test_decode_invalid_base64() {
         let result = decode_ledger_key("not-valid-base64!!!");
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SnapshotError::Base64Decode(_)
-        ));
+        assert!(matches!(result.unwrap_err(), SnapshotError::Base64Decode(_)));
     }
 
     #[test]
     fn test_decode_empty_payloads() {
         let key_result = decode_ledger_key("");
         assert!(key_result.is_err());
-        assert!(matches!(
-            key_result.unwrap_err(),
-            SnapshotError::Base64Decode(_)
-        ));
+        assert!(matches!(key_result.unwrap_err(), SnapshotError::Base64Decode(_)));
 
         let entry_result = decode_ledger_entry("");
         assert!(entry_result.is_err());
-        assert!(matches!(
-            entry_result.unwrap_err(),
-            SnapshotError::Base64Decode(_)
-        ));
+        assert!(matches!(entry_result.unwrap_err(), SnapshotError::Base64Decode(_)));
     }
 
     #[test]
@@ -478,10 +438,7 @@ mod tests {
 
         let result = LedgerSnapshot::from_base64_map(&entries);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SnapshotError::Base64Decode(_)
-        ));
+        assert!(matches!(result.unwrap_err(), SnapshotError::Base64Decode(_)));
     }
 
     #[test]
@@ -508,10 +465,7 @@ mod tests {
             .expect("Failed to build test payload");
 
         let result = LedgerSnapshot::from_bytes(&bytes);
-        assert!(matches!(
-            result.unwrap_err(),
-            SnapshotError::UnsupportedVersion(_)
-        ));
+        assert!(matches!(result.unwrap_err(), SnapshotError::UnsupportedVersion(_)));
     }
 
     #[test]

@@ -75,21 +75,13 @@ impl FunctionSignature {
         let params = if self.params.is_empty() {
             String::new()
         } else {
-            self.params
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
+            self.params.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", ")
         };
 
         let results = if self.results.is_empty() {
             String::new()
         } else {
-            self.results
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
+            self.results.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", ")
         };
 
         format!("({}) -> ({})", params, results)
@@ -119,12 +111,7 @@ impl FunctionSignature {
             }
         }
 
-        SignatureDiff {
-            param_count_match,
-            result_count_match,
-            param_mismatches,
-            result_mismatches,
-        }
+        SignatureDiff { param_count_match, result_count_match, param_mismatches, result_mismatches }
     }
 }
 

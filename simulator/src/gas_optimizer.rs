@@ -40,10 +40,7 @@ pub struct GasOptimizationAdvisor {
 
 impl GasOptimizationAdvisor {
     pub fn new() -> Self {
-        Self {
-            baseline_cpu_per_op: 1000,
-            baseline_memory_per_op: 500,
-        }
+        Self { baseline_cpu_per_op: 1000, baseline_memory_per_op: 500 }
     }
 
     /// Analyze budget metrics and generate optimization suggestions

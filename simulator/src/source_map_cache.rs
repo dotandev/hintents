@@ -104,20 +104,14 @@ impl SourceMapCache {
     /// Creates a new SourceMapCache with the default cache directory
     pub fn new() -> Result<Self, String> {
         let cache_dir = Self::get_default_cache_dir()?;
-        Ok(Self {
-            cache_dir,
-            max_cache_size: None,
-        })
+        Ok(Self { cache_dir, max_cache_size: None })
     }
 
     /// Creates a new SourceMapCache with a custom cache directory
     pub fn with_cache_dir(cache_dir: PathBuf) -> Result<Self, String> {
         fs::create_dir_all(&cache_dir)
             .map_err(|e| format!("Failed to create cache directory: {}", e))?;
-        Ok(Self {
-            cache_dir,
-            max_cache_size: None,
-        })
+        Ok(Self { cache_dir, max_cache_size: None })
     }
 
     /// Creates a new SourceMapCache with a custom cache directory and max cache size
@@ -127,10 +121,7 @@ impl SourceMapCache {
     ) -> Result<Self, String> {
         fs::create_dir_all(&cache_dir)
             .map_err(|e| format!("Failed to create cache directory: {}", e))?;
-        Ok(Self {
-            cache_dir,
-            max_cache_size: Some(max_cache_size),
-        })
+        Ok(Self { cache_dir, max_cache_size: Some(max_cache_size) })
     }
 
     /// Sets the max cache size for this cache instance
@@ -230,10 +221,7 @@ impl SourceMapCache {
 
         let result = match bincode::deserialize(&bytes) {
             Ok(entry) => {
-                println!(
-                    "Cache hit! Loading source map from cache for WASM: {}",
-                    &wasm_hash[..8]
-                );
+                println!("Cache hit! Loading source map from cache for WASM: {}", &wasm_hash[..8]);
                 Some(entry)
             }
             Err(e) => {
@@ -265,12 +253,8 @@ impl SourceMapCache {
         // Acquire an exclusive OS-level lock before writing.
         let lock_file = Self::open_lock_file(&cache_path)
             .map_err(|e| format!("Failed to open lock file {:?}: {}", cache_path, e))?;
-        flock::lock_exclusive(&lock_file).map_err(|e| {
-            format!(
-                "Failed to acquire exclusive lock on {:?}: {}",
-                cache_path, e
-            )
-        })?;
+        flock::lock_exclusive(&lock_file)
+            .map_err(|e| format!("Failed to acquire exclusive lock on {:?}: {}", cache_path, e))?;
 
         // Serialize the entry
         let bytes = bincode::serialize(&entry)
@@ -281,9 +265,7 @@ impl SourceMapCache {
         // writers from clobbering each other's tmp file (critical on Windows
         // where flock is a no-op).
         let tmp_id = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let tmp_path = self
-            .cache_dir
-            .join(format!("{}.{}.tmp", entry.wasm_hash, tmp_id));
+        let tmp_path = self.cache_dir.join(format!("{}.{}.tmp", entry.wasm_hash, tmp_id));
         let write_result = (|| {
             let mut file = File::create(&tmp_path)
                 .map_err(|e| format!("Failed to create temp cache file {:?}: {}", tmp_path, e))?;
@@ -536,10 +518,7 @@ mod tests {
     fn test_get_missing() {
         let (cache, _temp) = create_test_cache();
 
-        let result = cache.get(
-            "nonexistent_hash_1_234_567_8901_234_567_8901_234_567_89012",
-            false,
-        );
+        let result = cache.get("nonexistent_hash_1_234_567_8901_234_567_8901_234_567_89012", false);
         assert!(result.is_none());
     }
 
@@ -708,10 +687,7 @@ mod tests {
         cache.store(entry2).unwrap();
 
         let list = cache.list_cached().unwrap();
-        assert!(
-            list.len() <= 2,
-            "Should have at most 2 entries after eviction"
-        );
+        assert!(list.len() <= 2, "Should have at most 2 entries after eviction");
 
         if list.len() == 1 {
             assert_eq!(list[0].wasm_hash, wasm_hash2);
@@ -757,10 +733,7 @@ mod tests {
 
         if !list.is_empty() {
             let min_created_at = list.iter().map(|e| e.created_at).min().unwrap();
-            assert!(
-                min_created_at > 1000,
-                "Oldest entries should have been evicted"
-            );
+            assert!(min_created_at > 1000, "Oldest entries should have been evicted");
         }
     }
 
@@ -819,10 +792,6 @@ mod tests {
         }
 
         let list = cache.list_cached().unwrap();
-        assert_eq!(
-            list.len(),
-            3,
-            "No eviction should occur without max_size set"
-        );
+        assert_eq!(list.len(), 3, "No eviction should occur without max_size set");
     }
 }

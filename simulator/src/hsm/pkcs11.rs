@@ -181,11 +181,7 @@ impl Pkcs11Signer {
         // Default to Ed25519 for now
         let algorithm = "ed25519".to_string();
 
-        Ok(Self {
-            config,
-            library: Arc::new(library),
-            algorithm,
-        })
+        Ok(Self { config, library: Arc::new(library), algorithm })
     }
 
     /// Load PKCS#11 functions from the library
@@ -385,16 +381,11 @@ impl Pkcs11Signer {
             (functions.C_FindObjectsFinal)(session);
 
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!(
-                    "Failed to find key: 0x{:x}",
-                    result
-                )));
+                return Err(SignerError::Pkcs11(format!("Failed to find key: 0x{:x}", result)));
             }
 
             if object_count == 0 {
-                return Err(SignerError::KeyNotFound(
-                    "Private key not found in HSM".to_string(),
-                ));
+                return Err(SignerError::KeyNotFound("Private key not found in HSM".to_string()));
             }
 
             Ok(key_handle)
@@ -411,10 +402,7 @@ impl Pkcs11Signer {
             // If public key is provided in config, use it
             if let Some(ref pem_data) = self.config.public_key_pem {
                 let spki_bytes = pem_data.as_bytes().to_vec();
-                return Ok(PublicKey {
-                    algorithm: self.algorithm.clone(),
-                    spki_bytes,
-                });
+                return Ok(PublicKey { algorithm: self.algorithm.clone(), spki_bytes });
             }
 
             // Otherwise, extract public key from HSM
@@ -475,18 +463,13 @@ impl Pkcs11Signer {
             }
 
             if object_count == 0 {
-                return Err(SignerError::KeyNotFound(
-                    "Public key not found in HSM".to_string(),
-                ));
+                return Err(SignerError::KeyNotFound("Public key not found in HSM".to_string()));
             }
 
             // Get EC point (public key)
             let mut point_len: c_ulong = 0;
-            let mut point_attr = CK_ATTRIBUTE {
-                type_: CKA_EC_POINT,
-                p_value: ptr::null_mut(),
-                ul_value_len: 0,
-            };
+            let mut point_attr =
+                CK_ATTRIBUTE { type_: CKA_EC_POINT, p_value: ptr::null_mut(), ul_value_len: 0 };
 
             let result = (functions.C_GetAttributeValue)(session, key_handle, &mut point_attr, 1);
             if result == CKR_OK {
@@ -506,10 +489,7 @@ impl Pkcs11Signer {
             }
 
             // Convert to SPKI format (simplified - in practice you'd need proper DER encoding)
-            Ok(PublicKey {
-                algorithm: self.algorithm.clone(),
-                spki_bytes: point_bytes,
-            })
+            Ok(PublicKey { algorithm: self.algorithm.clone(), spki_bytes: point_bytes })
         }
     }
 }
@@ -538,10 +518,7 @@ impl Signer for Pkcs11Signer {
                 (functions.C_OpenSession)(slot, CKF_SERIAL_SESSION | CKF_RW_SESSION, &mut session);
             if result != CKR_OK {
                 (functions.C_Finalize)(ptr::null_mut());
-                return Err(SignerError::Pkcs11(format!(
-                    "Failed to open session: 0x{:x}",
-                    result
-                )));
+                return Err(SignerError::Pkcs11(format!("Failed to open session: 0x{:x}", result)));
             }
 
             // Login
@@ -550,10 +527,7 @@ impl Signer for Pkcs11Signer {
             if result != CKR_OK {
                 (functions.C_CloseSession)(session);
                 (functions.C_Finalize)(ptr::null_mut());
-                return Err(SignerError::Pkcs11(format!(
-                    "Failed to login: 0x{:x}",
-                    result
-                )));
+                return Err(SignerError::Pkcs11(format!("Failed to login: 0x{:x}", result)));
             }
 
             // Find private key
@@ -620,16 +594,10 @@ impl Signer for Pkcs11Signer {
             (functions.C_Finalize)(ptr::null_mut());
 
             if result != CKR_OK {
-                return Err(SignerError::Pkcs11(format!(
-                    "Failed to sign data: 0x{:x}",
-                    result
-                )));
+                return Err(SignerError::Pkcs11(format!("Failed to sign data: 0x{:x}", result)));
             }
 
-            Ok(Signature {
-                algorithm: self.algorithm.clone(),
-                bytes: signature_bytes,
-            })
+            Ok(Signature { algorithm: self.algorithm.clone(), bytes: signature_bytes })
         }
     }
 
@@ -655,10 +623,7 @@ impl Signer for Pkcs11Signer {
                 (functions.C_OpenSession)(slot, CKF_SERIAL_SESSION | CKF_RW_SESSION, &mut session);
             if result != CKR_OK {
                 (functions.C_Finalize)(ptr::null_mut());
-                return Err(SignerError::Pkcs11(format!(
-                    "Failed to open session: 0x{:x}",
-                    result
-                )));
+                return Err(SignerError::Pkcs11(format!("Failed to open session: 0x{:x}", result)));
             }
 
             // Login
@@ -667,10 +632,7 @@ impl Signer for Pkcs11Signer {
             if result != CKR_OK {
                 (functions.C_CloseSession)(session);
                 (functions.C_Finalize)(ptr::null_mut());
-                return Err(SignerError::Pkcs11(format!(
-                    "Failed to login: 0x{:x}",
-                    result
-                )));
+                return Err(SignerError::Pkcs11(format!("Failed to login: 0x{:x}", result)));
             }
 
             // Get public key

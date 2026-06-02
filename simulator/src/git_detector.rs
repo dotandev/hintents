@@ -17,9 +17,7 @@ pub struct SearchConfig {
 
 impl Default for SearchConfig {
     fn default() -> Self {
-        Self {
-            timeout: Duration::from_secs(5),
-        }
+        Self { timeout: Duration::from_secs(5) }
     }
 }
 
@@ -47,12 +45,7 @@ impl GitRepository {
         let branch = Self::get_current_branch(&root_path).unwrap_or_else(|| "main".to_string());
         let commit_hash = Self::get_commit_hash(&root_path)?;
 
-        Some(GitRepository {
-            remote_url,
-            branch,
-            commit_hash,
-            root_path,
-        })
+        Some(GitRepository { remote_url, branch, commit_hash, root_path })
     }
 
     /// Walk up the directory tree from `start_path` looking for a `.git` entry.
@@ -181,20 +174,14 @@ impl GitRepository {
 
         let relative_path = self.make_relative_path(file_path)?;
 
-        Some(format!(
-            "{}/blob/{}/{}#L{}",
-            self.remote_url, self.commit_hash, relative_path, line
-        ))
+        Some(format!("{}/blob/{}/{}#L{}", self.remote_url, self.commit_hash, relative_path, line))
     }
 
     fn make_relative_path(&self, file_path: &str) -> Option<String> {
         let path = Path::new(file_path);
 
         if path.is_absolute() {
-            path.strip_prefix(&self.root_path)
-                .ok()
-                .and_then(|p| p.to_str())
-                .map(|s| s.to_string())
+            path.strip_prefix(&self.root_path).ok().and_then(|p| p.to_str()).map(|s| s.to_string())
         } else {
             Some(file_path.to_string())
         }
@@ -216,11 +203,7 @@ mod tests {
     }
 
     fn git_init(repo_dir: &Path) -> io::Result<()> {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(repo_dir)
-            .arg("init")
-            .output()?;
+        let output = Command::new("git").arg("-C").arg(repo_dir).arg("init").output()?;
         if output.status.success() {
             Ok(())
         } else {
@@ -230,9 +213,7 @@ mod tests {
 
     /// Build a `SearchConfig` with the given timeout in milliseconds.
     fn cfg_ms(ms: u64) -> SearchConfig {
-        SearchConfig {
-            timeout: Duration::from_millis(ms),
-        }
+        SearchConfig { timeout: Duration::from_millis(ms) }
     }
 
     // ── existing tests ───────────────────────────────────────────────────────
