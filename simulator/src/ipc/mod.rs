@@ -56,7 +56,7 @@ mod tests {
 
     #[test]
     fn test_emit_snapshot_frame_does_not_panic() {
-        emit_snapshot_frame(0, serde_json::json!({"test": true}));
+        emit_snapshot_frame(0, serde_json::json!({"test": true})).unwrap();
     }
 
     #[test]

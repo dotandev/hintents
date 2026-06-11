@@ -59,17 +59,12 @@ pub enum BridgeControlCommand {
 
 impl StreamFrame {
     #[allow(dead_code)]
-    pub fn emit(&self) {
-        match serde_json::to_string(self) {
-            Ok(line) => {
-                let stdout = std::io::stdout();
-                let mut handle = stdout.lock();
-                let _ = writeln!(handle, "{line}");
-            }
-            Err(e) => {
-                eprintln!("bridge: failed to serialize StreamFrame: {e}");
-            }
-        }
+    pub fn emit(&self) -> Result<(), IpcError> {
+        let line = serde_json::to_string(self)?;
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
+        writeln!(handle, "{line}")?;
+        Ok(())
     }
 }
 
@@ -144,23 +139,23 @@ impl SnapshotRegistry {
 }
 
 #[allow(dead_code)]
-pub fn emit_snapshot_frame(seq: u32, data: serde_json::Value) {
+pub fn emit_snapshot_frame(seq: u32, data: serde_json::Value) -> Result<(), IpcError> {
     StreamFrame {
         frame_type: FrameType::Snapshot,
         seq,
         data,
     }
-    .emit();
+    .emit()
 }
 
 #[allow(dead_code)]
-pub fn emit_final_frame(seq: u32, data: serde_json::Value) {
+pub fn emit_final_frame(seq: u32, data: serde_json::Value) -> Result<(), IpcError> {
     StreamFrame {
         frame_type: FrameType::Final,
         seq,
         data,
     }
-    .emit();
+    .emit()
 }
 
 #[allow(dead_code)]
