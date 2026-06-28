@@ -31,13 +31,29 @@ pub struct SimHost {
 }
 
 impl SimHost {
+    fn budget_limits_warning(cpu: u64, mem: u64) -> String {
+        format!(
+            "WARNING: custom budget_limits requested (cpu={cpu}, memory={mem}), but this simulator build cannot apply custom Soroban budget ceilings through the current stable soroban_env_host API. Using default mainnet budget settings instead."
+        )
+    }
+
+    fn budget_with_requested_limits(budget_limits: Option<(u64, u64)>) -> Budget {
+        if let Some((cpu, mem)) = budget_limits {
+            let warning = Self::budget_limits_warning(cpu, mem);
+            tracing::warn!(target: "simulator::runner", "{warning}");
+            eprintln!("{warning}");
+        }
+
+        Budget::default()
+    }
+
     /// Initialize a new Host with optional budget settings and resource calibration.
     pub fn new(
         budget_limits: Option<(u64, u64)>,
         calibration: Option<crate::types::ResourceCalibration>,
         memory_limit: Option<u64>,
     ) -> Self {
-        let budget = Budget::default();
+        let budget = Self::budget_with_requested_limits(budget_limits);
 
         // If the caller requested a custom resource calibration, explicitly
         // fail early rather than silently ignoring the setting. This avoids
@@ -50,10 +66,6 @@ impl SimHost {
             );
         }
 
-        if let Some((_cpu, _mem)) = budget_limits {
-            // Budget customization requires testutils feature or extended API
-            // Using default mainnet budget settings
-        }
 
         // Host::with_storage_and_budget is available in recent versions
         let host = Host::with_storage_and_budget(Storage::default(), budget);
@@ -78,7 +90,7 @@ impl SimHost {
         memory_limit: Option<u64>,
         snapshot: &LedgerSnapshot,
     ) -> Result<Self, SimHostError> {
-        let budget = Budget::default();
+        let budget = Self::budget_with_requested_limits(budget_limits);
         let storage = Self::storage_from_snapshot(snapshot, &budget)?;
         let host = Host::with_storage_and_budget(storage, budget);
         host.set_diagnostic_level(DiagnosticLevel::Debug)?;
@@ -209,6 +221,23 @@ mod tests {
     };
     use soroban_env_host::EnvBase;
 
+
+    #[test]
+    fn test_budget_limits_warning_names_requested_values() {
+        let warning = SimHost::budget_limits_warning(12_345, 67_890);
+
+        assert!(warning.contains("custom budget_limits requested"));
+        assert!(warning.contains("cpu=12345"));
+        assert!(warning.contains("memory=67890"));
+        assert!(warning.contains("default mainnet budget settings"));
+    }
+
+    #[test]
+    fn test_custom_budget_limits_still_create_functional_host() {
+        let host = SimHost::new(Some((12_345, 67_890)), None, None);
+
+        assert!(host.inner.budget_cloned().get_cpu_insns_consumed().is_ok());
+    }
     #[test]
     fn test_host_initialization() {
         let host = SimHost::new(None, None, None);
