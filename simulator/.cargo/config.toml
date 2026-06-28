@@ -1,0 +1,7 @@
+# Linker configuration for x86_64-pc-windows-gnu (used in CI / sandboxed envs
+# where the MSVC toolchain's link.exe is unavailable).
+# The self-contained GCC and dlltool shipped with rust-mingw are used so no
+# external MinGW installation is required.
+[target.x86_64-pc-windows-gnu]
+linker = "C:\\Users\\opeid\\.rustup\\toolchains\\stable-x86_64-pc-windows-gnu\\lib\\rustlib\\x86_64-pc-windows-gnu\\bin\\self-contained\\x86_64-w64-mingw32-gcc.exe"
+ar     = "C:\\Users\\opeid\\.rustup\\toolchains\\stable-x86_64-pc-windows-gnu\\lib\\rustlib\\x86_64-pc-windows-gnu\\bin\\self-contained\\dlltool.exe"

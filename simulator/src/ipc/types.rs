@@ -24,6 +24,12 @@ pub enum IpcError {
         #[source]
         source: std::io::Error,
     },
+
+    /// A request payload failed JSON parsing or schema validation.
+    /// The inner string is a human-readable description of the failure,
+    /// safe to forward to the Go client as a structured error message.
+    #[error("IPC validation error: {0}")]
+    Validation(String),
 }
 
 /// Identifies the kind of streaming frame emitted to stdout.
