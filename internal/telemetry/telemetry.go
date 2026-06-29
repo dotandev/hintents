@@ -22,30 +22,24 @@ type Config struct {
 	ServiceName string
 }
 
-// silentSpanExporter wraps a SpanExporter and swallows all export errors so
-// collector outages never block or log. Core SDK paths must not depend on telemetry.
-type silentSpanExporter struct {
-	delegate trace.SpanExporter
-}
+// noopErrorHandler implements otel.ErrorHandler and silently discards all
+// errors. This prevents collector outages from logging or blocking core paths.
+type noopErrorHandler struct{}
 
-func (s *silentSpanExporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) error {
-	_ = s.delegate.ExportSpans(ctx, spans)
-	return nil
-}
-
-func (s *silentSpanExporter) Shutdown(ctx context.Context) error {
-	_ = s.delegate.Shutdown(ctx)
-	return nil
-}
+func (noopErrorHandler) Handle(error) {}
 
 // Init initializes OpenTelemetry with the given configuration.
 // Graceful degradation: if the metrics collector is unreachable or init fails,
 // a no-op provider is used instead so the application never blocks or errors.
-// Export failures are swallowed; telemetry fails silently.
+// Export failures are swallowed globally via otel.SetErrorHandler.
 func Init(ctx context.Context, config Config) (func(), error) {
 	if !config.Enabled {
 		return func() {}, nil
 	}
+
+	// Swallow all OpenTelemetry SDK errors globally so telemetry never
+	// surfaces errors to core application paths.
+	otel.SetErrorHandler(noopErrorHandler{})
 
 	// Create OTLP HTTP exporter (best-effort; short timeout to avoid blocking)
 	exporter, err := otlptracehttp.New(ctx,
@@ -72,12 +66,9 @@ func Init(ctx context.Context, config Config) (func(), error) {
 		return func() {}, nil
 	}
 
-	// Wrap exporter so export failures never surface or log
-	silent := &silentSpanExporter{delegate: exporter}
-
-	// Create trace provider with silent exporter so collector downtime doesn't block or log
+	// Use exporter directly — errors are swallowed by the global handler
 	tp := trace.NewTracerProvider(
-		trace.WithBatcher(silent),
+		trace.WithBatcher(exporter),
 		trace.WithResource(res),
 	)
 
