@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dotandev/hintents/internal/logger"
@@ -59,6 +61,9 @@ type FuzzerConfig struct {
 	TargetContractID   string
 	Seed               int64
 	VerboseLogging     bool
+	// Workers controls the number of parallel fuzzing goroutines.
+	// Defaults to runtime.NumCPU() when zero or negative.
+	Workers int
 }
 
 // MutationStrategy defines how inputs are mutated
@@ -109,6 +114,10 @@ func NewCoverageGuidedFuzzer(runner simulator.RunnerInterface, config FuzzerConf
 		seed = time.Now().UnixNano()
 	}
 
+	if config.Workers <= 0 {
+		config.Workers = runtime.NumCPU()
+	}
+
 	return &CoverageGuidedFuzzer{
 		runner:           runner,
 		config:           config,
@@ -120,7 +129,10 @@ func NewCoverageGuidedFuzzer(runner simulator.RunnerInterface, config FuzzerConf
 	}
 }
 
-// Run executes the coverage-guided fuzzing campaign
+// Run executes the coverage-guided fuzzing campaign using multiple parallel workers.
+// The number of workers is controlled by FuzzerConfig.Workers (defaults to runtime.NumCPU()).
+// Iterations are distributed across workers; the run stops once MaxIterations have been
+// executed in total or the context is cancelled.
 func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.FuzzerInput) (*FuzzingStats, error) {
 	if seedInput == nil {
 		return nil, fmt.Errorf("seed input required for fuzzing")
@@ -130,88 +142,159 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 		StartTime: time.Now(),
 	}
 
-	// Add seed input to corpus
+	// Add seed input to corpus before workers start.
 	f.addToCorpus(ctx, seedInput, nil)
 
-	// Main fuzzing loop
-	for i := uint64(0); i < f.config.MaxIterations && ctx.Err() == nil; i++ {
-		// Select corpus entry for mutation (favor entries with recent coverage gains)
-		entry := f.selectCorpusEntry()
-		if entry == nil {
-			break
-		}
-
-		// Mutate the selected input
-		mutated := f.mutateInput(entry.Input)
-
-		// Run the simulator
-		result, coverage := f.executeInput(ctx, &mutated)
-
-		// Track crashes
-		if result.Status == "crash" {
-			f.mu.Lock()
-			f.crashingInputs = append(f.crashingInputs, &mutated)
-			f.mu.Unlock()
-			stats.CrashCount++
-		}
-
-		// Update corpus if new coverage found
-		newCoverage := f.addToCorpus(ctx, &mutated, coverage)
-		if newCoverage {
-			stats.NewCoverageCount++
-			f.lastCoverageGrow = time.Now()
-		}
-
-		f.mu.Lock()
-		f.executionCount++
-		f.mu.Unlock()
-		stats.ExecutionCount = f.executionCount
-
-		// Log progress periodically
-		if f.config.VerboseLogging && (i+1)%100 == 0 {
-			f.logProgress(i + 1)
-		}
+	numWorkers := f.config.Workers
+	if numWorkers <= 0 {
+		numWorkers = runtime.NumCPU()
 	}
 
+	// Shared atomic counters for lock-free progress tracking across workers.
+	var (
+		totalExecuted atomic.Uint64
+		totalCrashes  atomic.Uint64
+		totalNewCov   atomic.Uint64
+	)
+
+	// workQueue feeds iteration indices to workers so we can distribute
+	// exactly MaxIterations units of work across any number of goroutines.
+	workQueue := make(chan struct{}, numWorkers*2)
+
+	var wg sync.WaitGroup
+
+	// Producer: emit MaxIterations tokens, then close.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(workQueue)
+		for i := uint64(0); i < f.config.MaxIterations; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			case workQueue <- struct{}{}:
+			}
+		}
+	}()
+
+	// Workers: each gets a private RNG seeded from the shared seedRng so
+	// they never share mutable state through the global generator.
+	for w := 0; w < numWorkers; w++ {
+		// Grab a seed for this worker under the shared lock.
+		f.mu.Lock()
+		workerSeed := f.seedRng.Int63()
+		f.mu.Unlock()
+
+		wg.Add(1)
+		go func(localRng *rand.Rand) {
+			defer wg.Done()
+
+			for range workQueue {
+				if ctx.Err() != nil {
+					return
+				}
+
+				// Select a corpus entry and mutate it using the worker-local RNG.
+				entry := f.selectCorpusEntryWithRng(localRng)
+				if entry == nil {
+					return
+				}
+
+				mutated := f.mutateInputWithRng(entry.Input, localRng)
+
+				result, coverage := f.executeInput(ctx, &mutated)
+
+				if result.Status == "crash" {
+					f.mu.Lock()
+					f.crashingInputs = append(f.crashingInputs, &mutated)
+					f.mu.Unlock()
+					totalCrashes.Add(1)
+				}
+
+				newCoverage := f.addToCorpusWithRng(ctx, &mutated, coverage, localRng)
+				if newCoverage {
+					totalNewCov.Add(1)
+					f.mu.Lock()
+					f.lastCoverageGrow = time.Now()
+					f.mu.Unlock()
+				}
+
+				executed := totalExecuted.Add(1)
+
+				f.mu.Lock()
+				f.executionCount = executed
+				f.mu.Unlock()
+
+				// Periodic progress logging (only one worker logs per 100-iteration band).
+				if f.config.VerboseLogging && executed%100 == 0 {
+					f.logProgress(executed)
+				}
+			}
+		}(rand.New(rand.NewSource(workerSeed)))
+	}
+
+	wg.Wait()
+
 	stats.EndTime = time.Now()
+	stats.ExecutionCount = totalExecuted.Load()
+	stats.CrashCount = totalCrashes.Load()
+	stats.NewCoverageCount = totalNewCov.Load()
+
+	f.mu.RLock()
 	stats.CorpusSize = len(f.corpus)
 	stats.CoverageEntryCount = len(f.coverageMap)
 	stats.UniqueInputsCount = len(f.corpus)
+	f.mu.RUnlock()
 
 	return stats, nil
 }
 
-// addToCorpus adds an input to the corpus if it improves coverage
-// Returns true if the input was added (new coverage found)
+// addToCorpus adds an input to the corpus if it improves coverage.
+// rng is a caller-owned PRNG used for the probabilistic non-coverage path; it
+// must not be shared across goroutines.
+// Returns true if the input was added (new coverage found).
 func (f *CoverageGuidedFuzzer) addToCorpus(ctx context.Context, input *simulator.FuzzerInput, coverage *CoverageMap) bool {
+	f.mu.Lock()
+	seed := f.seedRng.Int63()
+	f.mu.Unlock()
+	return f.addToCorpusWithRng(ctx, input, coverage, rand.New(rand.NewSource(seed)))
+}
+
+// addToCorpusWithRng is the primary implementation used by parallel workers.
+func (f *CoverageGuidedFuzzer) addToCorpusWithRng(ctx context.Context, input *simulator.FuzzerInput, coverage *CoverageMap, rng *rand.Rand) bool {
 	if coverage == nil {
 		coverage = f.extractCoverage(input)
 	}
 
 	if !f.config.EnableCoverage {
 		// If coverage tracking disabled, keep at least one corpus entry if empty.
-		if len(f.corpus) == 0 && len(f.corpus) < f.config.MaxCorpusSize {
+		f.mu.Lock()
+		corpusLen := len(f.corpus)
+		f.mu.Unlock()
+
+		if corpusLen == 0 {
 			f.mu.Lock()
-			entry := &CorpusEntry{
-				Input:       input,
-				Timestamp:   time.Now(),
-				NewCoverage: false,
+			if len(f.corpus) == 0 && len(f.corpus) < f.config.MaxCorpusSize {
+				f.corpus = append(f.corpus, &CorpusEntry{
+					Input:       input,
+					Timestamp:   time.Now(),
+					NewCoverage: false,
+				})
 			}
-			f.corpus = append(f.corpus, entry)
 			f.mu.Unlock()
 			return false
 		}
 
-		if f.seedRng.Float64() < 0.05 && len(f.corpus) < f.config.MaxCorpusSize {
+		if rng.Float64() < 0.05 {
 			f.mu.Lock()
-			entry := &CorpusEntry{
-				Input:       input,
-				Timestamp:   time.Now(),
-				NewCoverage: false,
+			if len(f.corpus) < f.config.MaxCorpusSize {
+				f.corpus = append(f.corpus, &CorpusEntry{
+					Input:       input,
+					Timestamp:   time.Now(),
+					NewCoverage: false,
+				})
 			}
-			f.corpus = append(f.corpus, entry)
 			f.mu.Unlock()
-			return false
 		}
 		return false
 	}
@@ -247,8 +330,18 @@ func (f *CoverageGuidedFuzzer) addToCorpus(ctx context.Context, input *simulator
 	return false
 }
 
-// selectCorpusEntry selects an entry from the corpus favoring recent ones
+// selectCorpusEntry selects an entry from the corpus favoring recent ones.
+// It creates a short-lived local RNG for callers that don't have their own.
 func (f *CoverageGuidedFuzzer) selectCorpusEntry() *CorpusEntry {
+	f.mu.Lock()
+	seed := f.seedRng.Int63()
+	f.mu.Unlock()
+	return f.selectCorpusEntryWithRng(rand.New(rand.NewSource(seed)))
+}
+
+// selectCorpusEntryWithRng selects a corpus entry using the provided RNG so
+// parallel workers can call this without touching the shared seedRng.
+func (f *CoverageGuidedFuzzer) selectCorpusEntryWithRng(rng *rand.Rand) *CorpusEntry {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -263,26 +356,38 @@ func (f *CoverageGuidedFuzzer) selectCorpusEntry() *CorpusEntry {
 	}
 
 	// Pick a random entry, slightly favoring recent ones
-	idx := f.seedRng.Intn(len(f.corpus))
-	if f.seedRng.Float64() < 0.3 && len(f.corpus) > 1 {
+	idx := rng.Intn(len(f.corpus))
+	if rng.Float64() < 0.3 && len(f.corpus) > 1 {
 		// 30% chance to pick from the most recent 10%
-		recentIdx := f.seedRng.Intn((len(f.corpus) / 10) + 1)
+		recentIdx := rng.Intn((len(f.corpus) / 10) + 1)
 		idx = len(f.corpus) - 1 - recentIdx
 	}
 
 	return f.corpus[idx]
 }
 
-// mutateInput applies mutation strategies to create a new input
+// mutateInput applies mutation strategies to create a new input.
+// It creates a short-lived local RNG seeded from the shared seedRng so callers
+// that don't have their own RNG can still generate reproducible mutations
+// without contending on the shared source across workers.
 func (f *CoverageGuidedFuzzer) mutateInput(base *simulator.FuzzerInput) simulator.FuzzerInput {
-	rng := rand.New(rand.NewSource(f.seedRng.Int63()))
+	f.mu.Lock()
+	seed := f.seedRng.Int63()
+	f.mu.Unlock()
+	return f.mutateInputWithRng(base, rand.New(rand.NewSource(seed)))
+}
+
+// mutateInputWithRng applies mutation strategies using a caller-supplied RNG.
+// This is the primary mutation implementation used by parallel workers so each
+// worker can carry its own independent PRNG and avoid lock contention.
+func (f *CoverageGuidedFuzzer) mutateInputWithRng(base *simulator.FuzzerInput, rng *rand.Rand) simulator.FuzzerInput {
 
 	mutated := simulator.FuzzerInput{
 		EnvelopeXdr:   base.EnvelopeXdr,
 		Timestamp:     base.Timestamp,
 		LedgerEntries: make(map[string]string),
 		Args:          make([]string, len(base.Args)),
-		Seed:          f.seedRng.Uint64(),
+		Seed:          rng.Uint64(),
 	}
 
 	// Copy inputs
