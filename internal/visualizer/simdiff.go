@@ -6,6 +6,8 @@
 package visualizer
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"sort"
 	"strings"
@@ -48,7 +50,7 @@ func DiffLedgerEntries(before, after map[string]string) []LedgerDiffEntry {
 	for k := range allKeys {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	sortLedgerKeys(keys)
 
 	entries := make([]LedgerDiffEntry, 0, len(keys))
 	for _, k := range keys {
@@ -75,6 +77,33 @@ func DiffLedgerEntries(before, after map[string]string) []LedgerDiffEntry {
 		})
 	}
 	return entries
+}
+
+// sortLedgerKeys sorts base64-encoded XDR ledger keys by the byte order of their
+// decoded binary values, rather than the lexicographic order of the base64 text.
+// This matches the canonical ordering of the underlying ledger keys. Keys that
+// fail to decode fall back to comparison of their raw base64 string, and decoded
+// keys always sort before undecodable ones to keep the ordering deterministic.
+func sortLedgerKeys(keys []string) {
+	decoded := make(map[string][]byte, len(keys))
+	for _, k := range keys {
+		if b, err := base64.StdEncoding.DecodeString(k); err == nil {
+			decoded[k] = b
+		}
+	}
+
+	sort.Slice(keys, func(i, j int) bool {
+		bi, oki := decoded[keys[i]]
+		bj, okj := decoded[keys[j]]
+		switch {
+		case oki && okj:
+			return bytes.Compare(bi, bj) < 0
+		case oki != okj:
+			return oki // decodable keys sort before undecodable ones
+		default:
+			return keys[i] < keys[j]
+		}
+	})
 }
 
 // RenderLedgerStateDiff prints a colored before/after diff of ledger state changes
