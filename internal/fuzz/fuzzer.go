@@ -49,37 +49,67 @@ type CoverageGuidedFuzzer struct {
 }
 
 // FuzzerConfig contains configuration for the coverage-guided fuzzer
-type FuzzerConfig struct {
-	MaxIterations      uint64
-	TimeoutMs          uint64
-	MaxCorpusSize      int
-	CoverageSampleRate float64 // 0.0-1.0: probability of recording coverage
-	MutationStrategies []MutationStrategy
-	EnableCoverage     bool
-	TargetContractID   string
-	Seed               int64
-	VerboseLogging     bool
-}
+ type FuzzerConfig struct {
+ 	MaxIterations      uint64
+ 	TimeoutMs          uint64
+ 	MaxCorpusSize      int
+ 	CoverageSampleRate float64 // 0.0-1.0: probability of recording coverage
+ 	MutationStrategies []MutationStrategy
+ 	CustomStrategies   []MutationStrategyInterface
+ 	EnableCoverage     bool
+ 	TargetContractID   string
+ 	Seed               int64
+ 	VerboseLogging     bool
+ }
 
 // MutationStrategy defines how inputs are mutated
-type MutationStrategy string
+ type MutationStrategy string
 
-const (
-	// Bitflip mutations flip random bits
-	StrategyBitflip MutationStrategy = "bitflip"
+ const (
+ 	// Bitflip mutations flip random bits
+ 	StrategyBitflip MutationStrategy = "bitflip"
 
-	// ByteFlip mutations alter entire bytes
-	StrategyByteFlip MutationStrategy = "byteflip"
+ 	// ByteFlip mutations alter entire bytes
+ 	StrategyByteFlip MutationStrategy = "byteflip"
 
-	// Interesting mutations use interesting byte values
-	StrategyInteresting MutationStrategy = "interesting"
+ 	// Interesting mutations use interesting byte values
+ 	StrategyInteresting MutationStrategy = "interesting"
 
-	// Dictionary mutations use known keywords
-	StrategyDictionary MutationStrategy = "dictionary"
+ 	// Dictionary mutations use known keywords
+ 	StrategyDictionary MutationStrategy = "dictionary"
 
-	// Havoc performs random mutations
-	StrategyHavoc MutationStrategy = "havoc"
-)
+ 	// Havoc performs random mutations
+ 	StrategyHavoc MutationStrategy = "havoc"
+ )
+
+ // MutationStrategy defines the interface for mutation strategies
+ // Consumers can implement their own contract-aware mutators
+ type MutationStrategyInterface interface {
+ 	Apply(f *CoverageGuidedFuzzer, input *simulator.FuzzerInput, rng *rand.Rand)
+ }
+
+ // DefaultMutationStrategy implements the MutationStrategyInterface
+ // for the built-in mutation strategies
+ type DefaultMutationStrategy struct {
+ 	strategy MutationStrategy
+ }
+
+ func (m *DefaultMutationStrategy) Apply(f *CoverageGuidedFuzzer, input *simulator.FuzzerInput, rng *rand.Rand) {
+ 	switch m.strategy {
+ 	case StrategyBitflip:
+ 		f.applyBitflipMutation(input, rng)
+ 	case StrategyByteFlip:
+ 		f.applyByteflipMutation(input, rng)
+ 	case StrategyInteresting:
+ 		f.applyInterestingMutation(input, rng)
+ 	case StrategyHavoc:
+ 		f.applyHavocMutation(input, rng)
+ 	case StrategyDictionary:
+ 		f.applyDictionaryMutation(input, rng)
+ 	default:
+ 		f.applyBitflipMutation(input, rng)
+ 	}
+ }
 
 // NewCoverageGuidedFuzzer creates a new coverage-guided fuzzer
 func NewCoverageGuidedFuzzer(runner simulator.RunnerInterface, config FuzzerConfig) *CoverageGuidedFuzzer {
@@ -274,42 +304,50 @@ func (f *CoverageGuidedFuzzer) selectCorpusEntry() *CorpusEntry {
 }
 
 // mutateInput applies mutation strategies to create a new input
-func (f *CoverageGuidedFuzzer) mutateInput(base *simulator.FuzzerInput) simulator.FuzzerInput {
-	rng := rand.New(rand.NewSource(f.seedRng.Int63()))
+ func (f *CoverageGuidedFuzzer) mutateInput(base *simulator.FuzzerInput) simulator.FuzzerInput {
+ 	rng := rand.New(rand.NewSource(f.seedRng.Int63()))
 
-	mutated := simulator.FuzzerInput{
-		EnvelopeXdr:   base.EnvelopeXdr,
-		Timestamp:     base.Timestamp,
-		LedgerEntries: make(map[string]string),
-		Args:          make([]string, len(base.Args)),
-		Seed:          f.seedRng.Uint64(),
-	}
+ 	mutated := simulator.FuzzerInput{
+ 		EnvelopeXdr:   base.EnvelopeXdr,
+ 		Timestamp:     base.Timestamp,
+ 		LedgerEntries: make(map[string]string),
+ 		Args:          make([]string, len(base.Args)),
+ 		Seed:          f.seedRng.Uint64(),
+ 	}
 
-	// Copy inputs
-	for k, v := range base.LedgerEntries {
-		mutated.LedgerEntries[k] = v
-	}
-	copy(mutated.Args, base.Args)
+ 	// Copy inputs
+ 	for k, v := range base.LedgerEntries {
+ 		mutated.LedgerEntries[k] = v
+ 	}
+ 	copy(mutated.Args, base.Args)
 
-	// Select a random mutation strategy
-	strategy := f.config.MutationStrategies[rng.Intn(len(f.config.MutationStrategies))]
+ 	// If custom strategies are configured, use them
+ 	if len(f.config.CustomStrategies) > 0 {
+ 		strategy := f.config.CustomStrategies[rng.Intn(len(f.config.CustomStrategies))]
+ 		strategy.Apply(f, &mutated, rng)
+ 		return mutated
+ 	}
 
-	// Apply mutations
-	switch strategy {
-	case StrategyBitflip:
-		f.applyBitflipMutation(&mutated, rng)
-	case StrategyByteFlip:
-		f.applyByteflipMutation(&mutated, rng)
-	case StrategyInteresting:
-		f.applyInterestingMutation(&mutated, rng)
-	case StrategyHavoc:
-		f.applyHavocMutation(&mutated, rng)
-	default:
-		f.applyBitflipMutation(&mutated, rng)
-	}
+ 	// Apply default mutation strategies
+ 	strategy := f.config.MutationStrategies[rng.Intn(len(f.config.MutationStrategies))]
 
-	return mutated
-}
+ 	switch strategy {
+ 	case StrategyBitflip:
+ 		f.applyBitflipMutation(&mutated, rng)
+ 	case StrategyByteFlip:
+ 		f.applyByteflipMutation(&mutated, rng)
+ 	case StrategyInteresting:
+ 		f.applyInterestingMutation(&mutated, rng)
+ 	case StrategyHavoc:
+ 		f.applyHavocMutation(&mutated, rng)
+ 	case StrategyDictionary:
+ 		f.applyDictionaryMutation(&mutated, rng)
+ 	default:
+ 		f.applyBitflipMutation(&mutated, rng)
+ 	}
+
+ 	return mutated
+ }
 
 // applyBitflipMutation flips random bits in the input
 func (f *CoverageGuidedFuzzer) applyBitflipMutation(input *simulator.FuzzerInput, rng *rand.Rand) {
@@ -367,23 +405,37 @@ func (f *CoverageGuidedFuzzer) applyInterestingMutation(input *simulator.FuzzerI
 }
 
 // applyHavocMutation applies random mutations
-func (f *CoverageGuidedFuzzer) applyHavocMutation(input *simulator.FuzzerInput, rng *rand.Rand) {
-	// Apply 1-5 random mutations
-	mutationCount := 1 + rng.Intn(5)
-	for i := 0; i < mutationCount; i++ {
-		choice := rng.Intn(3)
-		switch choice {
-		case 0:
-			f.applyBitflipMutation(input, rng)
-		case 1:
-			f.applyByteflipMutation(input, rng)
-		case 2:
-			f.applyInterestingMutation(input, rng)
-		}
-	}
-}
+ func (f *CoverageGuidedFuzzer) applyHavocMutation(input *simulator.FuzzerInput, rng *rand.Rand) {
+ 	// Apply 1-5 random mutations
+ 	mutationCount := 1 + rng.Intn(5)
+ 	for i := 0; i < mutationCount; i++ {
+ 		choice := rng.Intn(3)
+ 		switch choice {
+ 		case 0:
+ 			f.applyBitflipMutation(input, rng)
+ 		case 1:
+ 			f.applyByteflipMutation(input, rng)
+ 		case 2:
+ 			f.applyInterestingMutation(input, rng)
+ 		}
+ 	}
+ }
 
-// bitflipHexString applies bitflip mutations to a hex string
+ // applyDictionaryMutation uses known keywords
+ func (f *CoverageGuidedFuzzer) applyDictionaryMutation(input *simulator.FuzzerInput, rng *rand.Rand) {
+ 	dictionary := []string{ "0", "0x0", "array", "string", "int", "timestamp", "transfer" }
+ 	if len(input.EnvelopeXdr) > 0 {
+ 		data, _ := hex.DecodeString(input.EnvelopeXdr)
+ 		if len(data) > 0 {
+ 			pos := rng.Intn(len(data))
+ 			word := dictionary[rng.Intn(len(dictionary))]
+ 			data[pos] = word[0]
+ 			input.EnvelopeXdr = hex.EncodeToString(data)
+ 		}
+ 	}
+ }
+
+ // bitflipHexString applies bitflip mutations to a hex string
 func (f *CoverageGuidedFuzzer) bitflipHexString(hexStr string, rng *rand.Rand) string {
 	data, err := hex.DecodeString(hexStr)
 	if err != nil {
