@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -223,6 +224,20 @@ func TestApplySimulationFeeMocks(t *testing.T) {
 	if assert.NotNil(t, req.MockGasPrice) {
 		assert.Equal(t, uint64(99), *req.MockGasPrice)
 	}
+}
+
+func TestReadEnvelopeFromStdin(t *testing.T) {
+	envelopeXdr := buildTestEnvelopeXdr(t)
+	stdinData := []byte(envelopeXdr)
+
+	result, err := readEnvelopeXDRFromReader(bytes.NewReader(stdinData))
+	assert.NoError(t, err)
+	assert.Equal(t, envelopeXdr, result)
+}
+
+func TestReadEnvelopeFromStdin_EmptyInput(t *testing.T) {
+	_, err := readEnvelopeXDRFromReader(bytes.NewReader(nil))
+	assert.Error(t, err)
 }
 
 func TestDeprecatedHostFunctionDetection(t *testing.T) {

@@ -124,53 +124,78 @@ Example:
 }
 
 func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
-	txHash := cmdArgs[0]
+	var txHash string
+	var envelopeXdr string
 
-	token := rpcTokenFlag
-	if token == "" {
-		token = os.Getenv("ERST_RPC_TOKEN")
-	}
-	if token == "" {
-		cfg, err := config.Load()
-		if err == nil && cfg.RPCToken != "" {
-			token = cfg.RPCToken
+	if len(cmdArgs) > 0 {
+		txHash = cmdArgs[0]
+	} else {
+		var err error
+		envelopeXdr, err = readEnvelopeXDRFromReader(cmd.InOrStdin())
+		if err != nil {
+			return errors.WrapValidationError(err.Error())
 		}
 	}
 
-	opts := []rpc.ClientOption{
-		rpc.WithNetwork(rpc.Network(networkFlag)),
-		rpc.WithToken(token),
-	}
-	if rpcURLFlag != "" {
-		opts = append(opts, rpc.WithHorizonURL(rpcURLFlag))
+	if txHash != "" {
+		token := rpcTokenFlag
+		if token == "" {
+			token = os.Getenv("ERST_RPC_TOKEN")
+		}
+		if token == "" {
+			cfg, err := config.Load()
+			if err == nil && cfg.RPCToken != "" {
+				token = cfg.RPCToken
+			}
+		}
+
+		opts := []rpc.ClientOption{
+			rpc.WithNetwork(rpc.Network(networkFlag)),
+			rpc.WithToken(token),
+		}
+		if rpcURLFlag != "" {
+			opts = append(opts, rpc.WithHorizonURL(rpcURLFlag))
+		}
+
+		client, err := rpc.NewClient(opts...)
+		if err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
+		}
+
+		fmt.Printf("Debugging transaction: %s\n", txHash)
+		fmt.Printf("Network: %s\n", networkFlag)
+		if rpcURLFlag != "" {
+			fmt.Printf("RPC URL: %s\n", rpcURLFlag)
+		}
+
+		// Fetch transaction details
+		resp, err := client.GetTransaction(cmd.Context(), txHash)
+		if err != nil {
+			return errors.WrapRPCConnectionFailed(err)
+		}
+
+		fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(resp.EnvelopeXdr))
+
+		simReq := &simulator.SimulationRequest{
+			EnvelopeXdr:   resp.EnvelopeXdr,
+			ResultMetaXdr: resp.ResultMetaXdr,
+		}
+		_, err = d.Runner.Run(cmd.Context(), simReq)
+		if err != nil {
+			return errors.WrapSimulationFailed(err, txHash)
+		}
+
+		return nil
 	}
 
-	client, err := rpc.NewClient(opts...)
-	if err != nil {
-		return errors.WrapValidationError(fmt.Sprintf("failed to create client: %v", err))
-	}
-
-	fmt.Printf("Debugging transaction: %s\n", txHash)
-	fmt.Printf("Network: %s\n", networkFlag)
-	if rpcURLFlag != "" {
-		fmt.Printf("RPC URL: %s\n", rpcURLFlag)
-	}
-
-	// Fetch transaction details
-	resp, err := client.GetTransaction(cmd.Context(), txHash)
-	if err != nil {
-		return errors.WrapRPCConnectionFailed(err)
-	}
-
-	fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(resp.EnvelopeXdr))
-
+	fmt.Printf("Debugging offline transaction envelope from stdin\n")
 	simReq := &simulator.SimulationRequest{
-		EnvelopeXdr:   resp.EnvelopeXdr,
-		ResultMetaXdr: resp.ResultMetaXdr,
+		EnvelopeXdr:   envelopeXdr,
+		ResultMetaXdr: "AAAAAQ==",
 	}
-	_, err = d.Runner.Run(cmd.Context(), simReq)
+	_, err := d.Runner.Run(cmd.Context(), simReq)
 	if err != nil {
-		return errors.WrapSimulationFailed(err, txHash)
+		return errors.WrapSimulationFailed(err, "offline-envelope")
 	}
 
 	return nil
@@ -225,11 +250,10 @@ Local WASM Replay Mode:
 		}
 
 		if len(args) == 0 {
-			return errors.WrapValidationError("transaction hash is required when not using --wasm or --demo flag")
-		}
-
-		if err := rpc.ValidateTransactionHash(args[0]); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("invalid transaction hash format: %v", err))
+			if stdinHasData(cmd.InOrStdin()) {
+				return nil
+			}
+			return errors.WrapValidationError("transaction hash is required when not using --wasm, --demo, or piped envelope XDR")
 		}
 
 		if !cmd.Flags().Changed("network") {
@@ -251,6 +275,10 @@ Local WASM Replay Mode:
 			// valid
 		default:
 			return errors.WrapInvalidNetwork(networkFlag)
+		}
+
+		if len(args) == 0 && stdinHasData(cmd.InOrStdin()) {
+			return nil
 		}
 
 		// Validate compare network flag if present
@@ -857,6 +885,43 @@ Local WASM Replay Mode:
 }
 
 // runDemoMode prints sample output without network/WASM - for testing color detection.
+func readEnvelopeXDRFromReader(in io.Reader) (string, error) {
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return "", fmt.Errorf("failed to read envelope from stdin: %w", err)
+	}
+	if len(data) == 0 {
+		return "", fmt.Errorf("stdin did not contain an envelope XDR")
+	}
+
+	candidate := strings.TrimSpace(string(data))
+	if candidate != "" {
+		if envBytes, err := base64.StdEncoding.Strict().DecodeString(candidate); err == nil {
+			var envelope xdr.TransactionEnvelope
+			if err := xdr.SafeUnmarshal(envBytes, &envelope); err == nil {
+				return candidate, nil
+			}
+		}
+	}
+
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+func stdinHasData(in io.Reader) bool {
+	if in == nil {
+		return false
+	}
+	if file, ok := in.(*os.File); ok {
+		if info, err := file.Stat(); err == nil {
+			if info.Mode()&os.ModeCharDevice != 0 {
+				return false
+			}
+			return true
+		}
+	}
+	return true
+}
+
 func runDemoMode(cmdArgs []string) error {
 	txHash := "5c0a1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab"
 	if len(cmdArgs) > 0 && len(cmdArgs[0]) == 64 {
