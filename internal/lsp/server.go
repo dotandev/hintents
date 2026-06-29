@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/dotandev/hintents/internal/visualizer"
 	"go.lsp.dev/jsonrpc2"
@@ -173,7 +174,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			HoverProvider: true,
 			TextDocumentSync: protocol.TextDocumentSyncOptions{
 				OpenClose: true,
-				Change:    protocol.TextDocumentSyncKindFull,
+				Change:    protocol.TextDocumentSyncKindIncremental,
 			},
 		},
 	}, nil
@@ -214,14 +215,28 @@ func (s *Server) DidChange(ctx context.Context, params *protocol.DidChangeTextDo
 		return fmt.Errorf("document URI is empty")
 	}
 
-	if len(params.ContentChanges) == 0 {
-		return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	text, ok := s.documents[params.TextDocument.URI]
+	if !ok {
+		return fmt.Errorf("document not found: %s", params.TextDocument.URI)
 	}
 
-	text := params.ContentChanges[0].Text
-	s.mu.Lock()
+	for _, change := range params.ContentChanges {
+		// If Range is nil, it's a full document change
+		if change.Range == nil {
+			text = change.Text
+			continue
+		}
+
+		// Otherwise, apply incremental change
+		start := positionToOffset(text, change.Range.Start)
+		end := positionToOffset(text, change.Range.End)
+		text = text[:start] + change.Text + text[end:]
+	}
+
 	s.documents[params.TextDocument.URI] = text
-	s.mu.Unlock()
 	return nil
 }
 
@@ -348,6 +363,38 @@ func hostFunctionAtPosition(line string, position protocol.Position) (string, ui
 	return "", 0, 0
 }
 
-func isWordCharacter(r byte) bool {
-	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_'
+func isWordCharacter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+func positionToOffset(text string, pos protocol.Position) int {
+	lines := strings.Split(text, "\n")
+	line := int(pos.Line)
+	if line >= len(lines) {
+		return len(text)
+	}
+
+	offset := 0
+	for i := 0; i < line; i++ {
+		offset += len(lines[i]) + 1 // +1 for the newline character
+	}
+
+	// Now, handle the character count as UTF-16 code units
+	lineText := lines[line]
+	charCount := 0
+	runeOffset := 0
+	for _, r := range lineText {
+		if charCount >= int(pos.Character) {
+			break
+		}
+		runeOffset += utf8.RuneLen(r)
+		// UTF-16: if rune is outside BMP, it's 2 code units
+		if r > 0xFFFF {
+			charCount += 2
+		} else {
+			charCount += 1
+		}
+	}
+
+	return offset + runeOffset
 }
