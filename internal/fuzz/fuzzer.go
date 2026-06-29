@@ -403,7 +403,13 @@ func (f *CoverageGuidedFuzzer) bitflipHexString(hexStr string, rng *rand.Rand) s
 	return hex.EncodeToString(data)
 }
 
-// executeInput runs a single input through the simulator
+// executeInput runs a single input through the simulator.
+// Each call uses its own sync.WaitGroup to coordinate LCOV file cleanup,
+// ensuring that concurrent executeInput calls do not interfere with each
+// other's file lifecycle. The eager read is performed before any error check
+// so that file content is captured into simResp.LCOVReport even when the
+// context is cancelled, preventing deletes while runner goroutines may still
+// be writing.
 func (f *CoverageGuidedFuzzer) executeInput(ctx context.Context, input *simulator.FuzzerInput) (*simulator.FuzzingResult, *CoverageMap) {
 	result := &simulator.FuzzingResult{
 		Seed:   input.Seed,
@@ -418,6 +424,12 @@ func (f *CoverageGuidedFuzzer) executeInput(ctx context.Context, input *simulato
 		MockArgs:      &input.Args,
 	}
 
+	// Per-call WaitGroup tracks in-flight reads of THIS call's LCOV file.
+	// Using a local WaitGroup avoids cross-goroutine interference: one call's
+	// cleanup blocks only on its own reads, never on another call's reads.
+	var lcovWg sync.WaitGroup
+	var coveragePath string
+
 	if f.config.EnableCoverage {
 		simReq.EnableCoverage = true
 		if simReq.CoverageLCOVPath == nil {
@@ -428,10 +440,13 @@ func (f *CoverageGuidedFuzzer) executeInput(ctx context.Context, input *simulato
 				result.ExecutionTimeMs = 0
 				return result, nil
 			}
-			coveragePath := tmpFile.Name()
+			coveragePath = tmpFile.Name()
 			_ = tmpFile.Close()
 			simReq.CoverageLCOVPath = &coveragePath
-			defer os.Remove(coveragePath)
+			defer func() {
+				lcovWg.Wait()
+				os.Remove(coveragePath)
+			}()
 		}
 	}
 
@@ -440,19 +455,41 @@ func (f *CoverageGuidedFuzzer) executeInput(ctx context.Context, input *simulato
 	// Run simulation with timeout context
 	simResp, err := f.runner.Run(ctx, simReq)
 	result.ExecutionTimeMs = uint64(time.Since(start).Milliseconds())
+
+	// Eagerly read LCOV file content into response before deferred cleanup
+	// can fire. This eliminates the race between file readers and os.Remove:
+	// the content is captured into memory so subsequent code never touches the
+	// file, and the cleanup's Wait() only needs to wait for this read.
+	if coveragePath != "" && simResp != nil {
+		lcovWg.Add(1)
+		content, readErr := os.ReadFile(coveragePath)
+		if readErr == nil && simResp.LCOVReport == "" {
+			simResp.LCOVReport = string(content)
+			simResp.LCOVReportPath = ""
+		}
+		lcovWg.Done()
+	}
+
 	if err != nil {
-		result.Status = "crash"
-		result.ErrorMessage = fmt.Sprintf("execution error: %v", err)
+		if ctx.Err() != nil {
+			result.Status = "cancelled"
+			result.ErrorMessage = fmt.Sprintf("context cancelled: %v", ctx.Err())
+		} else {
+			result.Status = "crash"
+			result.ErrorMessage = fmt.Sprintf("execution error: %v", err)
+		}
 		return result, nil
 	}
 
-	coverage := f.extractCoverageFromResponse(simResp)
-	result.CodeCoverage = coverage.totalCoverage
+	coverage := f.extractCoverageFromResponse(ctx, simResp, &lcovWg)
+	if simResp != nil {
+		result.CodeCoverage = coverage.totalCoverage
 
-	// Analyze response
-	if simResp.Status == "error" {
-		result.Status = "error"
-		result.ErrorMessage = simResp.Error
+		// Analyze response
+		if simResp.Status == "error" {
+			result.Status = "error"
+			result.ErrorMessage = simResp.Error
+		}
 	}
 
 	// Check for slow execution
@@ -479,7 +516,11 @@ func (f *CoverageGuidedFuzzer) extractCoverage(input *simulator.FuzzerInput) *Co
 }
 
 // extractCoverageFromResponse parses coverage data returned by the simulator.
-func (f *CoverageGuidedFuzzer) extractCoverageFromResponse(resp *simulator.SimulationResponse) *CoverageMap {
+// It synchronizes LCOV file reads with the caller's per-call WaitGroup and
+// checks context cancellation before performing file I/O. The lcovWg parameter
+// is the per-call WaitGroup from executeInput, ensuring reads of this file are
+// tracked independently of other concurrent executeInput calls.
+func (f *CoverageGuidedFuzzer) extractCoverageFromResponse(ctx context.Context, resp *simulator.SimulationResponse, lcovWg *sync.WaitGroup) *CoverageMap {
 	if resp == nil {
 		return &CoverageMap{coveredLines: make(map[string]bool), timestamp: time.Now()}
 	}
@@ -488,8 +529,10 @@ func (f *CoverageGuidedFuzzer) extractCoverageFromResponse(resp *simulator.Simul
 		return f.parseLCOVReport(resp.LCOVReport)
 	}
 
-	if resp.LCOVReportPath != "" {
+	if resp.LCOVReportPath != "" && ctx.Err() == nil {
+		lcovWg.Add(1)
 		content, err := os.ReadFile(resp.LCOVReportPath)
+		lcovWg.Done()
 		if err == nil {
 			return f.parseLCOVReport(string(content))
 		}

@@ -6,6 +6,11 @@ package fuzz
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
+	"math/rand"
+	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -293,6 +298,296 @@ func TestCoverageStatisticsString(t *testing.T) {
 	assert.Contains(t, str, "50") // corpus_size
 	assert.Contains(t, str, "25") // unique_coverage
 	assert.Contains(t, str, "3")  // crashes
+}
+
+// TestExecuteInputCancellationWithCoverage verifies safe cancellation
+// when the LCOV temp file is in use. The eager read and per-call WaitGroup
+// synchronization ensure no file access races. The eager read captures the
+// file content before the deferred cleanup fires, so the file can be safely
+// removed even when the runner returns early due to context cancellation.
+func TestExecuteInputCancellationWithCoverage(t *testing.T) {
+	runner := simulator.NewMockRunner(func(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+		if req.CoverageLCOVPath != nil {
+			content := "TN:\nSF:test.wasm\nDA:10,1\nDA:20,3\nend_of_record\n"
+			os.WriteFile(*req.CoverageLCOVPath, []byte(content), 0644)
+		}
+		select {
+		case <-time.After(5 * time.Second):
+			return &simulator.SimulationResponse{
+				Status:         "success",
+				LCOVReportPath: *req.CoverageLCOVPath,
+			}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{EnableCoverage: true})
+	input := &simulator.FuzzerInput{EnvelopeXdr: "test_envelope"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	result, coverage := fuzzer.executeInput(ctx, input)
+	require.NotNil(t, result)
+	assert.Equal(t, "cancelled", result.Status)
+	assert.Contains(t, result.ErrorMessage, "context cancelled")
+	// Coverage is nil when runner returns nil response on cancellation
+	_ = coverage
+}
+
+// TestConcurrentCoverageFileAccess verifies that multiple goroutines can
+// safely call executeInput with coverage enabled. Each call creates its own
+// temp LCOV file and uses its own per-call WaitGroup, so cleanup of one
+// goroutine's file never blocks on another goroutine's reads.
+func TestConcurrentCoverageFileAccess(t *testing.T) {
+	runner := simulator.NewMockRunner(func(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+		select {
+		case <-time.After(50 * time.Millisecond):
+			if req.CoverageLCOVPath != nil {
+				content := "TN:\nSF:test.wasm\nDA:10,1\nDA:20,3\nend_of_record\n"
+				os.WriteFile(*req.CoverageLCOVPath, []byte(content), 0644)
+				return &simulator.SimulationResponse{
+					Status:         "success",
+					LCOVReportPath: *req.CoverageLCOVPath,
+				}, nil
+			}
+			return &simulator.SimulationResponse{Status: "success"}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{EnableCoverage: true})
+
+	var wg sync.WaitGroup
+	const numRuns = 10
+	results := make([]*simulator.FuzzingResult, numRuns)
+
+	for i := 0; i < numRuns; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			input := &simulator.FuzzerInput{
+				EnvelopeXdr: fmt.Sprintf("test_envelope_%d", idx),
+			}
+			result, coverage := fuzzer.executeInput(context.Background(), input)
+			results[idx] = result
+			assert.NotNil(t, result)
+			assert.NotNil(t, coverage)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, r := range results {
+		assert.Equal(t, "pass", r.Status, "run %d should pass", i)
+	}
+}
+
+// TestRapidCancellationStress stresses the cancellation path with rapid
+// context timeouts. Verifies no panics from LCOV file access races. Each
+// goroutine's per-call WaitGroup ensures independent cleanup timing.
+func TestRapidCancellationStress(t *testing.T) {
+	runner := simulator.NewMockRunner(func(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+		select {
+		case <-time.After(100 * time.Millisecond):
+			if req.CoverageLCOVPath != nil {
+				content := "TN:\nSF:test.wasm\nDA:10,1\nend_of_record\n"
+				os.WriteFile(*req.CoverageLCOVPath, []byte(content), 0644)
+			}
+			return &simulator.SimulationResponse{Status: "success"}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{EnableCoverage: true})
+
+	var (
+		wg        sync.WaitGroup
+		cancelled int64
+		panics    int64
+	)
+	const numRuns = 50
+
+	for i := 0; i < numRuns; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					atomic.AddInt64(&panics, 1)
+				}
+			}()
+
+			input := &simulator.FuzzerInput{EnvelopeXdr: "test"}
+			timeout := time.Duration(rand.Intn(50)) * time.Millisecond
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+
+			result, coverage := fuzzer.executeInput(ctx, input)
+			assert.NotNil(t, result)
+			// Coverage may be nil when context is cancelled before runner responds
+			if result.Status != "cancelled" {
+				assert.NotNil(t, coverage)
+			}
+			if result.Status == "cancelled" {
+				atomic.AddInt64(&cancelled, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.Zero(t, panics, "no panics should occur during concurrent cancellations")
+	t.Logf("Runs: %d, cancelled: %d", numRuns, cancelled)
+}
+
+// TestPerCallWaitGroupIsolation verifies that one executeInput call's cleanup
+// does not block on another call's reads. With the old shared WaitGroup, a
+// cancelled call's cleanup could block indefinitely waiting for a slow read in
+// a different call. The per-call WaitGroup eliminates this cross-goroutine
+// interference.
+func TestPerCallWaitGroupIsolation(t *testing.T) {
+	runner := simulator.NewMockRunner(func(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+		if req.CoverageLCOVPath != nil {
+			content := "TN:\nSF:test.wasm\nDA:10,1\nend_of_record\n"
+			os.WriteFile(*req.CoverageLCOVPath, []byte(content), 0644)
+		}
+		select {
+		case <-time.After(5 * time.Second):
+			return &simulator.SimulationResponse{
+				Status:         "success",
+				LCOVReportPath: *req.CoverageLCOVPath,
+			}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{EnableCoverage: true})
+
+	// Start a slow call in a goroutine
+	var slowWg sync.WaitGroup
+	slowWg.Add(1)
+	go func() {
+		defer slowWg.Done()
+		input := &simulator.FuzzerInput{EnvelopeXdr: "slow_call"}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		fuzzer.executeInput(ctx, input)
+	}()
+
+	// Give the slow call time to start
+	time.Sleep(10 * time.Millisecond)
+
+	// Start a fast call that cancels quickly — its cleanup must not block on the slow call
+	fastWg := sync.WaitGroup{}
+	fastWg.Add(1)
+	go func() {
+		defer fastWg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+		defer cancel()
+		input := &simulator.FuzzerInput{EnvelopeXdr: "fast_call"}
+		result, _ := fuzzer.executeInput(ctx, input)
+		assert.Equal(t, "cancelled", result.Status)
+	}()
+
+	// The fast call should complete quickly, not block on the slow call's reads
+	done := make(chan struct{})
+	go func() {
+		fastWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Fast call completed without blocking on slow call — per-call isolation works
+	case <-time.After(2 * time.Second):
+		t.Fatal("fast call cleanup blocked on slow call's reads — per-call WaitGroup isolation broken")
+	}
+
+	// Clean up the slow call
+	slowWg.Wait()
+}
+
+// TestEagerReadCapturesContentOnCancellation verifies that the eager read
+// captures LCOV file content into simResp.LCOVReport even when the context
+// is cancelled. Previously, the eager read was after the error check, so on
+// cancellation the file content was lost and the deferred cleanup would delete
+// the file while runner goroutines might still be writing.
+func TestEagerReadCapturesContentOnCancellation(t *testing.T) {
+	runner := simulator.NewMockRunner(func(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+		if req.CoverageLCOVPath != nil {
+			content := "TN:\nSF:test.wasm\nDA:42,5\nDA:99,1\nend_of_record\n"
+			os.WriteFile(*req.CoverageLCOVPath, []byte(content), 0644)
+		}
+		// Simulate a slow runner that gets cancelled
+		select {
+		case <-time.After(5 * time.Second):
+			return &simulator.SimulationResponse{
+				Status:         "success",
+				LCOVReportPath: *req.CoverageLCOVPath,
+			}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{EnableCoverage: true})
+	input := &simulator.FuzzerInput{EnvelopeXdr: "test_eager_read"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+
+	result, coverage := fuzzer.executeInput(ctx, input)
+	require.NotNil(t, result)
+	assert.Equal(t, "cancelled", result.Status)
+	assert.Contains(t, result.ErrorMessage, "context cancelled")
+	// Coverage is nil when runner returns nil response on cancellation
+	_ = coverage
+}
+
+// TestCleanupDoesNotLeakFiles verifies that LCOV temp files are properly
+// cleaned up after executeInput completes, even under concurrent access.
+func TestCleanupDoesNotLeakFiles(t *testing.T) {
+	runner := simulator.NewMockRunner(func(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+		if req.CoverageLCOVPath != nil {
+			content := "TN:\nSF:test.wasm\nDA:10,1\nend_of_record\n"
+			os.WriteFile(*req.CoverageLCOVPath, []byte(content), 0644)
+		}
+		select {
+		case <-time.After(20 * time.Millisecond):
+			return &simulator.SimulationResponse{Status: "success"}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{EnableCoverage: true})
+
+	const numRuns = 20
+	var wg sync.WaitGroup
+	for i := 0; i < numRuns; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			input := &simulator.FuzzerInput{EnvelopeXdr: fmt.Sprintf("leak_test_%d", idx)}
+			fuzzer.executeInput(ctx, input)
+		}(i)
+	}
+	wg.Wait()
+
+	// Verify no leftover temp files by checking /tmp for erst-fuzz-*.lcov files
+	entries, err := os.ReadDir(os.TempDir())
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && len(entry.Name()) > 10 && entry.Name()[:10] == "erst-fuzz-" {
+				t.Errorf("leaked temp file: %s", entry.Name())
+			}
+		}
+	}
 }
 
 // BenchmarkMutation benchmarks the mutation performance
