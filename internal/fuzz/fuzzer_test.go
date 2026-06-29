@@ -6,6 +6,7 @@ package fuzz
 import (
 	"context"
 	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 
@@ -253,6 +254,49 @@ func TestExecuteInputWithCoverage(t *testing.T) {
 	assert.NotNil(t, coverage)
 	assert.Equal(t, uint32(2), coverage.totalCoverage)
 	assert.Len(t, coverage.coveredLines, 2)
+}
+
+type DummyCustomParser struct{}
+
+func (d *DummyCustomParser) Parse(report string) (*CoverageMap, error) {
+	coverage := &CoverageMap{
+		coveredLines: make(map[string]bool),
+		timestamp:    time.Now(),
+	}
+	parts := strings.Split(report, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			coverage.coveredLines[part] = true
+			coverage.totalCoverage++
+		}
+	}
+	return coverage, nil
+}
+
+func TestCustomCoverageParser(t *testing.T) {
+	runner := simulator.NewMockRunner(func(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+		return &simulator.SimulationResponse{
+			Status:     "success",
+			LCOVReport: "line1,line2,line3",
+		}, nil
+	})
+
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{
+		EnableCoverage: true,
+		CoverageParser: &DummyCustomParser{},
+	})
+
+	input := &simulator.FuzzerInput{EnvelopeXdr: "test_envelope"}
+	result, coverage := fuzzer.executeInput(context.Background(), input)
+
+	assert.NotNil(t, result)
+	assert.Equal(t, uint32(3), result.CodeCoverage)
+	assert.NotNil(t, coverage)
+	assert.Equal(t, uint32(3), coverage.totalCoverage)
+	assert.True(t, coverage.coveredLines["line1"])
+	assert.True(t, coverage.coveredLines["line2"])
+	assert.True(t, coverage.coveredLines["line3"])
 }
 
 // TestContextCancellation tests behavior when context is cancelled

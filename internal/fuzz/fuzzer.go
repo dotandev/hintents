@@ -48,6 +48,11 @@ type CoverageGuidedFuzzer struct {
 	lastCoverageGrow time.Time
 }
 
+// CoverageParser defines the interface for parsing coverage reports
+type CoverageParser interface {
+	Parse(report string) (*CoverageMap, error)
+}
+
 // FuzzerConfig contains configuration for the coverage-guided fuzzer
 type FuzzerConfig struct {
 	MaxIterations      uint64
@@ -59,6 +64,7 @@ type FuzzerConfig struct {
 	TargetContractID   string
 	Seed               int64
 	VerboseLogging     bool
+	CoverageParser     CoverageParser
 }
 
 // MutationStrategy defines how inputs are mutated
@@ -102,6 +108,9 @@ func NewCoverageGuidedFuzzer(runner simulator.RunnerInterface, config FuzzerConf
 			StrategyInteresting,
 			StrategyHavoc,
 		}
+	}
+	if config.CoverageParser == nil {
+		config.CoverageParser = &LCOVCoverageParser{}
 	}
 
 	seed := config.Seed
@@ -478,27 +487,11 @@ func (f *CoverageGuidedFuzzer) extractCoverage(input *simulator.FuzzerInput) *Co
 	return coverage
 }
 
-// extractCoverageFromResponse parses coverage data returned by the simulator.
-func (f *CoverageGuidedFuzzer) extractCoverageFromResponse(resp *simulator.SimulationResponse) *CoverageMap {
-	if resp == nil {
-		return &CoverageMap{coveredLines: make(map[string]bool), timestamp: time.Now()}
-	}
+// LCOVCoverageParser parses coverage reports in LCOV format.
+type LCOVCoverageParser struct{}
 
-	if resp.LCOVReport != "" {
-		return f.parseLCOVReport(resp.LCOVReport)
-	}
-
-	if resp.LCOVReportPath != "" {
-		content, err := os.ReadFile(resp.LCOVReportPath)
-		if err == nil {
-			return f.parseLCOVReport(string(content))
-		}
-	}
-
-	return &CoverageMap{coveredLines: make(map[string]bool), timestamp: time.Now()}
-}
-
-func (f *CoverageGuidedFuzzer) parseLCOVReport(report string) *CoverageMap {
+// Parse parses an LCOV report string and returns a CoverageMap.
+func (p *LCOVCoverageParser) Parse(report string) (*CoverageMap, error) {
 	coverage := &CoverageMap{
 		coveredLines: make(map[string]bool),
 		timestamp:    time.Now(),
@@ -528,7 +521,40 @@ func (f *CoverageGuidedFuzzer) parseLCOVReport(report string) *CoverageMap {
 		}
 	}
 
-	return coverage
+	return coverage, nil
+}
+
+// extractCoverageFromResponse parses coverage data returned by the simulator.
+func (f *CoverageGuidedFuzzer) extractCoverageFromResponse(resp *simulator.SimulationResponse) *CoverageMap {
+	if resp == nil {
+		return &CoverageMap{coveredLines: make(map[string]bool), timestamp: time.Now()}
+	}
+
+	parser := f.config.CoverageParser
+	if parser == nil {
+		parser = &LCOVCoverageParser{}
+	}
+
+	if resp.LCOVReport != "" {
+		cov, err := parser.Parse(resp.LCOVReport)
+		if err == nil {
+			return cov
+		}
+		logger.Logger.Warn("Failed to parse coverage report", "error", err)
+	}
+
+	if resp.LCOVReportPath != "" {
+		content, err := os.ReadFile(resp.LCOVReportPath)
+		if err == nil {
+			cov, err := parser.Parse(string(content))
+			if err == nil {
+				return cov
+			}
+			logger.Logger.Warn("Failed to parse coverage report from file", "path", resp.LCOVReportPath, "error", err)
+		}
+	}
+
+	return &CoverageMap{coveredLines: make(map[string]bool), timestamp: time.Now()}
 }
 
 // computeInputHash creates a simple hash of the input
