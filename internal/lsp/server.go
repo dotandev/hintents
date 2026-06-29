@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/dotandev/hintents/internal/visualizer"
@@ -72,6 +73,10 @@ func (s *Server) handler() jsonrpc2.Handler {
 		if ctx.Err() != nil {
 			return reply(ctx, nil, protocol.ErrRequestCancelled)
 		}
+
+		// Wrap the context with a timeout to ensure the server remains responsive
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
 
 		dec := json.NewDecoder(bytes.NewReader(req.Params()))
 
