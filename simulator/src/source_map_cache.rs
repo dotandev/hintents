@@ -18,6 +18,9 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::thread;
 use std::time::UNIX_EPOCH;
 
 /// Monotonically increasing counter used to generate unique temp-file names,
@@ -83,6 +86,103 @@ mod flock {
 /// Default cache directory name
 pub const CACHE_DIR_NAME: &str = "sourcemaps";
 
+/// Tracks the number of in-flight background writes so [`SourceMapCache::flush`]
+/// can block until the disk has caught up (used by tests and on shutdown).
+#[derive(Default)]
+struct PendingWrites {
+    state: Mutex<u64>,
+    condvar: Condvar,
+}
+
+impl PendingWrites {
+    fn increment(&self) {
+        let mut count = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        *count += 1;
+    }
+
+    fn decrement(&self) {
+        let mut count = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            self.condvar.notify_all();
+        }
+    }
+
+    /// Blocks the calling thread until all in-flight writes have completed.
+    fn wait_until_idle(&self) {
+        let mut count = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        while *count > 0 {
+            count = self.condvar.wait(count).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
+/// A single unit of work handed off to the background cache-writer thread.
+struct WriteJob {
+    cache_dir: PathBuf,
+    entry: SourceMapCacheEntry,
+    max_cache_size: Option<u64>,
+}
+
+/// Owns the channel used to hand writes off to a dedicated background thread,
+/// keeping disk I/O (locking, serialization, atomic rename, eviction) off the
+/// caller's thread — most importantly, off the main simulator thread.
+///
+/// The worker thread is spawned lazily on first use and lives for as long as
+/// the owning [`SourceMapCache`]; dropping the cache drops the [`Sender`],
+/// which closes the channel and lets the worker thread exit naturally once
+/// it drains any remaining jobs.
+struct BackgroundWriter {
+    sender: Sender<WriteJob>,
+    pending: Arc<PendingWrites>,
+}
+
+impl BackgroundWriter {
+    fn spawn() -> Self {
+        let (sender, receiver) = mpsc::channel::<WriteJob>();
+        let pending = Arc::new(PendingWrites::default());
+        let worker_pending = Arc::clone(&pending);
+
+        // Detached worker thread: processes jobs in submission order so a
+        // cache directory's eviction pass always sees the writes that
+        // preceded it. The thread exits once the channel is closed (i.e.
+        // once the owning SourceMapCache, and therefore `sender`, is dropped)
+        // and all queued jobs have drained.
+        thread::Builder::new()
+            .name("source-map-cache-writer".to_string())
+            .spawn(move || {
+                for job in receiver {
+                    if let Err(e) = SourceMapCache::write_entry_to_disk(
+                        &job.cache_dir,
+                        &job.entry,
+                        job.max_cache_size,
+                    ) {
+                        eprintln!("Background source map cache write failed: {}", e);
+                    }
+                    worker_pending.decrement();
+                }
+            })
+            .expect("failed to spawn source map cache writer thread");
+
+        Self { sender, pending }
+    }
+
+    fn submit(&self, job: WriteJob) {
+        self.pending.increment();
+        if self.sender.send(job).is_err() {
+            // Worker thread is gone (should not happen while `self` is alive,
+            // since the channel only closes when this BackgroundWriter is
+            // dropped); undo the increment so flush() doesn't hang forever.
+            self.pending.decrement();
+            eprintln!("Source map cache writer thread is unavailable; write dropped");
+        }
+    }
+
+    fn flush(&self) {
+        self.pending.wait_until_idle();
+    }
+}
+
 /// Cache entry containing parsed source mappings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceMapCacheEntry {
@@ -105,6 +205,10 @@ pub struct SourceMapCacheEntry {
 pub struct SourceMapCache {
     cache_dir: PathBuf,
     max_cache_size: Option<u64>,
+    /// Lazily-spawned background writer thread; disk writes are offloaded
+    /// here so `store()` never blocks the calling (e.g. main simulator)
+    /// thread on file locking or I/O.
+    writer: OnceLock<BackgroundWriter>,
 }
 
 impl SourceMapCache {
@@ -114,6 +218,7 @@ impl SourceMapCache {
         Ok(Self {
             cache_dir,
             max_cache_size: None,
+            writer: OnceLock::new(),
         })
     }
 
@@ -124,6 +229,7 @@ impl SourceMapCache {
         Ok(Self {
             cache_dir,
             max_cache_size: None,
+            writer: OnceLock::new(),
         })
     }
 
@@ -137,6 +243,7 @@ impl SourceMapCache {
         Ok(Self {
             cache_dir,
             max_cache_size: Some(max_cache_size),
+            writer: OnceLock::new(),
         })
     }
 
@@ -206,7 +313,13 @@ impl SourceMapCache {
 
     /// Gets the cache file path for a given WASM hash
     fn get_cache_path(&self, wasm_hash: &str) -> PathBuf {
-        self.cache_dir.join(format!("{}.bin", wasm_hash))
+        Self::cache_path_in_dir(&self.cache_dir, wasm_hash)
+    }
+
+    /// Same as [`Self::get_cache_path`], but usable without an instance
+    /// (needed by the background writer thread, which only has a `PathBuf`).
+    fn cache_path_in_dir(cache_dir: &Path, wasm_hash: &str) -> PathBuf {
+        cache_dir.join(format!("{}.bin", wasm_hash))
     }
 
     /// Gets the advisory lock file path for a given cache path.
@@ -535,6 +648,7 @@ impl Default for SourceMapCache {
                     .join("cache")
                     .join(CACHE_DIR_NAME),
                 max_cache_size: None,
+                writer: OnceLock::new(),
             }
         })
     }
