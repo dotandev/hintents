@@ -177,13 +177,7 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 		}
 	}()
 
-	// Workers: each gets a private RNG seeded from the shared seedRng so
-	// they never share mutable state through the global generator.
-	for w := 0; w < numWorkers; w++ {
-		// Grab a seed for this worker under the shared lock.
-		f.mu.Lock()
-		workerSeed := f.seedRng.Int63()
-		f.mu.Unlock()
+		stats.ExecutionCount = atomic.AddUint64(&f.executionCount, 1)
 
 		wg.Add(1)
 		go func(localRng *rand.Rand) {
@@ -710,7 +704,7 @@ func (f *CoverageGuidedFuzzer) CoverageStats() CoverageStatistics {
 		CorpusSize:          len(f.corpus),
 		UniqueCoverageCount: len(f.coverageMap),
 		CrashCount:          len(f.crashingInputs),
-		ExecutionCount:      f.executionCount,
+		ExecutionCount:      atomic.LoadUint64(&f.executionCount),
 	}
 
 	// Calculate max coverage

@@ -65,7 +65,6 @@ clean:
 # Install dependencies
 deps:
 	go mod tidy
-	go mod download
 
 # Run benchmarks
 bench:
