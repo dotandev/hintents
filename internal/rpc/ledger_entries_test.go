@@ -89,7 +89,7 @@ func TestGetLedgerEntries_FiveKeys(t *testing.T) {
 		for i, key := range reqKeys {
 			entries[i] = LedgerEntryResult{
 				Key:                key.(string),
-				Xdr:                buildValidEntryB64(t, key.(string)),
+				Xdr:                buildValidEntryB64(key.(string)),
 				LastModifiedLedger: 12345,
 				LiveUntilLedger:    12400,
 			}
@@ -154,7 +154,7 @@ func TestGetLedgerEntries_LargeBatch(t *testing.T) {
 		for i, key := range keys {
 			entries[i] = LedgerEntryResult{
 				Key:                key.(string),
-				Xdr:                buildValidEntryB64(t, key.(string)),
+				Xdr:                buildValidEntryB64(key.(string)),
 				LastModifiedLedger: 12345,
 				LiveUntilLedger:    12400,
 			}
@@ -226,7 +226,7 @@ func TestGetLedgerEntries_ConcurrentBatches(t *testing.T) {
 		for i, key := range keys {
 			entries[i] = LedgerEntryResult{
 				Key:                key.(string),
-				Xdr:                buildValidEntryB64(t, key.(string)),
+				Xdr:                buildValidEntryB64(key.(string)),
 				LastModifiedLedger: 12345,
 				LiveUntilLedger:    12400,
 			}
