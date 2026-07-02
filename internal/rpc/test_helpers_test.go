@@ -5,7 +5,7 @@ package rpc
 
 import (
 	"encoding/base64"
-	"testing"
+	"fmt"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -13,15 +13,14 @@ import (
 // buildValidEntryB64 decodes a base64-encoded XDR LedgerKey, constructs a
 // valid LedgerEntry whose key fields match, and returns it as base64 XDR.
 // This is used by mock servers so that VerifyLedgerEntryHash passes.
-func buildValidEntryB64(t testing.TB, keyB64 string) string {
-	t.Helper()
+func buildValidEntryB64(keyB64 string) string {
 	keyBytes, err := base64.StdEncoding.DecodeString(keyB64)
 	if err != nil {
-		t.Fatalf("buildValidEntryB64: bad base64: %v", err)
+		panic(fmt.Sprintf("buildValidEntryB64: bad base64: %v", err))
 	}
 	var lk xdr.LedgerKey
 	if err := xdr.SafeUnmarshal(keyBytes, &lk); err != nil {
-		t.Fatalf("buildValidEntryB64: bad XDR key: %v", err)
+		panic(fmt.Sprintf("buildValidEntryB64: bad XDR key: %v", err))
 	}
 
 	var entry xdr.LedgerEntry
@@ -64,12 +63,12 @@ func buildValidEntryB64(t testing.TB, keyB64 string) string {
 			},
 		}
 	default:
-		t.Fatalf("buildValidEntryB64: unsupported key type %v", lk.Type)
+		panic(fmt.Sprintf("buildValidEntryB64: unsupported key type %v", lk.Type))
 	}
 
 	eb, err := entry.MarshalBinary()
 	if err != nil {
-		t.Fatalf("buildValidEntryB64: marshal failed: %v", err)
+		panic(fmt.Sprintf("buildValidEntryB64: marshal failed: %v", err))
 	}
 	return base64.StdEncoding.EncodeToString(eb)
 }
