@@ -34,16 +34,30 @@ use super::types::IpcError;
 /// Valid payloads are returned unchanged as a [`serde_json::Value`].
 #[allow(dead_code)]
 pub fn validate_request(input: &str) -> Result<Value, IpcError> {
-    // Embed the schema at compile-time — always present, never a runtime path error.
     let schema_json =
         include_str!("../../../docs/schema/simulation-request.schema.json");
+    let common_json =
+        include_str!("../../../docs/schema/common.schema.json");
 
-    // Compile the embedded schema.  Map any schema-compile error into
+    // Compile the embedded schemas. Map any schema-compile error into
     // IpcError::Validation rather than panicking or returning a raw String.
     let schema: Value = serde_json::from_str(schema_json)
         .map_err(|e| IpcError::Validation(format!("invalid embedded schema JSON: {e}")))?;
+    let common: Value = serde_json::from_str(common_json)
+        .map_err(|e| IpcError::Validation(format!("invalid common schema JSON: {e}")))?;
 
-    let validator = jsonschema::validator_for(&schema)
+    // Register the common schema so that references to it are resolved offline.
+    let registry = jsonschema::Registry::new()
+        .add("https://simulator.stellar.org/schemas/v1/common.schema.json", common.clone())
+        .map_err(|e| IpcError::Validation(format!("failed to register schema: {e}")))?
+        .add("common.schema.json", common)
+        .map_err(|e| IpcError::Validation(format!("failed to register schema: {e}")))?
+        .prepare()
+        .map_err(|e| IpcError::Validation(format!("failed to prepare registry: {e}")))?;
+
+    let validator = jsonschema::options()
+        .with_registry(&registry)
+        .build(&schema)
         .map_err(|e| IpcError::Validation(format!("failed to compile schema: {e}")))?;
 
     // Parse the caller-supplied JSON.  A malformed payload surfaces here as a
