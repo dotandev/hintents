@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dotandev/hintents/internal/logger"
@@ -162,10 +163,7 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 			f.lastCoverageGrow = time.Now()
 		}
 
-		f.mu.Lock()
-		f.executionCount++
-		f.mu.Unlock()
-		stats.ExecutionCount = f.executionCount
+		stats.ExecutionCount = atomic.AddUint64(&f.executionCount, 1)
 
 		// Log progress periodically
 		if f.config.VerboseLogging && (i+1)%100 == 0 {
@@ -605,7 +603,7 @@ func (f *CoverageGuidedFuzzer) CoverageStats() CoverageStatistics {
 		CorpusSize:          len(f.corpus),
 		UniqueCoverageCount: len(f.coverageMap),
 		CrashCount:          len(f.crashingInputs),
-		ExecutionCount:      f.executionCount,
+		ExecutionCount:      atomic.LoadUint64(&f.executionCount),
 	}
 
 	// Calculate max coverage

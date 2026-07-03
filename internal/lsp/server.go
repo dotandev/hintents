@@ -354,9 +354,31 @@ func hostFunctionAtPosition(line string, position protocol.Position) (string, ui
 		return "", 0, 0
 	}
 
-	for _, candidate := range visualizer.KnownHostFunctions() {
+	candidates := visualizer.KnownHostFunctions()
+
+	// First try to match the full token as-is (e.g. a simple name like "require_auth").
+	for _, candidate := range candidates {
 		if word == candidate {
 			return word, uint32(start), uint32(end)
+		}
+	}
+
+	// For fully-qualified Rust paths (e.g. "soroban_sdk::require_auth" or
+	// "env.require_auth"), extract the final segment after the last "::" or "."
+	// and try to match that against known host functions. The hover range still
+	// covers the full qualified token so the editor highlights it correctly.
+	segment := word
+	if idx := strings.LastIndex(word, "::"); idx >= 0 {
+		segment = word[idx+2:]
+	} else if idx := strings.LastIndex(word, "."); idx >= 0 {
+		segment = word[idx+1:]
+	}
+
+	if segment != word && segment != "" {
+		for _, candidate := range candidates {
+			if segment == candidate {
+				return segment, uint32(start), uint32(end)
+			}
 		}
 	}
 

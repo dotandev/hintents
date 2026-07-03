@@ -225,8 +225,8 @@ mod tests {
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /// Create a fresh temporary directory and return its handle.
-    fn tmp() -> TempDir {
-        TempDir::new().expect("failed to create temp dir")
+    fn tmp() -> io::Result<TempDir> {
+        TempDir::new()
     }
 
     fn git_init(repo_dir: &Path) -> io::Result<()> {
@@ -299,63 +299,68 @@ mod tests {
 
     /// `.git` is present in the start directory itself.
     #[test]
-    fn test_find_git_root_in_current_dir() {
-        let root = tmp();
-        git_init(root.path()).unwrap();
+    fn test_find_git_root_in_current_dir() -> io::Result<()> {
+        let root = tmp()?;
+        git_init(root.path())?;
 
         let found = GitRepository::find_git_root(root.path(), &SearchConfig::default());
         assert_eq!(found.as_deref(), Some(root.path()));
+        Ok(())
     }
 
     /// `.git` is present two levels above the start directory (nested repo).
     #[test]
-    fn test_find_git_root_in_parent() {
-        let root = tmp();
-        git_init(root.path()).unwrap();
+    fn test_find_git_root_in_parent() -> io::Result<()> {
+        let root = tmp()?;
+        git_init(root.path())?;
 
         let nested = root.path().join("a").join("b");
-        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(&nested)?;
 
         let found = GitRepository::find_git_root(&nested, &SearchConfig::default());
         assert_eq!(found.as_deref(), Some(root.path()));
+        Ok(())
     }
 
     /// No `.git` directory exists anywhere in the tree — should return `None`.
     #[test]
-    fn test_find_git_root_no_repo() {
-        let root = tmp();
+    fn test_find_git_root_no_repo() -> io::Result<()> {
+        let root = tmp()?;
         let deep = root.path().join("x").join("y").join("z");
-        fs::create_dir_all(&deep).unwrap();
+        fs::create_dir_all(&deep)?;
 
         // Start from a deeply nested directory with no .git anywhere.
         let found = GitRepository::find_git_root(&deep, &SearchConfig::default());
         assert!(found.is_none());
+        Ok(())
     }
 
     /// A zero-millisecond timeout always yields `None` regardless of layout.
     #[test]
-    fn test_find_git_root_timeout() {
-        let root = tmp();
-        git_init(root.path()).unwrap();
+    fn test_find_git_root_timeout() -> io::Result<()> {
+        let root = tmp()?;
+        git_init(root.path())?;
 
         // Immediate deadline — the search must never succeed.
         let found = GitRepository::find_git_root(root.path(), &cfg_ms(0));
         assert!(found.is_none());
+        Ok(())
     }
 
     /// A symlinked `.git` directory is detected correctly.
     #[cfg(unix)]
     #[test]
-    fn test_find_git_root_symlink() {
-        let root = tmp();
+    fn test_find_git_root_symlink() -> io::Result<()> {
+        let root = tmp()?;
         let real_git = root.path().join("actual_git_dir");
-        git_init(root.path()).unwrap();
-        fs::rename(root.path().join(".git"), &real_git).unwrap();
+        git_init(root.path())?;
+        fs::rename(root.path().join(".git"), &real_git)?;
 
         let git_link = root.path().join(".git");
-        std::os::unix::fs::symlink(&real_git, &git_link).unwrap();
+        std::os::unix::fs::symlink(&real_git, &git_link)?;
 
         let found = GitRepository::find_git_root(root.path(), &SearchConfig::default());
         assert_eq!(found.as_deref(), Some(root.path()));
+        Ok(())
     }
 }
