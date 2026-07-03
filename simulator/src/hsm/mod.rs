@@ -7,7 +7,6 @@
 //! by different cryptographic backends, including software-based signers
 //! and PKCS#11 HSM signers.
 
-pub mod mock;
 pub mod mock_signer;
 pub mod pkcs11;
 pub mod software;

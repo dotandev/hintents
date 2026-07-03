@@ -4,9 +4,9 @@
 // Note: This file is built as a shared library (cdylib) as configured in Cargo.toml.
 // It provides a minimal mock of the PKCS#11 API for CI testing.
 
-//! Minimal PKCS#11 mock shared library.
+#![allow(non_camel_case_types, non_snake_case)]
 
-use std::ptr;
+//! Minimal PKCS#11 mock shared library.
 
 // PKCS#11 minimal types as requested (u64 for simplicity)
 pub type CK_RV = u64;
@@ -21,6 +21,9 @@ pub const CKR_OK: CK_RV = 0;
 
 /// C_Initialize always returns CKR_OK (0).
 /// Signature: CK_RV C_Initialize(void* pInitArgs)
+///
+/// # Safety
+/// This function is unsafe because it dereferences raw pointers.
 #[no_mangle]
 pub unsafe extern "C" fn C_Initialize(_p_init_args: *mut std::ffi::c_void) -> CK_RV {
     CKR_OK
@@ -28,6 +31,9 @@ pub unsafe extern "C" fn C_Initialize(_p_init_args: *mut std::ffi::c_void) -> CK
 
 /// C_GetSlotList returns a single mock slot with ID 1.
 /// Signature: CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount)
+///
+/// # Safety
+/// This function is unsafe because it dereferences raw pointers.
 #[no_mangle]
 pub unsafe extern "C" fn C_GetSlotList(
     _token_present: CK_BBOOL,
