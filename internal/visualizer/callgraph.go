@@ -14,8 +14,15 @@ import (
 
 var elapsedPattern = regexp.MustCompile(`(?i)elapsed(?:[_\s-]*time)?(?:[_\s-]*(ms|us|ns|s))?[\s:=]+([0-9]+(?:\.[0-9]+)?)`)
 
+var humanReadableGas bool
+
+// SetHumanReadableGas configures whether gas values are rendered in human-readable format.
+func SetHumanReadableGas(enabled bool) {
+	humanReadableGas = enabled
+}
+
 // GenerateCallGraphSVG generates a premium SVG call graph from a decoder.CallNode tree
-func GenerateCallGraphSVG(root *decoder.CallNode) string {
+func GenerateCallGraphSVG(root *decoder.CallNode, maxDepth int) string {
 	if root == nil {
 		return ""
 	}
@@ -25,23 +32,28 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 	nodeHeight := 96
 	horizontalGap := 40
 	verticalGap := 60
+	legendHeight := 56
 
 	// Track total dimensions and compute positions
 	positions := make(map[*decoder.CallNode][2]int) // node -> [x, y]
 
 	// First pass: calculate tree width and positions
-	var calculatePositions func(node *decoder.CallNode, x, y int) int
-	calculatePositions = func(node *decoder.CallNode, x, y int) int {
+	actualMaxDepth := 0
+	var calculatePositions func(node *decoder.CallNode, x, y, depth int) int
+	calculatePositions = func(node *decoder.CallNode, x, y, depth int) int {
 		positions[node] = [2]int{x, y}
+		if depth > actualMaxDepth {
+			actualMaxDepth = depth
+		}
 
-		if len(node.SubCalls) == 0 {
+		if len(node.SubCalls) == 0 || (maxDepth > 0 && depth >= maxDepth) {
 			return nodeWidth
 		}
 
 		totalChildWidth := 0
 		currentX := x
 		for i, child := range node.SubCalls {
-			childWidth := calculatePositions(child, currentX, y+nodeHeight+verticalGap)
+			childWidth := calculatePositions(child, currentX, y+nodeHeight+verticalGap, depth+1)
 			totalChildWidth += childWidth
 			if i < len(node.SubCalls)-1 {
 				totalChildWidth += horizontalGap
@@ -54,28 +66,16 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 		return totalChildWidth
 	}
 
-	totalWidth := calculatePositions(root, 0, 0)
+	totalWidth := calculatePositions(root, 0, 0, 1)
 	if totalWidth < nodeWidth {
 		totalWidth = nodeWidth
 	}
 
-	// Find max depth for height
-	maxDepth := 0
-	var findDepth func(node *decoder.CallNode, depth int)
-	findDepth = func(node *decoder.CallNode, depth int) {
-		if depth > maxDepth {
-			maxDepth = depth
-		}
-		for _, child := range node.SubCalls {
-			findDepth(child, depth+1)
-		}
-	}
-	findDepth(root, 1)
-	totalHeight := maxDepth*(nodeHeight+verticalGap) - verticalGap + 40 // + padding
+	totalHeight := actualMaxDepth*(nodeHeight+verticalGap) - verticalGap + 40 // + padding
 
 	// Build SVG
 	var sb strings.Builder
-	fmt.Fprintf(&sb, `<svg viewBox="-20 -20 %d %d" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif">`, totalWidth+40, totalHeight+40)
+	fmt.Fprintf(&sb, `<svg viewBox="-20 -20 %d %d" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif">`, totalWidth+40, totalHeight+40+legendHeight+16)
 
 	// CSS for styling and dark mode
 	sb.WriteString(`
@@ -89,6 +89,12 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 		--link: #8c959f;
 		--cpu: #0969da;
 		--mem: #1a7f37;
+		--gas-low-bg: #e6f4ea;
+		--gas-mid-bg: #fff3cd;
+		--gas-high-bg: #ffeef0;
+		--gas-low-swatch: #1a7f37;
+		--gas-mid-swatch: #d4a017;
+		--gas-high-swatch: #da3633;
 	}
 	@media (prefers-color-scheme: dark) {
 		:root {
@@ -100,8 +106,17 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 			--link: #484f58;
 			--cpu: #58a6ff;
 			--mem: #3fb950;
+			--gas-low-bg: #0d2818;
+			--gas-mid-bg: #2d1f00;
+			--gas-high-bg: #3d0c0c;
+			--gas-low-swatch: #3fb950;
+			--gas-mid-swatch: #e3b341;
+			--gas-high-swatch: #f85149;
 		}
 	}
+	.gas-low rect.node-box { fill: var(--gas-low-bg); }
+	.gas-mid rect.node-box { fill: var(--gas-mid-bg); }
+	.gas-high rect.node-box { fill: var(--gas-high-bg); }
 	rect { transition: fill 0.2s; }
 	rect:hover { fill: var(--bg); stroke-width: 2px; }
 	.node-title { font-weight: 600; font-size: 14px; fill: var(--text-main); }
@@ -113,7 +128,10 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 	// Second pass: Draw links
 	for node, pos := range positions {
 		for _, child := range node.SubCalls {
-			childPos := positions[child]
+			childPos, ok := positions[child]
+			if !ok {
+				continue
+			}
 			x1 := pos[0] + nodeWidth/2
 			y1 := pos[1] + nodeHeight
 			x2 := childPos[0] + nodeWidth/2
@@ -130,24 +148,49 @@ func GenerateCallGraphSVG(root *decoder.CallNode) string {
 	for node, pos := range positions {
 		x, y := pos[0], pos[1]
 
-		contractShort := node.ContractID
-		if len(contractShort) > 12 {
-			contractShort = contractShort[:6] + "..." + contractShort[len(contractShort)-4:]
+		contractShort := shortenContractID(node.ContractID)
+
+		collapsedText := ""
+		if maxDepth > 0 && len(node.SubCalls) > 0 {
+			if _, ok := positions[node.SubCalls[0]]; !ok {
+				collapsedText = fmt.Sprintf(` <tspan fill="var(--link)">[+%d calls]</tspan>`, len(node.SubCalls))
+			}
 		}
 
 		fmt.Fprintf(&sb, `
-	<g transform="translate(%d, %d)">
-		<rect width="%d" height="%d" rx="8" fill="var(--node-bg)" stroke="var(--node-border)" />
+	<g class="%s" transform="translate(%d, %d)">
+		<rect class="node-box" width="%d" height="%d" rx="8" stroke="var(--node-border)" />
 		<text x="12" y="24" class="node-title">%s</text>
-		<text x="12" y="40" class="node-sub">%s</text>
-		<text x="12" y="60" class="node-metric" fill="var(--cpu)">CPU: %d</text>
+		<text x="12" y="40" class="node-sub">%s%s</text>
+		<text x="12" y="60" class="node-metric" fill="var(--cpu)">CPU: %s</text>
 		<text x="100" y="60" class="node-metric" fill="var(--mem)">Mem: %s</text>
 		<text x="12" y="78" class="node-metric" fill="var(--text-mute)">Elapsed: %s</text>
-	</g>`, x, y, nodeWidth, nodeHeight, node.Function, contractShort, node.CPUInstructions, formatBytes(node.MemoryBytes), formatElapsedPerCall(node))
+	</g>`, gasLevel(node.CPUInstructions), x, y, nodeWidth, nodeHeight, node.Function, contractShort, collapsedText, formatGas(node.CPUInstructions, humanReadableGas), formatBytes(node.MemoryBytes), formatElapsedPerCall(node))
 	}
+
+	// Legend footer
+	legendY := totalHeight + 8
+	fmt.Fprintf(&sb, `
+	<g transform="translate(0, %d)">
+		<rect width="320" height="%d" rx="6" fill="var(--node-bg)" stroke="var(--node-border)" />
+		<text x="12" y="16" style="font-size:11px;font-weight:600;fill:var(--text-mute)">Gas Intensity (CPU instructions)</text>
+		<rect x="12" y="26" width="12" height="12" rx="2" fill="var(--gas-low-swatch)" />
+		<text x="28" y="36" style="font-size:10px;fill:var(--text-mute)">Low (&lt;100K)</text>
+		<rect x="112" y="26" width="12" height="12" rx="2" fill="var(--gas-mid-swatch)" />
+		<text x="128" y="36" style="font-size:10px;fill:var(--text-mute)">Medium (100K&#8211;1M)</text>
+		<rect x="248" y="26" width="12" height="12" rx="2" fill="var(--gas-high-swatch)" />
+		<text x="264" y="36" style="font-size:10px;fill:var(--text-mute)">High (&gt;1M)</text>
+	</g>`, legendY, legendHeight)
 
 	sb.WriteString("</svg>")
 	return sb.String()
+}
+
+func shortenContractID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:6] + "..." + id[len(id)-4:]
 }
 
 func formatElapsedPerCall(node *decoder.CallNode) string {
@@ -173,6 +216,37 @@ func formatElapsedPerCall(node *decoder.CallNode) string {
 		return valueRaw + unit
 	}
 	return "n/a"
+}
+
+func gasLevel(cpu uint64) string {
+	switch {
+	case cpu > 1_000_000:
+		return "gas-high"
+	case cpu > 100_000:
+		return "gas-mid"
+	default:
+		return "gas-low"
+	}
+}
+
+// formatGas converts CPU instructions into a human-readable gas string.
+// If human is false, it returns the raw integer as a string.
+func formatGas(cpu uint64, human bool) string {
+	if !human {
+		return strconv.FormatUint(cpu, 10)
+	}
+
+	switch {
+	case cpu >= 1_000_000:
+		// Threshold: 1M or more. Format as MegaGas (MGas).
+		return fmt.Sprintf("%.1f MGas", float64(cpu)/1_000_000)
+	case cpu >= 1_000:
+		// Threshold: 1k or more. Format as kiloGas (kGas).
+		return fmt.Sprintf("%.1f kGas", float64(cpu)/1_000)
+	default:
+		// Below 1k: render as raw Gas.
+		return fmt.Sprintf("%d Gas", cpu)
+	}
 }
 
 func formatBytes(b uint64) string {

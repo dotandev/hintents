@@ -35,6 +35,7 @@ type Config struct {
 type Client struct {
 	config     Config
 	httpClient *http.Client
+	sleep      func(time.Duration)
 }
 
 // NewClient creates a new webhook client with validation
@@ -60,6 +61,7 @@ func NewClient(config Config) (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: config.Timeout,
 		},
+		sleep: time.Sleep,
 	}, nil
 }
 
@@ -91,7 +93,7 @@ func (c *Client) sendWithRetry(payload interface{}) error {
 				"attempt", attempt+1,
 				"backoff", backoffDuration.String(),
 			)
-			time.Sleep(backoffDuration)
+			c.sleep(backoffDuration)
 		}
 
 		err := c.sendRequest(payload)

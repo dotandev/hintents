@@ -123,7 +123,7 @@ func resolveSessionInput(ctx context.Context, store *session.Store, input string
 
 // suggestSessionID returns the closest session ID for a failed lookup.
 // Kept for backward compatibility; new callers should use resolveSessionInput.
-func suggestSessionID(ctx context.Context, store *session.Store, input string) (string, error) { //nolint:unused
+func suggestSessionID(ctx context.Context, store *session.Store, input string) (string, error) { //nolint:unused // Kept for backward compatibility
 	sessions, err := store.List(ctx, sessionLookupListLimit)
 	if err != nil {
 		return "", err

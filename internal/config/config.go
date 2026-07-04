@@ -6,16 +6,20 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/dotandev/hintents/internal/errors"
 )
 
 func joinPath(parts ...string) string {
-	return strings.Join(parts, "/")
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cleaned = append(cleaned, filepath.ToSlash(part))
+	}
+	return path.Join(cleaned...)
 }
 
 // -- Interfaces --

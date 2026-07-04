@@ -16,6 +16,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -113,12 +114,17 @@ func (s *Snippet) Format() string {
 
 // Disassembler decodes WASM bytecode into WAT instructions.
 type Disassembler struct {
-	data []byte
+	data                  []byte
+	importedFunctionCount uint32
 }
 
 // NewDisassembler creates a disassembler for the given WASM module bytes.
 func NewDisassembler(wasmBytes []byte) *Disassembler {
-	return &Disassembler{data: wasmBytes}
+	d := &Disassembler{data: wasmBytes}
+	if d.IsValidWasm() {
+		d.importedFunctionCount = d.parseImportedFunctionCount()
+	}
+	return d
 }
 
 // IsValidWasm checks whether the data starts with the WASM magic number.
@@ -234,9 +240,129 @@ func (d *Disassembler) findCodeSection() (int, int, error) {
 	return 0, 0, fmt.Errorf("code section not found")
 }
 
+// parseImportedFunctionCount extracts the number of imported functions from
+// the import section. Returns 0 if no import section is found or if there are
+// no function imports.
+func (d *Disassembler) parseImportedFunctionCount() uint32 {
+	pos := 8 // Skip magic + version
+	var importPayload []byte
+	var importStart, importEnd int
+	var foundImport bool
+
+	// Find the import section
+	for pos < len(d.data) {
+		if pos >= len(d.data) {
+			break
+		}
+
+		sectionID := d.data[pos]
+		pos++
+
+		sectionSize, n := decodeULEB128(d.data[pos:])
+		pos += n
+
+		if sectionID == SectionImport {
+			importStart = pos
+			importEnd = pos + int(sectionSize)
+			if importEnd > len(d.data) {
+				importEnd = len(d.data)
+			}
+			importPayload = d.data[importStart:importEnd]
+			foundImport = true
+			break
+		}
+
+		pos += int(sectionSize)
+	}
+
+	if !foundImport || len(importPayload) == 0 {
+		return 0
+	}
+
+	// Parse the import section to count function imports
+	pos = 0
+	count, n := decodeULEB128(importPayload[pos:])
+	pos += n
+
+	var fnCount uint32
+	for i := uint64(0); i < count && pos < len(importPayload); i++ {
+		// Skip module name
+		nameLen, n := decodeULEB128(importPayload[pos:])
+		pos += n
+		pos += int(nameLen)
+
+		// Skip entity name
+		if pos >= len(importPayload) {
+			break
+		}
+		nameLen, n = decodeULEB128(importPayload[pos:])
+		pos += n
+		pos += int(nameLen)
+
+		// Check import kind
+		if pos >= len(importPayload) {
+			break
+		}
+		kind := importPayload[pos]
+		pos++
+
+		if kind == 0x00 { // Function import
+			// Skip type index (ULEB128)
+			_, n := decodeULEB128(importPayload[pos:])
+			pos += n
+			fnCount++
+		} else if kind == 0x01 { // Table import
+			// Skip table type byte and limits
+			pos++ // elementtype byte
+			if pos >= len(importPayload) {
+				break
+			}
+			// Skip limits (max presence flag + values)
+			flags := importPayload[pos]
+			pos++
+			_, n := decodeULEB128(importPayload[pos:])
+			pos += n
+			if (flags & 0x01) != 0 { // max is present
+				_, n := decodeULEB128(importPayload[pos:])
+				pos += n
+			}
+		} else if kind == 0x02 { // Memory import
+			// Skip limits
+			if pos >= len(importPayload) {
+				break
+			}
+			flags := importPayload[pos]
+			pos++
+			_, n := decodeULEB128(importPayload[pos:])
+			pos += n
+			if (flags & 0x01) != 0 { // max is present
+				_, n := decodeULEB128(importPayload[pos:])
+				pos += n
+			}
+		} else if kind == 0x03 { // Global import
+			if pos+2 > len(importPayload) {
+				break
+			}
+			pos += 2 // type + mutability
+		} else if kind == 0x04 { // Tag import
+			if pos >= len(importPayload) {
+				break
+			}
+			// Skip attribute bit
+			pos++
+			// Skip type index
+			_, n := decodeULEB128(importPayload[pos:])
+			pos += n
+		}
+	}
+
+	return fnCount
+}
+
 // parallelThreshold is the minimum number of functions required to trigger
 // parallel decoding. Below this, sequential decoding is used.
 const parallelThreshold = 16
+const largeMemoryOperationThreshold = 64 * 1024
 
 // funcBodyRange holds the byte range [start, end) of a single function body
 // within the WASM module.
@@ -288,12 +414,28 @@ func (d *Disassembler) decodeFuncBody(body funcBodyRange) []Instruction {
 	}
 
 	var insts []Instruction
+	var previousConstValue int64
+	var previousWasI32Const bool
 	for pos < end {
 		instOffset := uint64(pos)
 		opcode := d.data[pos]
 		pos++
 		mnemonic, operands, consumed := decodeOpcode(opcode, d.data[pos:])
 		pos += consumed
+
+		// Highlight imported function calls
+		if mnemonic == "call" && d.importedFunctionCount > 0 {
+			operands = d.highlightImportedCall(operands)
+		}
+
+		if (mnemonic == "memory.grow" || mnemonic == "memory.fill") &&
+			previousWasI32Const && previousConstValue > largeMemoryOperationThreshold {
+			if operands != "" {
+				operands = operands + " "
+			}
+			operands += "⚠ Large memory operation detected"
+		}
+
 		insts = append(insts, Instruction{
 			Offset:   instOffset,
 			Opcode:   opcode,
@@ -301,8 +443,49 @@ func (d *Disassembler) decodeFuncBody(body funcBodyRange) []Instruction {
 			Operands: operands,
 			Size:     1 + consumed,
 		})
+
+		if mnemonic == "i32.const" {
+			if parsed, err := strconv.ParseInt(operands, 10, 64); err == nil {
+				previousConstValue = parsed
+				previousWasI32Const = true
+				continue
+			}
+		}
+		previousWasI32Const = false
 	}
 	return insts
+}
+
+// highlightImportedCall modifies the operands string of a call instruction
+// to mark it as [imported] if it refers to an imported function.
+func (d *Disassembler) highlightImportedCall(operands string) string {
+	// Extract function index from operands like "$func0" or "0"
+	// Format is typically "$func<index>"
+	if len(operands) == 0 {
+		return operands
+	}
+
+	// Try to parse as "$func<index>"
+	var funcIndex uint64
+	var parsed bool
+
+	if strings.HasPrefix(operands, "$func") {
+		idxStr := operands[5:] // Skip "$func"
+		var err error
+		funcIndex, err = strconv.ParseUint(idxStr, 10, 64)
+		parsed = err == nil
+	} else {
+		// Try to parse as plain number
+		var err error
+		funcIndex, err = strconv.ParseUint(operands, 10, 64)
+		parsed = err == nil
+	}
+
+	if parsed && funcIndex < uint64(d.importedFunctionCount) {
+		return operands + " [imported]"
+	}
+
+	return operands
 }
 
 // decodeInstructions decodes WASM instructions from the given byte range.
@@ -574,12 +757,69 @@ func CrossReferenceEvents(wasmBytes []byte, events []DiagnosticEventSource) ([]E
 }
 
 // =============================================================================
+// WAT file export  (--output-wat)
+// =============================================================================
+
+// FormatFullWAT renders the complete disassembly of the WASM module as a
+// human-readable WAT-style text document. Custom section metadata is included
+// as comments at the top; all decoded instructions follow with their byte
+// offsets. The output is suitable for saving to a .wat file.
+func FormatFullWAT(wasmBytes []byte) (string, error) {
+	d := NewDisassembler(wasmBytes)
+	if !d.IsValidWasm() {
+		return "", fmt.Errorf("not a valid WASM module")
+	}
+
+	instructions, err := d.DecodeAll()
+	if err != nil {
+		return "", fmt.Errorf("decode instructions: %w", err)
+	}
+
+	sections, err := d.ParseCustomSections()
+	if err != nil {
+		return "", fmt.Errorf("parse custom sections: %w", err)
+	}
+
+	var b strings.Builder
+
+	b.WriteString(";; WAT Disassembly\n")
+	b.WriteString(";; Generated by erst <https://github.com/dotandev/hintents>\n\n")
+
+	// Custom section metadata as comments.
+	if len(sections) > 0 {
+		b.WriteString(";; Custom Sections\n")
+		for _, line := range strings.Split(strings.TrimRight(FormatCustomSections(sections), "\n"), "\n") {
+			fmt.Fprintf(&b, ";; %s\n", line)
+		}
+		b.WriteByte('\n')
+	}
+
+	fmt.Fprintf(&b, ";; Instructions (%d total)\n", len(instructions))
+	for _, inst := range instructions {
+		fmt.Fprintf(&b, "  0x%04x: %s\n", inst.Offset, inst.String())
+	}
+
+	return b.String(), nil
+}
+
+// WriteWATToFile disassembles wasmBytes and writes the WAT text to the file at
+// path. The file is created or truncated. This is the backing implementation for
+// the --output-wat CLI flag.
+func WriteWATToFile(path string, wasmBytes []byte) error {
+	content, err := FormatFullWAT(wasmBytes)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// =============================================================================
 // WASM opcode decoding
 // =============================================================================
 
 // decodeOpcode returns the WAT mnemonic, operand string, and number of
 // additional bytes consumed for operands.
-func decodeOpcode(opcode byte, rest []byte) (string, string, int) { //nolint:gocyclo
+func decodeOpcode(opcode byte, rest []byte) (string, string, int) { //nolint:gocyclo // Large switch statement mapping WASM opcodes to WAT mnemonics is naturally complex
 	switch opcode {
 	// Control flow
 	case 0x00:
@@ -788,6 +1028,17 @@ func decodeOpcode(opcode byte, rest []byte) (string, string, int) { //nolint:goc
 		return "drop", "", 0
 	case 0x1b:
 		return "select", "", 0
+	case 0xfc:
+		subOpcode, n := decodeULEB128(rest)
+		switch subOpcode {
+		case 11: // memory.fill
+			if len(rest[n:]) > 0 {
+				return "memory.fill", "", n + 1
+			}
+			return "memory.fill", "", n
+		default:
+			return fmt.Sprintf("unknown_0xfc_%d", subOpcode), "", n
+		}
 
 	default:
 		return fmt.Sprintf("unknown_0x%02x", opcode), "", 0

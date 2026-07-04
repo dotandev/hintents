@@ -12,12 +12,7 @@ import (
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 )
 
-// ClientOption is a functional option for configuring a Client.
-// It follows the idiomatic Go functional options pattern, allowing flexible
-// and elegant configuration without exposing internal builder state.
-// Options like WithNetwork and WithToken are evaluated during NewClient,
-// and validation is deferred until all options are applied.
-type ClientOption func(*clientBuilder)
+type ClientOption func(*clientBuilder) error
 
 type clientBuilder struct {
 	network          Network
@@ -50,54 +45,79 @@ func newBuilder() *clientBuilder {
 }
 
 func WithNetwork(net Network) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
 		if net == "" {
 			net = Mainnet
 		}
 		b.network = net
+		return nil
 	}
 }
 
 func WithToken(token string) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
 		b.token = token
+		return nil
 	}
 }
 
 func WithHorizonURL(url string) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
+		if url != "" {
+			if err := isValidURL(url); err != nil {
+				return errors.WrapValidationError(fmt.Sprintf("invalid HorizonURL: %v", err))
+			}
+		}
 		b.horizonURL = url
 		b.altURLs = []string{url}
+		return nil
 	}
 }
 
 func WithAltURLs(urls []string) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
+		for _, url := range urls {
+			if err := isValidURL(url); err != nil {
+				return errors.WrapValidationError(fmt.Sprintf("invalid URL in altURLs: %v", err))
+			}
+		}
 		if len(urls) > 0 {
 			b.altURLs = urls
 			b.horizonURL = urls[0]
 		}
+		return nil
 	}
 }
 
 func WithSorobanURL(url string) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
+		if url != "" {
+			if err := isValidURL(url); err != nil {
+				return errors.WrapValidationError(fmt.Sprintf("invalid SorobanURL: %v", err))
+			}
+		}
 		b.sorobanURL = url
+		return nil
 	}
 }
 
 func WithNetworkConfig(cfg NetworkConfig) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
+		if err := ValidateNetworkConfig(cfg); err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("invalid network config: %v", err))
+		}
 		b.config = &cfg
 		b.network = Network(cfg.Name)
 		b.horizonURL = cfg.HorizonURL
 		b.sorobanURL = cfg.SorobanRPCURL
+		return nil
 	}
 }
 
 func WithCacheEnabled(enabled bool) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
 		b.cacheEnabled = enabled
+		return nil
 	}
 }
 
@@ -105,31 +125,35 @@ func WithCacheEnabled(enabled bool) ClientOption {
 // Use this to override the default 15-second timeout, for example on slow connections.
 // A value of 0 disables the timeout (not recommended for production use).
 func WithRequestTimeout(d time.Duration) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
 		b.requestTimeout = d
+		return nil
 	}
 }
 
 func WithHTTPClient(client HTTPClient) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
 		b.httpClient = client
+		return nil
 	}
 }
 
 // WithMethodTelemetry injects an optional telemetry hook for SDK method timings.
 // If nil is provided, a no-op implementation is used.
 func WithMethodTelemetry(telemetry MethodTelemetry) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
 		if telemetry == nil {
 			telemetry = defaultMethodTelemetry()
 		}
 		b.methodTelemetry = telemetry
+		return nil
 	}
 }
 
 func WithMiddleware(middlewares ...Middleware) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
 		b.middlewares = append(b.middlewares, middlewares...)
+		return nil
 	}
 }
 
@@ -138,26 +162,29 @@ func WithMiddleware(middlewares ...Middleware) ClientOption {
 // method, URL, response status, and round-trip latency. The logging middleware
 // is always placed outermost so it observes the full logical request duration.
 func WithLoggingEnabled(enabled bool) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
 		b.loggingEnabled = enabled
+		return nil
 	}
 }
 
 // WithCircuitBreakerThreshold sets the number of failures before the circuit breaker opens.
 func WithCircuitBreakerThreshold(threshold int) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
 		if threshold > 0 {
 			b.failureThreshold = threshold
 		}
+		return nil
 	}
 }
 
 // WithCircuitBreakerTimeout sets the duration in seconds to wait before retrying a failed endpoint.
 func WithCircuitBreakerTimeout(timeout int) ClientOption {
-	return func(b *clientBuilder) {
+	return func(b *clientBuilder) error {
 		if timeout > 0 {
 			b.retryTimeout = timeout
 		}
+		return nil
 	}
 }
 
@@ -169,7 +196,9 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 	}
 
 	for _, opt := range opts {
-		opt(builder)
+		if err := opt(builder); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := builder.validate(); err != nil {
@@ -182,28 +211,6 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 func (b *clientBuilder) validate() error {
 	if b.network == "" {
 		b.network = Mainnet
-	}
-
-	if b.config != nil {
-		if err := ValidateNetworkConfig(*b.config); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("invalid network config: %v", err))
-		}
-	}
-
-	if b.horizonURL != "" {
-		if err := isValidURL(b.horizonURL); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("invalid HorizonURL: %v", err))
-		}
-	}
-	for _, url := range b.altURLs {
-		if err := isValidURL(url); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("invalid URL in altURLs: %v", err))
-		}
-	}
-	if b.sorobanURL != "" {
-		if err := isValidURL(b.sorobanURL); err != nil {
-			return errors.WrapValidationError(fmt.Sprintf("invalid SorobanURL: %v", err))
-		}
 	}
 
 	if b.horizonURL == "" && b.sorobanURL == "" {

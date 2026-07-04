@@ -9,7 +9,7 @@
 use super::{MockHsmConfig, PublicKey, Signature, Signer, SignerError, SignerInfo};
 use async_trait::async_trait;
 use ed25519_dalek::{Signer as EdSigner, SigningKey, VerifyingKey};
-use rand::Rng;
+use rand::{Rng, RngCore};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -38,7 +38,11 @@ impl MockHsm {
             SigningKey::from_bytes(&seed)
         } else {
             let mut csprng = rand::rngs::OsRng;
-            SigningKey::generate(&mut csprng)
+            let mut seed = [0u8; 32];
+            csprng.try_fill_bytes(&mut seed).map_err(|e| {
+                SignerError::Hardware(format!("Failed to generate signing key: {}", e))
+            })?;
+            SigningKey::from_bytes(&seed)
         };
 
         Ok(Self {

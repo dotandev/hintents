@@ -12,10 +12,15 @@ import (
 // ANSI SGR (Select Graphic Rendition) escape codes for terminal colors.
 // Redundant constants removed as they are defined in ansi.go
 
+func noColorSet() bool {
+	_, ok := os.LookupEnv("NO_COLOR")
+	return ok
+}
+
 // ColorEnabled reports whether ANSI color output should be used.
 func ColorEnabled() bool {
 	// NO_COLOR must always take precedence.
-	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+	if noColorSet() {
 		return false
 	}
 	if os.Getenv("FORCE_COLOR") != "" {
@@ -28,7 +33,7 @@ func ColorEnabled() bool {
 }
 
 // colorMap maps color names to ANSI SGR codes.
-var colorMap = map[string]string{ //nolint:unused
+var colorMap = map[string]string{ //nolint:unused // Reserved for future use in dynamic color mapping
 	"red":     sgrRed,
 	"green":   sgrGreen,
 	"yellow":  sgrYellow,
@@ -102,7 +107,7 @@ func Info() string {
 
 // Symbol returns a symbol name rendered as ASCII markers.
 //
-//nolint:gocyclo
+//nolint:gocyclo // Large switch statement mapping symbol names to ASCII representations
 func Symbol(name string) string {
 	if ColorEnabled() {
 		switch name {

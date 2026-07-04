@@ -26,8 +26,8 @@ pub struct SimHost {
     ledger_snapshot: LedgerSnapshot,
     budget_limits: Option<(u64, u64)>,
     calibration: Option<crate::types::ResourceCalibration>,
-    pub memory_limit: Option<u64>,
-    _pending_events: Vec<String>,
+    memory_limit: Option<u64>,
+    pending_events: Vec<String>,
 }
 
 impl SimHost {
@@ -44,11 +44,15 @@ impl SimHost {
             let _ = budget.reset_limits(cpu_limit, mem_limit);
         }
 
-        if let Some(ref _calib) = calibration {
-            // Note: In newer versions of soroban_env_host, the Budget interface
-            // no longer uses set_model() or CostModel directly like this.
-            // Resource calibration settings from the request are ignored
-            // in this simulator version to maintain compatibility with the SDK.
+        // If the caller requested a custom resource calibration, explicitly
+        // fail early rather than silently ignoring the setting. This avoids
+        // surprising behaviour where the provided calibration is ignored due
+        // to version incompatibilities with `soroban_env_host`.
+        if let Some(ref calib) = calibration {
+            panic!(
+                "Unsupported: custom resource calibration requested ({:?}). The simulator does not support applying custom calibrations with the current soroban_env_host version.",
+                calib
+            );
         }
 
         if let Some((_cpu, _mem)) = budget_limits {
@@ -68,7 +72,7 @@ impl SimHost {
             budget_limits,
             calibration,
             memory_limit,
-            _pending_events: Vec::new(),
+            pending_events: Vec::new(),
         }
     }
 
@@ -92,11 +96,11 @@ impl SimHost {
 
         Ok(Self {
             inner: host,
-            ledger_snapshot: snapshot.clone(),
+            ledger_snapshot: snapshot.fork(),
             budget_limits,
             calibration,
             memory_limit,
-            _pending_events: Vec::new(),
+            pending_events: Vec::new(),
         })
     }
 
@@ -114,7 +118,7 @@ impl SimHost {
 
     /// Captures the current host storage as a reusable ledger snapshot.
     pub fn capture_snapshot(&self) -> Result<LedgerSnapshot, SimHostError> {
-        Ok(self.ledger_snapshot.clone())
+        Ok(self.ledger_snapshot.fork())
     }
 
     /// Returns the host events that have been emitted so far.
@@ -137,7 +141,7 @@ impl SimHost {
             .to_xdr(Limits::none())
             .map_err(|e| SnapshotError::XdrEncoding(format!("Failed to encode key: {e}")))?;
         self.ledger_snapshot.insert(key_bytes, entry);
-        let snapshot = self.ledger_snapshot.clone();
+        let snapshot = self.ledger_snapshot.fork();
         self.restore_from_snapshot(&snapshot)
     }
 
@@ -163,32 +167,37 @@ impl SimHost {
     }
 
     /// Set the contract ID for execution context.
-    pub fn _set_contract_id(&mut self, _id: Hash) {}
+    #[allow(dead_code)]
+    pub fn set_contract_id(&mut self, _id: Hash) {}
 
     /// Set the function name to invoke.
-    pub fn _set_fn_name(&mut self, _name: &str) -> Result<(), HostError> {
+    #[allow(dead_code)]
+    pub fn set_fn_name(&mut self, _name: &str) -> Result<(), HostError> {
         Ok(())
     }
 
     /// Convert a u32 to a Soroban Val.
-    pub fn _val_from_u32(&self, v: u32) -> Val {
+    #[allow(dead_code)]
+    pub fn val_from_u32(&self, v: u32) -> Val {
         Val::from_u32(v).into()
     }
 
     /// Convert a Val back to u32.
-    pub fn _val_to_u32(&self, v: Val) -> Result<u32, HostError> {
+    #[allow(dead_code)]
+    pub fn val_to_u32(&self, v: Val) -> Result<u32, HostError> {
         v.try_into_val(&self.inner).map_err(|_| {
-            EnvError::from_type_and_code(ScErrorType::Context, ScErrorCode::InvalidInput).into()
+            EnvError::from_type_and_code(ScErrorType::Value, ScErrorCode::InvalidInput).into()
         })
     }
 
     /// Buffer a contract event for inclusion in the next snapshot.
     ///
     /// Call this from the simulation loop each time an event is emitted so that
-    /// `_drain_events_for_snapshot` can associate the right events with each
+    /// `drain_events_for_snapshot` can associate the right events with each
     /// snapshot window.
-    pub fn _push_event(&mut self, event: String) {
-        self._pending_events.push(event);
+    #[allow(dead_code)]
+    pub fn push_event(&mut self, event: String) {
+        self.pending_events.push(event);
     }
 
     /// Return all events buffered since the last snapshot and clear the buffer.
@@ -196,8 +205,9 @@ impl SimHost {
     /// The returned `Vec` is moved into the `events` field of the `StateSnapshot`
     /// being constructed.  After this call the buffer is empty and ready for the
     /// next snapshot window.
-    pub fn _drain_events_for_snapshot(&mut self) -> Vec<String> {
-        std::mem::take(&mut self._pending_events)
+    #[allow(dead_code)]
+    pub fn drain_events_for_snapshot(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_events)
     }
 
     /// Check if the host has exceeded its configured memory limit and panic if so.
@@ -239,9 +249,9 @@ mod tests {
         let mut host = SimHost::new(None, None, None);
         // Test setting contract ID (dummy hash)
         let hash = Hash([0u8; 32]);
-        host._set_contract_id(hash);
+        host.set_contract_id(hash);
 
-        host._set_fn_name("add")
+        host.set_fn_name("add")
             .expect("failed to set function name");
     }
 
@@ -249,11 +259,11 @@ mod tests {
     fn test_simple_value_handling() {
         let host = SimHost::new(None, None, None);
 
-        let val_a = host._val_from_u32(10);
-        let val_b = host._val_from_u32(20);
+        let val_a = host.val_from_u32(10);
+        let val_b = host.val_from_u32(20);
 
-        let res_a = host._val_to_u32(val_a).expect("conversion failed");
-        let res_b = host._val_to_u32(val_b).expect("conversion failed");
+        let res_a = host.val_to_u32(val_a).expect("conversion failed");
+        let res_b = host.val_to_u32(val_b).expect("conversion failed");
 
         assert_eq!(res_a + res_b, 30);
     }

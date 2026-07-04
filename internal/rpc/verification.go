@@ -17,7 +17,7 @@ import (
 // validateLedgerKeyXDR decodes a base64-encoded XDR LedgerKey, validates its structure,
 // and emits a debug log with the key's SHA-256 hash and type. It is the canonical
 // integrity check shared by VerifyLedgerEntryHash and VerifyLedgerEntries.
-func validateLedgerKeyXDR(keyB64 string) error { //nolint:unused
+func validateLedgerKeyXDR(keyB64 string) error { //nolint:unused // Reserved for future ledger entry validation
 	keyBytes, err := base64.StdEncoding.DecodeString(keyB64)
 	if err != nil {
 		return errors.WrapValidationError(fmt.Sprintf("failed to decode ledger key: %v", err))

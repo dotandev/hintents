@@ -177,7 +177,7 @@ func TestWsFrameRoundTrip(t *testing.T) {
 func TestWsWriteFrame_CloseFrame(t *testing.T) {
 	pr, pw := io.Pipe()
 	go func() {
-		_ = wsWriteFrame(pw, nil) //nolint:errcheck
+		_ = wsWriteFrame(pw, nil) //nolint:errcheck // Test code, pipe write failure is not critical
 		_ = pw.Close()
 	}()
 
@@ -392,12 +392,12 @@ func newMockWSServer(t *testing.T, statuses []string) *httptest.Server {
 
 		// Service JSON-RPC requests until the client closes.
 		for {
-			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck
+			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck // Mock WebSocket server, deadline set failure is not critical
 			msg, err := wsReadFrame(bufrw.Reader)
 			if err != nil {
 				return
 			}
-			_ = conn.SetReadDeadline(time.Time{}) //nolint:errcheck
+			_ = conn.SetReadDeadline(time.Time{}) //nolint:errcheck // Mock WebSocket server, deadline clear failure is not critical
 
 			var req jsonrpcRequest
 			if err := json.Unmarshal(msg, &req); err != nil {
@@ -415,12 +415,12 @@ func newMockWSServer(t *testing.T, statuses []string) *httptest.Server {
 				req.ID, status,
 			)
 
-			_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck
+			_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck // Mock WebSocket server, deadline set failure is not critical
 			// Server sends unmasked frames — use a simple writer that skips masking.
 			if err := wsWriteFrameUnmasked(conn, []byte(resp)); err != nil {
 				return
 			}
-			_ = conn.SetWriteDeadline(time.Time{}) //nolint:errcheck
+			_ = conn.SetWriteDeadline(time.Time{}) //nolint:errcheck // Mock WebSocket server, deadline clear failure is not critical
 
 			if status == TxStatusSuccess || status == TxStatusFailed {
 				return
@@ -923,7 +923,7 @@ func TestWsReadMessage_SingleFrame(t *testing.T) {
 	want := []byte(`{"status":"PENDING"}`)
 	pr, pw := io.Pipe()
 	go func() {
-		_ = wsWriteFrameUnmasked(pw, want) //nolint:errcheck
+		_ = wsWriteFrameUnmasked(pw, want) //nolint:errcheck // Test code, pipe write failure is not critical
 		_ = pw.Close()
 	}()
 
@@ -1067,12 +1067,12 @@ func newMockWSServerFull(t *testing.T) *httptest.Server {
 		}
 
 		for {
-			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck
+			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck // Mock WebSocket server, deadline set failure is not critical
 			msg, err := wsReadFrame(bufrw.Reader)
 			if err != nil {
 				return
 			}
-			_ = conn.SetReadDeadline(time.Time{}) //nolint:errcheck
+			_ = conn.SetReadDeadline(time.Time{}) //nolint:errcheck // Mock WebSocket server, deadline clear failure is not critical
 
 			var req jsonrpcRequest
 			if err := json.Unmarshal(msg, &req); err != nil {
@@ -1102,11 +1102,11 @@ func newMockWSServerFull(t *testing.T) *httptest.Server {
 				)
 			}
 
-			_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck
+			_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck // Mock WebSocket server, deadline set failure is not critical
 			if err := wsWriteFrameUnmasked(conn, []byte(resp)); err != nil {
 				return
 			}
-			_ = conn.SetWriteDeadline(time.Time{}) //nolint:errcheck
+			_ = conn.SetWriteDeadline(time.Time{}) //nolint:errcheck // Mock WebSocket server, deadline clear failure is not critical
 
 			if callN >= 2 {
 				return

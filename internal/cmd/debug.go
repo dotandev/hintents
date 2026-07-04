@@ -32,6 +32,7 @@ import (
 	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/dotandev/hintents/internal/tokenflow"
 	simtypes "github.com/dotandev/hintents/internal/types"
+	"github.com/dotandev/hintents/internal/version"
 	"github.com/dotandev/hintents/internal/visualizer"
 	"github.com/dotandev/hintents/internal/wat"
 	"github.com/dotandev/hintents/internal/watch"
@@ -42,40 +43,42 @@ import (
 )
 
 var (
-	networkFlag         string
-	rpcURLFlag          string
-	rpcTokenFlag        string
-	tracingEnabled      bool
-	otlpExporterURL     string
-	generateTrace       bool
-	traceOutputFile     string
-	snapshotFlag        string
-	compareNetworkFlag  string
-	verbose             bool
-	wasmPath            string
-	args                []string
-	themeFlag           string
-	noCacheFlag         bool
-	demoMode            bool
-	watchFlag           bool
-	watchTimeoutFlag    int
-	hotReloadFlag       bool
-	hotReloadInterval   time.Duration
-	snapshotsFlag       bool
-	protocolVersionFlag uint32
-	auditKeyFlag        string
-	publishIPFSFlag     bool
-	publishArweaveFlag  bool
-	ipfsNodeFlag        string
-	arweaveGatewayFlag  string
-	arweaveWalletFlag   string
-	mockTimeFlag        int64
-	mockBaseFeeFlag     uint32
-	mockGasPriceFlag    uint64
-	exportSVGFlag       string
-	loadSnapshotsFlag   string
-	saveSnapshotsFlag   string
-	wasmBase64          string
+	networkFlag          string
+	rpcURLFlag           string
+	rpcTokenFlag         string
+	tracingEnabled       bool
+	otlpExporterURL      string
+	generateTrace        bool
+	traceOutputFile      string
+	snapshotFlag         string
+	compareNetworkFlag   string
+	verbose              bool
+	wasmPath             string
+	args                 []string
+	mockLedgerEntryFlags []string
+	mockLedgerManifest   string
+	themeFlag            string
+	noCacheFlag          bool
+	demoMode             bool
+	watchFlag            bool
+	watchTimeoutFlag     int
+	hotReloadFlag        bool
+	hotReloadInterval    time.Duration
+	snapshotsFlag        bool
+	protocolVersionFlag  uint32
+	auditKeyFlag         string
+	publishIPFSFlag      bool
+	publishArweaveFlag   bool
+	ipfsNodeFlag         string
+	arweaveGatewayFlag   string
+	arweaveWalletFlag    string
+	mockTimeFlag         int64
+	mockBaseFeeFlag      uint32
+	mockGasPriceFlag     uint64
+	exportSVGFlag        string
+	loadSnapshotsFlag    string
+	saveSnapshotsFlag    string
+	wasmBase64           string
 )
 
 // DebugCommand holds dependencies for the debug command
@@ -120,8 +123,8 @@ Example:
 	return cmd
 }
 
-func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
-	txHash := args[0]
+func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
+	txHash := cmdArgs[0]
 
 	token := rpcTokenFlag
 	if token == "" {
@@ -161,12 +164,14 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(resp.EnvelopeXdr))
 
-	// TODO: Use d.Runner for simulation when ready
-	// simReq := &simulator.SimulationRequest{
-	//     EnvelopeXdr: resp.EnvelopeXdr,
-	//     ResultMetaXdr: resp.ResultMetaXdr,
-	// }
-	// simResp, err := d.Runner.Run(simReq)
+	simReq := &simulator.SimulationRequest{
+		EnvelopeXdr:   resp.EnvelopeXdr,
+		ResultMetaXdr: resp.ResultMetaXdr,
+	}
+	_, err = d.Runner.Run(cmd.Context(), simReq)
+	if err != nil {
+		return errors.WrapSimulationFailed(err, txHash)
+	}
 
 	return nil
 }
@@ -461,6 +466,11 @@ Local WASM Replay Mode:
 			}
 		}
 
+		overrideEntries, err := loadMockLedgerOverrides()
+		if err != nil {
+			return err
+		}
+
 		var lastSimResp *simulator.SimulationResponse
 
 		// Collected per-timestamp states written to disk when --save-snapshots is set.
@@ -501,6 +511,11 @@ Local WASM Replay Mode:
 					}
 				}
 
+				if len(overrideEntries) > 0 {
+					ledgerEntries = simulator.MergeLedgerOverrides(ledgerEntries, overrideEntries)
+					fmt.Printf("Applied %d mock ledger override entries\n", len(overrideEntries))
+				}
+
 				if saveSnapshotsFlag != "" {
 					collectedEntries = append(collectedEntries, snapshotEntry{ts: ts, entries: ledgerEntries})
 				}
@@ -530,13 +545,13 @@ Local WASM Replay Mode:
 					return errors.WrapSimulationFailed(err, "")
 				}
 				printSimulationResult(networkFlag, simResp)
-				// Print simulation budget usage if present
-				if simResp != nil && simResp.BudgetUsage != nil {
-					fmt.Printf("\nSimulation Budget Usage:\n")
-					fmt.Printf("  CPU Instructions: %d / %d (%.2f%%)\n", simResp.BudgetUsage.CPUInstructions, simResp.BudgetUsage.CPULimit, simResp.BudgetUsage.CPUUsagePercent)
-					fmt.Printf("  Memory Bytes: %d / %d (%.2f%%)\n", simResp.BudgetUsage.MemoryBytes, simResp.BudgetUsage.MemoryLimit, simResp.BudgetUsage.MemoryUsagePercent)
-					fmt.Printf("  Operations: %d\n", simResp.BudgetUsage.OperationsCount)
+				// Budget usage is already rendered inside printSimulationResult; skip duplicate block.
+
+				// Render colored before/after ledger state diff.
+				if postState, diffErr := rpc.ExtractPostStateLedgerEntries(resp.ResultMetaXdr); diffErr == nil {
+					visualizer.RenderLedgerStateDiff(ledgerEntries, postState, false)
 				}
+
 				// Fetch contract bytecode on demand for any contract calls in the trace; cache via RPC client
 				if client != nil && simResp != nil && len(simResp.DiagnosticEvents) > 0 {
 					contractIDs := collectContractIDsFromDiagnosticEvents(simResp.DiagnosticEvents)
@@ -562,6 +577,10 @@ Local WASM Replay Mode:
 							primaryErr = extractErr
 							return
 						}
+					}
+					if len(overrideEntries) > 0 {
+						entries = simulator.MergeLedgerOverrides(entries, overrideEntries)
+						fmt.Printf("Applied %d mock ledger override entries to primary comparison\n", len(overrideEntries))
 					}
 					primaryReq := &simulator.SimulationRequest{
 						EnvelopeXdr:     resp.EnvelopeXdr,
@@ -604,8 +623,13 @@ Local WASM Replay Mode:
 						}
 					}
 
+					if len(overrideEntries) > 0 {
+						entries = simulator.MergeLedgerOverrides(entries, overrideEntries)
+						fmt.Printf("Applied %d mock ledger override entries to compare comparison\n", len(overrideEntries))
+					}
+
 					compareReq := &simulator.SimulationRequest{
-						EnvelopeXdr:     resp.EnvelopeXdr,
+						EnvelopeXdr:     compareResp.EnvelopeXdr,
 						ResultMetaXdr:   compareResp.ResultMetaXdr,
 						LedgerEntries:   entries,
 						Timestamp:       ts,
@@ -632,19 +656,7 @@ Local WASM Replay Mode:
 
 				simResp = primaryResult // Use primary for further analysis
 				printSimulationResult(networkFlag, primaryResult)
-				if primaryResult != nil && primaryResult.BudgetUsage != nil {
-					fmt.Printf("\nSimulation Budget Usage (%s):\n", networkFlag)
-					fmt.Printf("  CPU Instructions: %d / %d (%.2f%%)\n", primaryResult.BudgetUsage.CPUInstructions, primaryResult.BudgetUsage.CPULimit, primaryResult.BudgetUsage.CPUUsagePercent)
-					fmt.Printf("  Memory Bytes: %d / %d (%.2f%%)\n", primaryResult.BudgetUsage.MemoryBytes, primaryResult.BudgetUsage.MemoryLimit, primaryResult.BudgetUsage.MemoryUsagePercent)
-					fmt.Printf("  Operations: %d\n", primaryResult.BudgetUsage.OperationsCount)
-				}
 				printSimulationResult(compareNetworkFlag, compareResult)
-				if compareResult != nil && compareResult.BudgetUsage != nil {
-					fmt.Printf("\nSimulation Budget Usage (%s):\n", compareNetworkFlag)
-					fmt.Printf("  CPU Instructions: %d / %d (%.2f%%)\n", compareResult.BudgetUsage.CPUInstructions, compareResult.BudgetUsage.CPULimit, compareResult.BudgetUsage.CPUUsagePercent)
-					fmt.Printf("  Memory Bytes: %d / %d (%.2f%%)\n", compareResult.BudgetUsage.MemoryBytes, compareResult.BudgetUsage.MemoryLimit, compareResult.BudgetUsage.MemoryUsagePercent)
-					fmt.Printf("  Operations: %d\n", compareResult.BudgetUsage.OperationsCount)
-				}
 				diffResults(primaryResult, compareResult, networkFlag, compareNetworkFlag)
 			}
 			lastSimResp = simResp
@@ -654,7 +666,7 @@ Local WASM Replay Mode:
 				if err != nil {
 					fmt.Printf("%s Error building call tree for SVG: %v\n", visualizer.Symbol("error"), err)
 				} else {
-					svg := visualizer.GenerateCallGraphSVG(callTree)
+					svg := visualizer.GenerateCallGraphSVG(callTree, maxDepth)
 					err := os.WriteFile(exportSVGFlag, []byte(svg), 0644)
 					if err != nil {
 						fmt.Printf("%s Error saving SVG: %v\n", visualizer.Symbol("error"), err)
@@ -671,7 +683,7 @@ Local WASM Replay Mode:
 
 		// Persist snapshot registry to disk when --save-snapshots is set.
 		if saveSnapshotsFlag != "" && len(collectedEntries) > 0 {
-			reg := debug.New(Version, txHash, networkFlag, resp.EnvelopeXdr, resp.ResultMetaXdr)
+			reg := debug.New(version.Version, txHash, networkFlag, resp.EnvelopeXdr, resp.ResultMetaXdr)
 			for _, ce := range collectedEntries {
 				reg.Add(ce.ts, snapshot.FromMap(ce.entries))
 			}
@@ -782,7 +794,7 @@ Local WASM Replay Mode:
 			ResultMetaXdr:   resp.ResultMetaXdr,
 			SimRequestJSON:  string(simReqJSON),
 			SimResponseJSON: string(simRespJSON),
-			ErstVersion:     Version,
+			ErstVersion:     version.Version,
 			SchemaVersion:   session.SchemaVersion,
 		}
 		SetCurrentSession(sessionData)
@@ -916,8 +928,38 @@ func newLocalWasmSimulationRequest(forceNoCache bool) *simulator.SimulationReque
 	return req
 }
 
+func loadMockLedgerOverrides() (map[string]string, error) {
+	var overrides map[string]string
+	if mockLedgerManifest != "" {
+		manifestOverrides, err := simulator.LoadLedgerOverrideManifest(mockLedgerManifest)
+		if err != nil {
+			return nil, errors.WrapValidationError(fmt.Sprintf("failed to load mock ledger manifest: %v", err))
+		}
+		overrides = simulator.MergeLedgerOverrides(overrides, manifestOverrides)
+	}
+
+	if len(mockLedgerEntryFlags) > 0 {
+		flagOverrides, err := simulator.ParseLedgerOverrideFlags(mockLedgerEntryFlags)
+		if err != nil {
+			return nil, errors.WrapValidationError(fmt.Sprintf("failed to parse mock ledger entries: %v", err))
+		}
+		overrides = simulator.MergeLedgerOverrides(overrides, flagOverrides)
+	}
+
+	return overrides, nil
+}
+
 func runLocalWasmReplayOnce(ctx context.Context, runner simulator.RunnerInterface, forceNoCache bool) error {
 	req := newLocalWasmSimulationRequest(forceNoCache)
+
+	overrideEntries, err := loadMockLedgerOverrides()
+	if err != nil {
+		return err
+	}
+	if len(overrideEntries) > 0 {
+		req.LedgerEntries = simulator.MergeLedgerOverrides(req.LedgerEntries, overrideEntries)
+		fmt.Printf("Applied %d mock ledger override entries for local replay\n", len(overrideEntries))
+	}
 
 	// Run simulation
 	fmt.Printf("%s Executing contract locally...\n", visualizer.Symbol("play"))
@@ -1200,8 +1242,23 @@ func collectContractIDsFromDiagnosticEvents(events []simulator.DiagnosticEvent) 
 }
 
 func printSimulationResult(network string, res *simulator.SimulationResponse) {
-	fmt.Printf("\n--- Result for %s ---\n", network)
-	fmt.Printf("Status: %s\n", res.Status)
+	// Section header
+	sep := strings.Repeat("─", 60)
+	fmt.Printf("\n%s\n", visualizer.Colorize("  "+sep, "dim"))
+	fmt.Printf("  %s  %s\n",
+		visualizer.Colorize("Result for", "bold"),
+		visualizer.Colorize(network, "cyan"),
+	)
+	fmt.Printf("  %s\n\n", visualizer.Colorize(sep, "dim"))
+
+	// Status line — green for success, red for failure
+	statusColor := "green"
+	statusIcon := visualizer.Success()
+	if res.Status != "success" {
+		statusColor = "red"
+		statusIcon = visualizer.Error()
+	}
+	fmt.Printf("  %s  Status: %s\n", statusIcon, visualizer.Colorize(res.Status, statusColor))
 
 	// Determine and display snapshot status
 	hasOOM := res.BudgetUsage != nil && res.BudgetUsage.MemoryUsagePercent >= 99.0
@@ -1210,158 +1267,287 @@ func printSimulationResult(network string, res *simulator.SimulationResponse) {
 		len(res.DiagnosticEvents),
 		hasOOM,
 	)
-	fmt.Printf("Snapshot Status: %s\n", snapshotStatus)
+	snapshotColor := "green"
 	if !snapshotStatus.IsHealthy() {
-		fmt.Printf("  %s\n", snapshotStatus.StatusMessage())
+		snapshotColor = "yellow"
 	}
-	if res.Error != "" {
-		fmt.Printf("Error: %s\n", res.Error)
+	fmt.Printf("  %s  Snapshot: %s\n", visualizer.Info(), visualizer.Colorize(string(snapshotStatus), snapshotColor))
+	if !snapshotStatus.IsHealthy() {
+		fmt.Printf("       %s\n", visualizer.Colorize(snapshotStatus.StatusMessage(), "yellow"))
 	}
 
-	// Display stack trace with resolved source locations when available.
+	// Error message — always red
+	if res.Error != "" {
+		fmt.Printf("\n  %s  %s\n", visualizer.Error(), visualizer.Colorize(res.Error, "red"))
+	}
+
+	// Stack trace with resolved source locations
 	if res.StackTrace != nil && len(res.StackTrace.Frames) > 0 {
 		printWasmBacktrace(res.StackTrace)
 	}
 
-	// Preserve top-level source location display for compatibility.
+	// Top-level source location
 	if res.SourceLocation != nil {
-		fmt.Printf("%s Location: %s:%d\n", visualizer.Symbol("location"), res.SourceLocation.File, res.SourceLocation.Line)
+		fmt.Printf("  %s Location: %s:%d\n",
+			visualizer.Symbol("location"),
+			visualizer.Colorize(res.SourceLocation.File, "cyan"),
+			res.SourceLocation.Line,
+		)
 		displaySourceLocation(res.SourceLocation)
 	}
 
-	// Display budget usage if available
+	// Budget / resource usage
 	if res.BudgetUsage != nil {
-		fmt.Printf("\nResource Usage:\n")
+		fmt.Printf("\n  %s  Resource Usage:\n", visualizer.Colorize("──", "bold"))
 
-		// CPU usage with percentage and warning indicator
-		cpuIndicator := ""
-		if res.BudgetUsage.CPUUsagePercent >= 95.0 {
-			cpuIndicator = " [!]  CRITICAL"
-		} else if res.BudgetUsage.CPUUsagePercent >= 80.0 {
-			cpuIndicator = " [!]  WARNING"
-		}
-		fmt.Printf("  CPU Instructions: %d / %d (%.2f%%)%s\n",
-			res.BudgetUsage.CPUInstructions,
+		cpuColor, cpuSuffix := budgetIndicator(res.BudgetUsage.CPUUsagePercent)
+		fmt.Printf("    CPU Instructions: %s / %d  %s%s\n",
+			visualizer.Colorize(fmt.Sprintf("%d", res.BudgetUsage.CPUInstructions), cpuColor),
 			res.BudgetUsage.CPULimit,
-			res.BudgetUsage.CPUUsagePercent,
-			cpuIndicator)
+			visualizer.Colorize(fmt.Sprintf("(%.2f%%)", res.BudgetUsage.CPUUsagePercent), cpuColor),
+			cpuSuffix,
+		)
 
-		// Memory usage with percentage and warning indicator
-		memIndicator := ""
-		if res.BudgetUsage.MemoryUsagePercent >= 95.0 {
-			memIndicator = " [!]  CRITICAL"
-		} else if res.BudgetUsage.MemoryUsagePercent >= 80.0 {
-			memIndicator = " [!]  WARNING"
-		}
-		fmt.Printf("  Memory Bytes: %d / %d (%.2f%%)%s\n",
-			res.BudgetUsage.MemoryBytes,
+		memColor, memSuffix := budgetIndicator(res.BudgetUsage.MemoryUsagePercent)
+		fmt.Printf("    Memory Bytes:     %s / %d  %s%s\n",
+			visualizer.Colorize(fmt.Sprintf("%d", res.BudgetUsage.MemoryBytes), memColor),
 			res.BudgetUsage.MemoryLimit,
-			res.BudgetUsage.MemoryUsagePercent,
-			memIndicator)
+			visualizer.Colorize(fmt.Sprintf("(%.2f%%)", res.BudgetUsage.MemoryUsagePercent), memColor),
+			memSuffix,
+		)
 
-		fmt.Printf("  Operations: %d\n", res.BudgetUsage.OperationsCount)
+		fmt.Printf("    Operations:       %d\n", res.BudgetUsage.OperationsCount)
 	}
 
-	// Display diagnostic events with details
+	// Diagnostic events
 	if len(res.DiagnosticEvents) > 0 {
-		fmt.Printf("\nDiagnostic Events: %d\n", len(res.DiagnosticEvents))
+		fmt.Printf("\n  %s  Diagnostic Events: %s\n",
+			visualizer.Colorize("──", "bold"),
+			visualizer.Colorize(fmt.Sprintf("%d", len(res.DiagnosticEvents)), "cyan"),
+		)
 		for i, event := range res.DiagnosticEvents {
-			if i < 10 { // Show first 10 events
-				fmt.Printf("  [%d] Type: %s", i+1, event.EventType)
-				if event.ContractID != nil {
-					fmt.Printf(", Contract: %s", *event.ContractID)
-				}
-				if deprecatedFn, ok := deprecatedHostFunctionInDiagnosticEvent(event); ok {
-					fmt.Printf(" %s %s", visualizer.Warning(), visualizer.Colorize("deprecated host fn: "+deprecatedFn, "yellow"))
-				}
-				fmt.Printf("\n")
-				if len(event.Topics) > 0 {
-					fmt.Printf("      Topics: %v\n", event.Topics)
-				}
-				if event.Data != "" && len(event.Data) < 100 {
-					fmt.Printf("      Data: %s\n", event.Data)
-				}
+			if i >= 10 {
+				fmt.Printf("    %s\n",
+					visualizer.Colorize(fmt.Sprintf("… and %d more events", len(res.DiagnosticEvents)-10), "dim"),
+				)
+				break
 			}
-		}
-		if len(res.DiagnosticEvents) > 10 {
-			fmt.Printf("  ... and %d more events\n", len(res.DiagnosticEvents)-10)
+			eventTypeColor := "cyan"
+			if strings.Contains(strings.ToLower(event.EventType), "error") ||
+				strings.Contains(strings.ToLower(event.EventType), "fail") {
+				eventTypeColor = "red"
+			}
+			fmt.Printf("    [%d] %s", i+1, visualizer.Colorize(event.EventType, eventTypeColor))
+			if event.ContractID != nil {
+				fmt.Printf("  %s", visualizer.Colorize(*event.ContractID, "dim"))
+			}
+			if deprecatedFn, ok := deprecatedHostFunctionInDiagnosticEvent(event); ok {
+				fmt.Printf("  %s %s",
+					visualizer.Warning(),
+					visualizer.Colorize("deprecated host fn: "+deprecatedFn, "yellow"),
+				)
+			}
+			fmt.Println()
+			if len(event.Topics) > 0 {
+				fmt.Printf("         Topics: %s\n", visualizer.Colorize(fmt.Sprintf("%v", event.Topics), "dim"))
+			}
+			if event.Data != "" && len(event.Data) < 100 {
+				fmt.Printf("         Data:   %s\n", visualizer.Colorize(event.Data, "dim"))
+			}
 		}
 	} else {
-		fmt.Printf("\nEvents: %d\n", len(res.Events))
+		fmt.Printf("\n  Events: %s\n",
+			visualizer.Colorize(fmt.Sprintf("%d", len(res.Events)), "cyan"),
+		)
 	}
 
-	// Display logs
+	// Logs
 	if len(res.Logs) > 0 {
-		fmt.Printf("\nLogs: %d\n", len(res.Logs))
-		for i, log := range res.Logs {
-			if i < 5 { // Show first 5 logs
-				fmt.Printf("  - %s\n", log)
+		fmt.Printf("\n  %s  Logs: %s\n",
+			visualizer.Colorize("──", "bold"),
+			visualizer.Colorize(fmt.Sprintf("%d", len(res.Logs)), "cyan"),
+		)
+		for i, logLine := range res.Logs {
+			if i >= 5 {
+				fmt.Printf("    %s\n",
+					visualizer.Colorize(fmt.Sprintf("… and %d more logs", len(res.Logs)-5), "dim"),
+				)
+				break
 			}
-		}
-		if len(res.Logs) > 5 {
-			fmt.Printf("  ... and %d more logs\n", len(res.Logs)-5)
+			fmt.Printf("    %s %s\n", visualizer.Colorize("·", "dim"), logLine)
 		}
 	}
-	fmt.Printf("Events: %d, Logs: %d\n", len(res.Events), len(res.Logs))
+
+	fmt.Printf("\n  %s\n",
+		visualizer.Colorize(
+			fmt.Sprintf("Events: %d  Logs: %d", len(res.Events), len(res.Logs)),
+			"dim",
+		),
+	)
+}
+
+// budgetIndicator returns a color name and warning suffix for a budget usage percentage.
+func budgetIndicator(pct float64) (color, suffix string) {
+	switch {
+	case pct >= 95.0:
+		return "red", "  " + visualizer.Error() + "  " + visualizer.Colorize("CRITICAL", "red")
+	case pct >= 80.0:
+		return "yellow", "  " + visualizer.Warning() + "  " + visualizer.Colorize("WARNING", "yellow")
+	default:
+		return "green", ""
+	}
 }
 
 func diffResults(res1, res2 *simulator.SimulationResponse, net1, net2 string) {
-	fmt.Printf("\n=== Comparison: %s vs %s ===\n", net1, net2)
+	sep := strings.Repeat("═", 64)
+	fmt.Println()
+	fmt.Println(visualizer.Colorize("╔"+sep+"╗", "cyan"))
+	title := fmt.Sprintf("  COMPARISON: %s  vs  %s  ", net1, net2)
+	pad := len(sep) - len(title)
+	if pad < 0 {
+		pad = 0
+	}
+	fmt.Printf(visualizer.Colorize("║", "cyan")+"%s"+strings.Repeat(" ", pad)+visualizer.Colorize("║", "cyan")+"\n", title)
+	fmt.Println(visualizer.Colorize("╚"+sep+"╝", "cyan"))
+	fmt.Println()
 
+	// ── Status ────────────────────────────────────────────────────────────────
+	fmt.Println(visualizer.Colorize("── Execution Status "+strings.Repeat("─", 44), "bold"))
 	if res1.Status != res2.Status {
-		fmt.Printf("Status Mismatch: %s (%s) vs %s (%s)\n", res1.Status, net1, res2.Status, net2)
+		fmt.Printf("  %s  Status mismatch:\n", visualizer.Error())
+		fmt.Printf("    %-12s %s\n", visualizer.Colorize(net1+":", "dim"), visualizer.Colorize(res1.Status, "red"))
+		fmt.Printf("    %-12s %s\n", visualizer.Colorize(net2+":", "dim"), visualizer.Colorize(res2.Status, "red"))
 	} else {
-		fmt.Printf("Status Match: %s\n", res1.Status)
+		statusColor := "green"
+		if res1.Status != "success" {
+			statusColor = "red"
+		}
+		fmt.Printf("  %s  Status match: %s\n",
+			visualizer.Success(),
+			visualizer.Colorize(res1.Status, statusColor),
+		)
 	}
 
-	// Compare diagnostic events if available
-	if len(res1.DiagnosticEvents) > 0 && len(res2.DiagnosticEvents) > 0 {
+	// ── Diagnostic / Raw Events ───────────────────────────────────────────────
+	fmt.Println()
+	fmt.Println(visualizer.Colorize("── Event Counts "+strings.Repeat("─", 47), "bold"))
+	if len(res1.DiagnosticEvents) > 0 || len(res2.DiagnosticEvents) > 0 {
 		if len(res1.DiagnosticEvents) != len(res2.DiagnosticEvents) {
-			fmt.Printf("[DIFF] Diagnostic events count mismatch: %d vs %d\n",
-				len(res1.DiagnosticEvents), len(res2.DiagnosticEvents))
+			fmt.Printf("  %s  Diagnostic events: %s (%s)  vs  %s (%s)\n",
+				visualizer.Warning(),
+				visualizer.Colorize(fmt.Sprintf("%d", len(res1.DiagnosticEvents)), "yellow"), net1,
+				visualizer.Colorize(fmt.Sprintf("%d", len(res2.DiagnosticEvents)), "yellow"), net2,
+			)
+		} else {
+			fmt.Printf("  %s  Diagnostic events: %s (both networks)\n",
+				visualizer.Success(),
+				visualizer.Colorize(fmt.Sprintf("%d", len(res1.DiagnosticEvents)), "green"),
+			)
 		}
 	} else if len(res1.Events) != len(res2.Events) {
-		fmt.Printf("[DIFF] Events count mismatch: %d vs %d\n", len(res1.Events), len(res2.Events))
+		fmt.Printf("  %s  Events: %s (%s)  vs  %s (%s)\n",
+			visualizer.Warning(),
+			visualizer.Colorize(fmt.Sprintf("%d", len(res1.Events)), "yellow"), net1,
+			visualizer.Colorize(fmt.Sprintf("%d", len(res2.Events)), "yellow"), net2,
+		)
+	} else {
+		fmt.Printf("  %s  Events: %s (both networks)\n",
+			visualizer.Success(),
+			visualizer.Colorize(fmt.Sprintf("%d", len(res1.Events)), "green"),
+		)
 	}
 
-	// Compare budget usage if available
+	// ── Budget ────────────────────────────────────────────────────────────────
 	if res1.BudgetUsage != nil && res2.BudgetUsage != nil {
-		if res1.BudgetUsage.CPUInstructions != res2.BudgetUsage.CPUInstructions {
-			fmt.Printf("[DIFF] CPU instructions: %d vs %d\n",
-				res1.BudgetUsage.CPUInstructions, res2.BudgetUsage.CPUInstructions)
-		}
-		if res1.BudgetUsage.MemoryBytes != res2.BudgetUsage.MemoryBytes {
-			fmt.Printf("[DIFF] Memory bytes: %d vs %d\n",
-				res1.BudgetUsage.MemoryBytes, res2.BudgetUsage.MemoryBytes)
-		}
+		fmt.Println()
+		fmt.Println(visualizer.Colorize("── Resource Usage "+strings.Repeat("─", 45), "bold"))
+
+		printBudgetComparison("CPU Instructions",
+			int64(res1.BudgetUsage.CPUInstructions), int64(res2.BudgetUsage.CPUInstructions),
+			net1, net2)
+		printBudgetComparison("Memory Bytes",
+			int64(res1.BudgetUsage.MemoryBytes), int64(res2.BudgetUsage.MemoryBytes),
+			net1, net2)
+		printBudgetComparison("Operations",
+			int64(res1.BudgetUsage.OperationsCount), int64(res2.BudgetUsage.OperationsCount),
+			net1, net2)
 	}
 
-	// Compare Events
-	fmt.Println("\nEvent Diff:")
+	// ── Event-by-event diff ───────────────────────────────────────────────────
 	maxEvents := len(res1.Events)
 	if len(res2.Events) > maxEvents {
 		maxEvents = len(res2.Events)
 	}
+	if maxEvents > 0 {
+		fmt.Println()
+		fmt.Println(visualizer.Colorize("── Event Diff "+strings.Repeat("─", 49), "bold"))
+		hasMismatch := false
+		for i := 0; i < maxEvents; i++ {
+			inRes1 := i < len(res1.Events)
+			inRes2 := i < len(res2.Events)
 
-	for i := 0; i < maxEvents; i++ {
-		var ev1, ev2 string
-		if i < len(res1.Events) {
-			ev1 = res1.Events[i]
-		} else {
-			ev1 = "<missing>"
-		}
+			var ev1Raw, ev2Raw string         // raw event strings for comparison
+			var ev1Display, ev2Display string // display strings (may be colored)
 
-		if i < len(res2.Events) {
-			ev2 = res2.Events[i]
-		} else {
-			ev2 = "<missing>"
-		}
+			if inRes1 {
+				ev1Raw = res1.Events[i]
+				ev1Display = visualizer.Colorize(ev1Raw, "red")
+			} else {
+				ev1Raw = ""
+				ev1Display = visualizer.Colorize("<missing>", "red")
+			}
+			if inRes2 {
+				ev2Raw = res2.Events[i]
+				ev2Display = visualizer.Colorize(ev2Raw, "green")
+			} else {
+				ev2Raw = ""
+				ev2Display = visualizer.Colorize("<missing>", "red")
+			}
 
-		if ev1 != ev2 {
-			fmt.Printf("  [%d] MISMATCH:\n", i)
-			fmt.Printf("    %s: %s\n", net1, ev1)
-			fmt.Printf("    %s: %s\n", net2, ev2)
+			if !inRes1 || !inRes2 || ev1Raw != ev2Raw {
+				hasMismatch = true
+				fmt.Printf("  %s  [%d] %s\n",
+					visualizer.Error(),
+					i,
+					visualizer.Colorize("MISMATCH", "red"),
+				)
+				fmt.Printf("    %-12s %s\n", visualizer.Colorize(net1+":", "dim"), ev1Display)
+				fmt.Printf("    %-12s %s\n", visualizer.Colorize(net2+":", "dim"), ev2Display)
+			}
 		}
+		if !hasMismatch {
+			fmt.Printf("  %s  All %s events match\n",
+				visualizer.Success(),
+				visualizer.Colorize(fmt.Sprintf("%d", maxEvents), "green"),
+			)
+		}
+	}
+	fmt.Println()
+}
+
+// printBudgetComparison prints a single budget metric comparison row with color.
+func printBudgetComparison(label string, v1, v2 int64, net1, net2 string) {
+	if v1 != v2 {
+		delta := v2 - v1
+		sign := "+"
+		deltaColor := "yellow"
+		if delta < 0 {
+			sign = ""
+			deltaColor = "green"
+		}
+		fmt.Printf("  %s  %-20s %s (%s)  vs  %s (%s)  delta: %s\n",
+			visualizer.Warning(),
+			label+":",
+			visualizer.Colorize(fmt.Sprintf("%d", v1), "dim"), net1,
+			visualizer.Colorize(fmt.Sprintf("%d", v2), "dim"), net2,
+			visualizer.Colorize(fmt.Sprintf("%s%d", sign, delta), deltaColor),
+		)
+	} else {
+		fmt.Printf("  %s  %-20s %s\n",
+			visualizer.Success(),
+			label+":",
+			visualizer.Colorize(fmt.Sprintf("%d (match)", v1), "green"),
+		)
 	}
 }
 
@@ -1500,6 +1686,8 @@ func init() {
 	debugCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	debugCmd.Flags().StringVar(&wasmPath, "wasm", "", "Path to local WASM file for local replay (no network required)")
 	debugCmd.Flags().StringSliceVar(&args, "args", []string{}, "Mock arguments for local replay (JSON array of strings)")
+	debugCmd.Flags().StringSliceVar(&mockLedgerEntryFlags, "mock-ledger-entry", []string{}, "Override ledger entries before simulation using key:value; repeatable")
+	debugCmd.Flags().StringVar(&mockLedgerManifest, "mock-ledger-manifest", "", "Path to a JSON manifest containing ledger_entries for override state")
 	debugCmd.Flags().BoolVar(&noCacheFlag, "no-cache", false, "Disable local ledger state caching")
 	debugCmd.Flags().BoolVar(&demoMode, "demo", false, "Print sample output (no network) - for testing color detection")
 	debugCmd.Flags().BoolVar(&watchFlag, "watch", false, "Poll for transaction on-chain before debugging")

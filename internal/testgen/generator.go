@@ -5,14 +5,20 @@ package testgen
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"text/template"
+	"time"
 
+	"github.com/dotandev/hintents/internal/fuzz"
 	"github.com/dotandev/hintents/internal/rpc"
+	"github.com/dotandev/hintents/internal/simulator"
 )
 
 // Formal schema validation regex
@@ -79,19 +85,30 @@ func (g *TestGenerator) GenerateTests(ctx context.Context, txHash string, lang s
 	}
 
 	// 2. Proceed with generation
+	var generateErr error
 	switch lang {
 	case "go":
-		return g.GenerateGoTest(testData)
+		generateErr = g.GenerateGoTest(testData)
 	case "rust":
-		return g.GenerateRustTest(testData)
+		generateErr = g.GenerateRustTest(testData)
 	case "both":
 		if goErr := g.GenerateGoTest(testData); goErr != nil {
 			return goErr
 		}
-		return g.GenerateRustTest(testData)
+		generateErr = g.GenerateRustTest(testData)
 	default:
 		return fmt.Errorf("unsupported language: %s", lang)
 	}
+
+	if generateErr != nil {
+		return generateErr
+	}
+
+	if err := g.GenerateDynamicFuzzReport(ctx, testData); err != nil {
+		return fmt.Errorf("failed to generate dynamic fuzz report: %w", err)
+	}
+
+	return nil
 }
 
 // fetchTransactionData fetches transaction data from the RPC client
@@ -105,8 +122,10 @@ func (g *TestGenerator) fetchTransactionData(ctx context.Context, txHash string,
 		testName = sanitizeTestName(txHash)
 	}
 
-	// TODO: Fetch ledger entries from transaction footprint
-	ledgerEntries := []LedgerEntry{}
+	ledgerEntries, err := extractLedgerEntries(resp.ResultMetaXdr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract ledger entries from result metadata: %w", err)
+	}
 
 	return &TestData{
 		TestName:      testName,
@@ -171,7 +190,123 @@ func (g *TestGenerator) GenerateRustTest(data *TestData) error {
 	return nil
 }
 
-// sanitizeTestName converts a transaction hash to a valid test name
+// GenerateDynamicFuzzReport creates a dynamic fuzzing summary report for the transaction
+func (g *TestGenerator) GenerateDynamicFuzzReport(ctx context.Context, data *TestData) error {
+	baseInput, err := g.buildFuzzerInput(data)
+	if err != nil {
+		return err
+	}
+
+	fuzzer := fuzz.NewCoverageGuidedFuzzer(simulator.NewDefaultMockRunner(), fuzz.FuzzerConfig{
+		MaxIterations:  20,
+		TimeoutMs:      3000,
+		MaxCorpusSize:  20,
+		EnableCoverage: false,
+	})
+
+	stats, err := fuzzer.Run(ctx, baseInput)
+	if err != nil {
+		return fmt.Errorf("dynamic fuzz run failed: %w", err)
+	}
+
+	return g.writeFuzzSummary(data.TestName, stats, fuzzer.GetCrashingInputs())
+}
+
+func (g *TestGenerator) buildFuzzerInput(data *TestData) (*simulator.FuzzerInput, error) {
+	envelopeBytes, err := base64.StdEncoding.DecodeString(data.EnvelopeXdr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid envelope XDR: %w", err)
+	}
+
+	ledgerEntries := make(map[string]string, len(data.LedgerEntries))
+	for _, entry := range data.LedgerEntries {
+		ledgerEntries[entry.Key] = entry.Value
+	}
+
+	return &simulator.FuzzerInput{
+		EnvelopeXdr:   hex.EncodeToString(envelopeBytes),
+		LedgerEntries: ledgerEntries,
+		Timestamp:     time.Now().Unix(),
+	}, nil
+}
+
+func (g *TestGenerator) writeFuzzSummary(testName string, stats *fuzz.FuzzingStats, crashes []*simulator.FuzzerInput) error {
+	outputDir := filepath.Join(g.OutputDir, "internal", "testgen", "fuzz")
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create fuzz output directory: %w", err)
+	}
+
+	filename := filepath.Join(outputDir, fmt.Sprintf("fuzz_%s_summary.txt", testName))
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create fuzz summary file: %w", err)
+	}
+	defer file.Close()
+
+	_, err = fmt.Fprintf(file, "Dynamic fuzz generation report for %s\n", testName)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(file, "Transactions: %s\n", testName)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(file, "Total executions: %d\n", stats.ExecutionCount)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(file, "Crashes found: %d\n", stats.CrashCount)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(file, "New coverage count: %d\n", stats.NewCoverageCount)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(file, "Corpus size: %d\n", stats.CorpusSize)
+	if err != nil {
+		return err
+	}
+
+	if len(crashes) > 0 {
+		_, err = fmt.Fprintf(file, "\n-- Crash inputs --\n")
+		if err != nil {
+			return err
+		}
+		for i, input := range crashes {
+			_, err = fmt.Fprintf(file, "%d: seed=%d envelope_hex=%s ledger_entries=%d\n", i+1, input.Seed, input.EnvelopeXdr, len(input.LedgerEntries))
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	fmt.Printf("Generated dynamic fuzz report: %s\n", filename)
+	return nil
+}
+
+func extractLedgerEntries(resultMetaXdr string) ([]LedgerEntry, error) {
+	if resultMetaXdr == "" {
+		return []LedgerEntry{}, nil
+	}
+
+	entriesMap, err := rpc.ExtractLedgerEntriesFromMeta(resultMetaXdr)
+	if err != nil {
+		return nil, err
+	}
+
+	ledgerEntries := make([]LedgerEntry, 0, len(entriesMap))
+	for key, value := range entriesMap {
+		ledgerEntries = append(ledgerEntries, LedgerEntry{Key: key, Value: value})
+	}
+
+	sort.Slice(ledgerEntries, func(i, j int) bool {
+		return ledgerEntries[i].Key < ledgerEntries[j].Key
+	})
+
+	return ledgerEntries, nil
+}
+
 func sanitizeTestName(txHash string) string {
 	name := txHash
 	if len(name) > 8 {

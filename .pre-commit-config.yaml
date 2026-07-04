@@ -1,6 +1,9 @@
 # Pre-commit hooks for strict formatting and linting
 # Install: pip install pre-commit && pre-commit install
 # Run manually: pre-commit run --all-files
+#
+# This configuration defines formatters and linters for Go and Rust,
+# including local hooks for the simulator crate and strict Rust lint enforcement.
 
 repos:
   # ──────────────────────────────────────────────
@@ -16,7 +19,6 @@ repos:
       - id: go-imports
         name: goimports (auto-format)
         description: Runs goimports to fix imports and formatting in Go files
-
   # ──────────────────────────────────────────────
   # Go linting: golangci-lint (strict)
   # ──────────────────────────────────────────────
@@ -29,10 +31,12 @@ repos:
           - --config=.golangci.yml
           - --max-issues-per-linter=0
           - --max-same-issues=0
-
   # ──────────────────────────────────────────────
   # Local hooks: go vet, cargo fmt, cargo clippy
   # ──────────────────────────────────────────────
+  # The local repo section runs custom commands directly in the workspace.
+  # Rust hooks target the `simulator` crate and enforce consistent formatting
+  # and strict linting before commits.
   - repo: local
     hooks:
       - id: go-vet
@@ -65,3 +69,4 @@ repos:
         language: system
         pass_filenames: false
         files: \.rs$
+        description: Runs strict Rust linting and fails on warnings before commit

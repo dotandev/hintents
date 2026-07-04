@@ -34,8 +34,7 @@ fn test_signature_verification_mock_true() {
         include_linear_memory: false,
     };
 
-    assert!(request.mock_signature_verification.is_some());
-    assert!(request.mock_signature_verification.unwrap());
+    assert_eq!(request.mock_signature_verification, Some(true));
 }
 
 #[test]
@@ -67,8 +66,7 @@ fn test_signature_verification_mock_false() {
         include_linear_memory: false,
     };
 
-    assert!(request.mock_signature_verification.is_some());
-    assert!(!request.mock_signature_verification.unwrap());
+    assert_eq!(request.mock_signature_verification, Some(false));
 }
 
 #[test]
@@ -100,5 +98,5 @@ fn test_signature_verification_mock_disabled() {
         include_linear_memory: false,
     };
 
-    assert!(request.mock_signature_verification.is_none());
+    assert_eq!(request.mock_signature_verification, None);
 }

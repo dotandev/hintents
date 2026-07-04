@@ -225,7 +225,7 @@ We are building this open-source to help the entire Stellar community. All contr
 4.  Run tests:
     ```bash
     go test ./...
-    cargo test --release -p erst-sim
+    cd simulator && cargo test --verbose
     ```
 
 ## Development

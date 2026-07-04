@@ -36,6 +36,7 @@ type KeyWeight struct {
 
 type SignerInfo struct {
 	AccountID      string        `json:"account_id"`
+	Address        string        `json:"address,omitempty"` // Soroban account/contract address form.
 	SignerKey      string        `json:"signer_key"`
 	SignerType     SignatureType `json:"signer_type"`
 	Weight         uint32        `json:"weight"`
@@ -52,6 +53,7 @@ type AuthEvent struct {
 	Timestamp     int64             `json:"timestamp"`
 	EventType     string            `json:"event_type"`
 	AccountID     string            `json:"account_id"`
+	Address       string            `json:"address,omitempty"` // Supports account and contract addresses.
 	SignerKey     string            `json:"signer_key,omitempty"`
 	SignatureType SignatureType     `json:"signature_type,omitempty"`
 	Weight        uint32            `json:"weight,omitempty"`

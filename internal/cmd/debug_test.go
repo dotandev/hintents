@@ -192,6 +192,12 @@ func TestDebugCommand_Setup(t *testing.T) {
 	mockGasPrice := debugCmd.Flags().Lookup("mock-gas-price")
 	assert.NotNil(t, mockGasPrice)
 
+	mockLedgerEntry := debugCmd.Flags().Lookup("mock-ledger-entry")
+	assert.NotNil(t, mockLedgerEntry)
+
+	mockLedgerManifest := debugCmd.Flags().Lookup("mock-ledger-manifest")
+	assert.NotNil(t, mockLedgerManifest)
+
 	snapshots := debugCmd.Flags().Lookup("snapshots")
 	assert.NotNil(t, snapshots)
 	assert.Equal(t, "false", snapshots.DefValue)
@@ -349,7 +355,7 @@ func TestExtractLedgerKeys(t *testing.T) {
 	assert.True(t, found, "Key not found in extracted keys")
 }
 
-func buildTestEnvelopeXdr(t *testing.T) string { //nolint:unused
+func buildTestEnvelopeXdr(t *testing.T) string { //nolint:unused // Reserved for future test use
 	t.Helper()
 
 	sourceAccount := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")

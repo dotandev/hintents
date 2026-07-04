@@ -120,8 +120,8 @@ func TestMetricsStalenessDetection(t *testing.T) {
 	assert.Greater(t, timestamp, float64(beforeTime-5))
 	assert.LessOrEqual(t, timestamp, float64(time.Now().Unix()+1))
 
-	// Wait a bit
-	time.Sleep(2 * time.Second)
+	// Wait a bit (sleep slightly longer than 2s to guarantee elapsed time)
+	time.Sleep(2*time.Second + 100*time.Millisecond)
 
 	// Record error response (should NOT update timestamp)
 	RecordRemoteNodeResponse(nodeAddress, network, false, 50*time.Millisecond)
@@ -155,8 +155,8 @@ func TestMetricsStalenessDetection(t *testing.T) {
 	// Verify timestamp hasn't changed (error responses don't update it)
 	assert.Equal(t, timestamp, timestamp2, "Timestamp should not update on error responses")
 
-	// Verify that time() - timestamp would show staleness
-	staleness := float64(time.Now().Unix()) - timestamp2
+	// Verify that time() - timestamp would show staleness (using UnixNano for sub-second precision)
+	staleness := float64(time.Now().UnixNano())/1e9 - timestamp2
 	assert.GreaterOrEqual(t, staleness, 2.0, "Staleness should be at least 2 seconds")
 }
 

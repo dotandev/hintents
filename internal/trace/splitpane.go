@@ -104,7 +104,7 @@ func DefaultSplitPane() *SplitPane {
 func (p *SplitPane) Render(w io.Writer, node *TraceNode, src *SourceContext) {
 	width := p.resolveWidth()
 	bw := bufio.NewWriter(w)
-	defer func() { _ = bw.Flush() }() //nolint:errcheck
+	defer func() { _ = bw.Flush() }() //nolint:errcheck // Best-effort buffer flush on exit
 
 	p.renderTracePane(bw, node, width)
 	p.renderDivider(bw, width, src)

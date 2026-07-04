@@ -58,7 +58,7 @@ Upgrade available: v1.2.3 — run 'go install github.com/dotandev/hintents/cmd/e
 To set the version during build:
 
 ```bash
-go build -ldflags "-X main.Version=v1.2.3" -o erst ./cmd/erst
+go build -ldflags "-X main.buildVersion=v1.2.3" -o erst ./cmd/erst
 ```
 
 Without this flag, the version defaults to "dev" and update checking is skipped.

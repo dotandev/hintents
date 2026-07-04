@@ -12,13 +12,13 @@ mod restore_preamble_tests {
         LedgerEntryExt, LedgerKey, LedgerKeyContractData, ScAddress, ScVal, WriteXdr,
     };
 
-    fn encode_xdr<T: WriteXdr>(value: &T) -> String {
-        let bytes = value.to_xdr(soroban_env_host::xdr::Limits::none()).unwrap();
-        base64::engine::general_purpose::STANDARD.encode(&bytes)
+    fn encode_xdr<T: WriteXdr>(value: &T) -> Result<String, Box<dyn std::error::Error>> {
+        let bytes = value.to_xdr(soroban_env_host::xdr::Limits::none())?;
+        Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
     }
 
     #[test]
-    fn test_restore_preamble_injection() {
+    fn test_restore_preamble_injection() -> Result<(), Box<dyn std::error::Error>> {
         // Create a ContractData key and entry
         let contract_id = Hash([9u8; 32]);
         let key_val = ScVal::U32(123);
@@ -39,8 +39,8 @@ mod restore_preamble_tests {
             }),
             ext: LedgerEntryExt::V0,
         };
-        let key_b64 = encode_xdr(&key);
-        let entry_b64 = encode_xdr(&entry);
+        let key_b64 = encode_xdr(&key)?;
+        let entry_b64 = encode_xdr(&entry)?;
         let restore_preamble = json!({
             "ledger_entries": {
                 key_b64.clone(): entry_b64.clone()
@@ -76,9 +76,8 @@ mod restore_preamble_tests {
                     if let Some(map) = entries.as_object() {
                         for (key_xdr, entry_xdr_val) in map {
                             if let Some(entry_xdr) = entry_xdr_val.as_str() {
-                                let key = crate::snapshot::decode_ledger_key(key_xdr).unwrap();
-                                let entry =
-                                    crate::snapshot::decode_ledger_entry(entry_xdr).unwrap();
+                                let key = crate::snapshot::decode_ledger_key(key_xdr)?;
+                                let entry = crate::snapshot::decode_ledger_entry(entry_xdr)?;
                                 let result = host.put_ledger_entry(key.clone(), entry.clone());
                                 assert!(result.is_ok(), "Injection should succeed");
                             }
@@ -87,5 +86,7 @@ mod restore_preamble_tests {
                 }
             }
         }
+
+        Ok(())
     }
 }
