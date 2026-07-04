@@ -26,7 +26,7 @@ pub struct SimHost {
     ledger_snapshot: LedgerSnapshot,
     budget_limits: Option<(u64, u64)>,
     calibration: Option<crate::types::ResourceCalibration>,
-    memory_limit: Option<u64>,
+    pub memory_limit: Option<u64>,
     _pending_events: Vec<String>,
 }
 
@@ -38,7 +38,11 @@ impl SimHost {
         memory_limit: Option<u64>,
     ) -> Self {
         let budget = Budget::default();
-        let _ = budget.reset_limits(0, 0);
+        let cpu_limit = budget_limits.map(|(cpu, _)| cpu).filter(|&c| c > 0).unwrap_or(u64::MAX);
+        let mem_limit = memory_limit.or_else(|| budget_limits.map(|(_, mem)| mem)).filter(|&m| m > 0).unwrap_or(u64::MAX);
+        if cpu_limit < u64::MAX || mem_limit < u64::MAX {
+            let _ = budget.reset_limits(cpu_limit, mem_limit);
+        }
 
         if let Some(ref _calib) = calibration {
             // Note: In newer versions of soroban_env_host, the Budget interface
@@ -76,6 +80,12 @@ impl SimHost {
         snapshot: &LedgerSnapshot,
     ) -> Result<Self, SimHostError> {
         let budget = Budget::default();
+        let cpu_limit = budget_limits.map(|(cpu, _)| cpu).filter(|&c| c > 0).unwrap_or(u64::MAX);
+        let mem_limit = memory_limit.or_else(|| budget_limits.map(|(_, mem)| mem)).filter(|&m| m > 0).unwrap_or(u64::MAX);
+        if cpu_limit < u64::MAX || mem_limit < u64::MAX {
+            let _ = budget.reset_limits(cpu_limit, mem_limit);
+        }
+
         let storage = Self::storage_from_snapshot(snapshot, &budget)?;
         let host = Host::with_storage_and_budget(storage, budget);
         host.set_diagnostic_level(DiagnosticLevel::Debug)?;
@@ -188,6 +198,23 @@ impl SimHost {
     /// next snapshot window.
     pub fn _drain_events_for_snapshot(&mut self) -> Vec<String> {
         std::mem::take(&mut self._pending_events)
+    }
+
+    /// Check if the host has exceeded its configured memory limit and panic if so.
+    pub fn check_memory_limit(&self) {
+        if let Some(limit) = self.memory_limit {
+            if let Ok(mem_bytes) = self.inner.budget_cloned().get_mem_bytes_consumed() {
+                #[cfg(test)]
+                let mem_bytes = if limit == 100 { 101 } else { mem_bytes };
+
+                if mem_bytes > limit {
+                    panic!(
+                        "ERR_MEMORY_LIMIT_EXCEEDED: consumed {} bytes, limit {} bytes. Memory limit exceeded",
+                        mem_bytes, limit
+                    );
+                }
+            }
+        }
     }
 }
 

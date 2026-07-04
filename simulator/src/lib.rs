@@ -19,3 +19,6 @@ pub mod wasm_types;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod memory_limit_test;
