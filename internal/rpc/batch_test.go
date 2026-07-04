@@ -197,7 +197,7 @@ func newMockSorobanServer(t *testing.T, known []string) *httptest.Server {
 	// Pre-build valid entries for the known keys.
 	index := make(map[string]string, len(known))
 	for _, k := range known {
-		index[k] = buildValidEntryB64(k)
+		index[k] = buildValidEntryB64(t, k)
 	}
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
