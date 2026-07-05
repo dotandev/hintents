@@ -330,7 +330,10 @@ mod tests {
         std::env::remove_var("ERST_SIGNER_TYPE");
         std::env::remove_var("ERST_SIGNER_ALGORITHM");
 
-        let config = SignerConfig::from_env().unwrap();
+        let config = match SignerConfig::from_env() {
+            Ok(config) => config,
+            Err(err) => panic!("expected default signer config, got error: {}", err),
+        };
         assert_eq!(config.signer_type, "software");
         assert_eq!(config.algorithm, "ed25519");
 

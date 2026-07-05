@@ -14,13 +14,20 @@ import (
 	"github.com/dotandev/hintents/internal/cmd"
 	"github.com/dotandev/hintents/internal/config"
 	"github.com/dotandev/hintents/internal/crashreport"
+	"github.com/dotandev/hintents/internal/version"
 )
 
 // Build-time variables injected via -ldflags.
 var (
-	version   = "dev"
-	commitSHA = "unknown"
+	buildVersion   = "dev"
+	buildCommitSHA = "unknown"
 )
+
+func init() {
+	// Set version from build-time variables
+	version.Version = buildVersion
+	version.CommitSHA = buildCommitSHA
+}
 
 // ─── Example RPC handler ──────────────────────────────────────────────────────
 
@@ -54,8 +61,8 @@ func main() {
 		Enabled:   cfg.CrashReporting,
 		SentryDSN: cfg.CrashSentryDSN,
 		Endpoint:  cfg.CrashEndpoint,
-		Version:   version,
-		CommitSHA: commitSHA,
+		Version:   buildVersion,
+		CommitSHA: buildCommitSHA,
 	})
 
 	// Catch any unrecovered panic, report it, then re-panic.

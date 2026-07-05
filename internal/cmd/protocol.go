@@ -94,10 +94,11 @@ var protocolVerifyCmd = &cobra.Command{
 }
 
 var protocolHandlerCmd = &cobra.Command{
-	Use:    "protocol-handler <uri>",
-	Short:  "Internal protocol entrypoint used by the OS",
-	Hidden: true,
-	Args:   cobra.ExactArgs(1),
+	Use:     "protocol:handle <uri>",
+	Aliases: []string{"protocol-handler"},
+	Short:   "Handle an erst:// protocol URI and dispatch it to the debugger",
+	GroupID: "utility",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		parsed, err := protocolreg.ParseDebugURI(args[0])
 		if err != nil {

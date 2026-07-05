@@ -107,7 +107,7 @@ func triggerMockLink(selfPath string) bool {
 	// We invoke the binary directly rather than through the OS URL dispatcher
 	// so the test is hermetic and does not require the scheme to be registered.
 	// The --deep-link flag tells the binary to handle the URL and exit.
-	cmd := exec.Command(selfPath, "--deep-link", MockURL) //nolint:gosec // selfPath is our own binary
+	cmd := exec.Command(selfPath, "--deep-link", MockURL) //nolint:gosec // selfPath is our own trusted binary
 	cmd.Env = append(os.Environ(), "ERST_DEEP_LINK_PROBE=1")
 
 	done := make(chan error, 1)

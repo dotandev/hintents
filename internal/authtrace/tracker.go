@@ -405,3 +405,57 @@ func (t *Tracker) ExportTraceJSON() ([]byte, error) {
 	}
 	return out, nil
 }
+
+// VerifyInvocationTreeIntegrity compares invocation tree nodes with execution
+// trace nodes in order and reports precise structural mismatches.
+func (t *Tracker) VerifyInvocationTreeIntegrity(invocationTree []string, executionTrace []string) error {
+	maxLen := len(invocationTree)
+	if len(executionTrace) > maxLen {
+		maxLen = len(executionTrace)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		treeNodeExists := i < len(invocationTree)
+		traceNodeExists := i < len(executionTrace)
+
+		switch {
+		case treeNodeExists && !traceNodeExists:
+			err := fmt.Errorf("invocation tree mismatch: missing execution node at position %d (expected %q)", i, invocationTree[i])
+			t.RecordEvent(AuthEvent{
+				EventType:   "invocation_tree_integrity",
+				AccountID:   "",
+				Status:      "warning",
+				ErrorReason: ReasonUnknown,
+				Details:     err.Error(),
+			})
+			return err
+		case !treeNodeExists && traceNodeExists:
+			err := fmt.Errorf("invocation tree mismatch: unexpected execution node at position %d (actual %q)", i, executionTrace[i])
+			t.RecordEvent(AuthEvent{
+				EventType:   "invocation_tree_integrity",
+				AccountID:   "",
+				Status:      "warning",
+				ErrorReason: ReasonUnknown,
+				Details:     err.Error(),
+			})
+			return err
+		case treeNodeExists && traceNodeExists && invocationTree[i] != executionTrace[i]:
+			err := fmt.Errorf(
+				"invocation tree mismatch: ordering/content mismatch at position %d (expected %q, got %q)",
+				i,
+				invocationTree[i],
+				executionTrace[i],
+			)
+			t.RecordEvent(AuthEvent{
+				EventType:   "invocation_tree_integrity",
+				AccountID:   "",
+				Status:      "warning",
+				ErrorReason: ReasonUnknown,
+				Details:     err.Error(),
+			})
+			return err
+		}
+	}
+
+	return nil
+}

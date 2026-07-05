@@ -7,17 +7,16 @@ ARG TARGETARCH
 
 WORKDIR /app/simulator
 
-# Install build dependencies for cross-compilation
-# clang and lld are used as cross-linkers
-RUN apk add --no-cache musl-dev gcc clang lld llvm
-
 # Copy Rust project files
 COPY simulator/Cargo.toml simulator/Cargo.lock ./
 COPY simulator/src ./src
 
+# Install build dependencies for cross-compilation
+# clang and lld are used as cross-linkers
 # Build release binary (statically linked by default on Alpine)
 # We use cross-compilation if TARGETARCH is arm64 to keep build times fast
-RUN if [ "$TARGETARCH" = "arm64" ]; then \
+RUN apk add --no-cache musl-dev gcc clang lld llvm && \
+  if [ "$TARGETARCH" = "arm64" ]; then \
   rustup target add aarch64-unknown-linux-musl && \
   CC_aarch64_unknown_linux_musl=clang \
   AR_aarch64_unknown_linux_musl=llvm-ar \
@@ -49,9 +48,7 @@ RUN go mod download
 COPY . .
 
 # Build Go binary statically for target architecture
-ENV CGO_ENABLED=0
-ENV GOOS=${TARGETOS}
-ENV GOARCH=${TARGETARCH}
+ENV CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH}
 RUN go build -ldflags="-s -w" -o erst cmd/erst/main.go
 
 # Stage 3: Final Runtime Image

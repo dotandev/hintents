@@ -12,7 +12,7 @@ import (
 	"github.com/dotandev/hintents/internal/errors"
 )
 
-func loadFromEnv(cfg *Config) error { //nolint:unused
+func loadFromEnv(cfg *Config) error { //nolint:unused // Reserved for future config loading from environment
 	if v := os.Getenv("ERST_RPC_URL"); v != "" {
 		cfg.RpcUrl = v
 	}

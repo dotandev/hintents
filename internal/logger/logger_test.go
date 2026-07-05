@@ -396,3 +396,111 @@ func TestLogLevelHierarchy(t *testing.T) {
 		})
 	}
 }
+
+func TestRedactPIN(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			input:    "ERST_PKCS11_PIN=1234",
+			expected: "ERST_PKCS11_PIN=*****",
+		},
+		{
+			input:    "ERST_PKCS11_PIN=12345678",
+			expected: "ERST_PKCS11_PIN=*****",
+		},
+		{
+			input:    "ERST_PKCS11_PIN: 1234",
+			expected: "ERST_PKCS11_PIN=*****",
+		},
+		{
+			input:    "Config: ERST_PKCS11_PIN=secret123",
+			expected: "Config: ERST_PKCS11_PIN=*****",
+		},
+		{
+			input:    "No PIN here",
+			expected: "No PIN here",
+		},
+		{
+			input:    "ERST_PKCS11_MODULE=/usr/lib/softhsm2.so ERST_PKCS11_PIN=1234",
+			expected: "ERST_PKCS11_MODULE=/usr/lib/softhsm2.so ERST_PKCS11_PIN=*****",
+		},
+		{
+			input:    "\"pin\": \"1234\"",
+			expected: "\"pin\": \"*****\"",
+		},
+		{
+			input:    "'pin': '1234'",
+			expected: "'pin': '*****'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := RedactPIN(tt.input)
+			if result != tt.expected {
+				t.Errorf("RedactPIN(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestRedactingWriter(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			input:    "ERST_PKCS11_PIN=1234\n",
+			expected: "ERST_PKCS11_PIN=*****\n",
+		},
+		{
+			input:    "Connecting with ERST_PKCS11_PIN=secret\n",
+			expected: "Connecting with ERST_PKCS11_PIN=*****\n",
+		},
+		{
+			input:    "No PIN in this log\n",
+			expected: "No PIN in this log\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			rw := &redactingWriter{w: buf}
+
+			_, err := rw.Write([]byte(tt.input))
+			if err != nil {
+				t.Fatalf("Write() error = %v", err)
+			}
+
+			result := buf.String()
+			if result != tt.expected {
+				t.Errorf("redactingWriter.Write(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoggerRedactsPIN(t *testing.T) {
+	buf := &bytes.Buffer{}
+	SetOutput(buf, false)
+	SetLevel(slog.LevelDebug)
+
+	Logger.Info("HSM config", "ERST_PKCS11_PIN", "1234")
+	Logger.Info("Config loaded", "config", "ERST_PKCS11_PIN=secret123")
+
+	output := buf.String()
+
+	// Verify PIN is redacted
+	if strings.Contains(output, "1234") {
+		t.Error("PIN value should be redacted from logs")
+	}
+	if strings.Contains(output, "secret123") {
+		t.Error("PIN value should be redacted from logs")
+	}
+	if !strings.Contains(output, "*****") {
+		t.Error("Redaction marker should appear in logs")
+	}
+}

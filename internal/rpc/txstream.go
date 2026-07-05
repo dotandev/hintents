@@ -241,7 +241,7 @@ func (s *wsStreamer) poll(ctx context.Context, conn *wsConn, hash string, id int
 		return true
 	}
 
-	_ = conn.raw.SetWriteDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck
+	_ = conn.raw.SetWriteDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck // Best-effort write deadline for WebSocket frame
 	if err := wsWriteFrame(conn.raw, reqBytes); err != nil {
 		logger.Logger.Warn("ws streamer: write frame", "error", err)
 		return true

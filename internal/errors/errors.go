@@ -68,6 +68,7 @@ var (
 	ErrWasmInvalid          = stdliberrors.New("invalid WASM file")
 	ErrSpecNotFound         = stdliberrors.New("contract spec not found")
 	ErrShellExit            = stdliberrors.New("exit")
+	ErrRegistryConflict     = stdliberrors.New("protocol registry conflict detected")
 )
 
 type LedgerNotFoundError struct {

@@ -5,6 +5,7 @@ package simulator
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -55,6 +56,19 @@ func NewRegressionHarness(runner RunnerInterface, client *rpc.Client, maxWorkers
 	}
 }
 
+func openIsolatedSQLiteCacheDB() (*sql.DB, error) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		return nil, fmt.Errorf("failed to open isolated sqlite testing database: %w", err)
+	}
+
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+
+	return db, nil
+}
+
 // RunRegressionTests fetches and tests historic failed transactions
 // This downloads up to `count` historic failed transactions and verifies
 // that erst-sim produces identical results to the original execution
@@ -66,6 +80,22 @@ func (h *RegressionHarness) RunRegressionTests(
 ) (*RegressionTestSuite, error) {
 	if count <= 0 {
 		return nil, fmt.Errorf("count must be greater than 0")
+	}
+
+	cacheDB, err := openIsolatedSQLiteCacheDB()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rpc.CloseCache()
+		_ = cacheDB.Close()
+	}()
+
+	if err := rpc.CloseCache(); err != nil {
+		logger.Logger.Warn("Failed to close existing RPC cache before starting isolated regression run", "error", err)
+	}
+	if err := rpc.InitCacheWithDB(cacheDB); err != nil {
+		return nil, fmt.Errorf("failed to initialize isolated sqlite cache for regression tests: %w", err)
 	}
 
 	// Fetch failed transaction hashes from mainnet

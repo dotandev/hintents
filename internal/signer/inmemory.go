@@ -5,7 +5,9 @@ package signer
 
 import (
 	"crypto/ed25519"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 )
 
@@ -47,6 +49,27 @@ func NewInMemorySigner(privateKeyHex string) (*InMemorySigner, error) {
 // ed25519.PrivateKey value.
 func NewInMemorySignerFromKey(key ed25519.PrivateKey) *InMemorySigner {
 	return &InMemorySigner{privateKey: key}
+}
+
+// NewInMemorySignerFromPEM creates an InMemorySigner from a PEM-encoded
+// Ed25519 private key. It supports PKCS#8 PEM private keys.
+func NewInMemorySignerFromPEM(pemData string) (*InMemorySigner, error) {
+	block, _ := pem.Decode([]byte(pemData))
+	if block == nil {
+		return nil, &Error{Op: "inmemory", Msg: "invalid PEM private key"}
+	}
+
+	privKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, &Error{Op: "inmemory", Msg: "invalid PKCS#8 private key", Err: err}
+	}
+
+	edPriv, ok := privKey.(ed25519.PrivateKey)
+	if !ok {
+		return nil, &Error{Op: "inmemory", Msg: "PEM does not contain an Ed25519 private key"}
+	}
+
+	return &InMemorySigner{privateKey: edPriv}, nil
 }
 
 // Sign produces an Ed25519 signature over the provided data.

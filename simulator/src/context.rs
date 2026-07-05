@@ -25,11 +25,14 @@ pub struct HarnessContext {
 
 impl HarnessContext {
     /// Applies control-command side effects and returns human-readable log lines.
-    pub fn apply_control_command(&mut self, request: &SimulationRequest) -> Vec<String> {
+    pub fn apply_control_command(
+        &mut self,
+        request: &SimulationRequest,
+    ) -> Result<Vec<String>, SimulationContextError> {
         let mut logs = Vec::new();
 
         let Some(command) = request.control_command.as_deref() else {
-            return logs;
+            return Ok(logs);
         };
 
         if command.eq_ignore_ascii_case(ROLLBACK_AND_RESUME) {
@@ -54,11 +57,11 @@ impl HarnessContext {
                 ));
             }
             logs.push(replay_log);
-            return logs;
+            return Ok(logs);
         }
 
         logs.push(format!("Bridge command ignored: {}", command));
-        logs
+        Ok(logs)
     }
 
     /// Resets temporary harness counters that should not leak across forks.

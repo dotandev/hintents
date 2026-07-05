@@ -118,7 +118,7 @@ func (r *ANSIRenderer) Error() string {
 	return "[X]"
 }
 
-func (r *ANSIRenderer) Symbol(name string) string { //nolint:gocyclo
+func (r *ANSIRenderer) Symbol(name string) string { //nolint:gocyclo // Large switch statement mapping symbol names to ASCII representations
 	if r.IsTTY() {
 		switch name {
 		case "check":

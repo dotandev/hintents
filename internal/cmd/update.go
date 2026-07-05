@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dotandev/hintents/internal/updater"
+	"github.com/dotandev/hintents/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +28,7 @@ var updateCmd = &cobra.Command{
 You can also specify a target version using the --version flag.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		checker := updater.NewChecker(Version)
+		checker := updater.NewChecker(version.Version)
 
 		targetVersion := updateVersionFlag
 		if targetVersion == "" {

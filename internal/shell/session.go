@@ -5,6 +5,7 @@ package shell
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,7 +13,13 @@ import (
 
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/simulator"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
+
+// maxShellTimestamp is the latest allowed ledger timestamp (2100-01-01 UTC).
+// Prevents unbounded growth when the clock is behind during extended time-travel debugging.
+const maxShellTimestamp int64 = 4102444800
 
 // Session represents an interactive shell session with persistent ledger state
 type Session struct {
@@ -75,13 +82,15 @@ func (s *Session) Invoke(ctx context.Context, contractID, function string, args 
 		return nil, fmt.Errorf("failed to build envelope: %w", err)
 	}
 
-	// Create simulation request
+	// Create simulation request with snapshots enabled so updateLedgerState
+	// can read post-execution ledger entry diffs from the response.
 	req := &simulator.SimulationRequest{
-		EnvelopeXdr:    envelopeXDR,
-		ResultMetaXdr:  "",
-		LedgerEntries:  s.ledgerEntries,
-		Timestamp:      s.timestamp,
-		LedgerSequence: s.ledgerSequence,
+		EnvelopeXdr:     envelopeXDR,
+		ResultMetaXdr:   "",
+		LedgerEntries:   s.ledgerEntries,
+		Timestamp:       s.timestamp,
+		LedgerSequence:  s.ledgerSequence,
+		EnableSnapshots: true,
 	}
 
 	// Execute simulation
@@ -107,33 +116,116 @@ func (s *Session) Invoke(ctx context.Context, contractID, function string, args 
 
 // buildInvocationEnvelope creates a transaction envelope for contract invocation
 func (s *Session) buildInvocationEnvelope(contractID, function string, args []string) (string, error) {
-	// This is a simplified version - in production, you'd use stellar-sdk to build proper XDR
-	// For now, we'll create a minimal envelope structure
+	// Decode contract ID from strkey (C...) or 32-byte hex
+	var cid xdr.ContractId
+	if len(contractID) > 0 && contractID[0] == 'C' {
+		decoded, err := strkey.Decode(strkey.VersionByteContract, contractID)
+		if err != nil {
+			return "", fmt.Errorf("decode contract id: %w", err)
+		}
+		if len(decoded) != 32 {
+			return "", fmt.Errorf("contract id must be 32 bytes, got %d", len(decoded))
+		}
+		copy(cid[:], decoded)
+	} else {
+		return "", fmt.Errorf("contract id must be a strkey C... address")
+	}
 
-	// TODO: Implement proper XDR envelope building using stellar-sdk
-	// This would involve:
-	// 1. Creating a TransactionEnvelope
-	// 2. Adding InvokeHostFunction operation
-	// 3. Setting contract ID, function name, and arguments
-	// 4. Encoding to base64 XDR
+	// Build ScVal arguments from string representations
+	scArgs := make([]xdr.ScVal, 0, len(args))
+	for _, arg := range args {
+		s := xdr.ScString(arg)
+		scArgs = append(scArgs, xdr.ScVal{
+			Type: xdr.ScValTypeScvString,
+			Str:  &s,
+		})
+	}
 
-	return "", fmt.Errorf("envelope building not yet implemented - requires stellar-sdk integration")
+	// Build InvokeHostFunction operation
+	fnName := xdr.ScSymbol(function)
+	op := xdr.Operation{
+		Body: xdr.OperationBody{
+			Type: xdr.OperationTypeInvokeHostFunction,
+			InvokeHostFunctionOp: &xdr.InvokeHostFunctionOp{
+				HostFunction: xdr.HostFunction{
+					Type: xdr.HostFunctionTypeHostFunctionTypeInvokeContract,
+					InvokeContract: &xdr.InvokeContractArgs{
+						ContractAddress: xdr.ScAddress{
+							Type:       xdr.ScAddressTypeScAddressTypeContract,
+							ContractId: &cid,
+						},
+						FunctionName: fnName,
+						Args:         scArgs,
+					},
+				},
+			},
+		},
+	}
+
+	// Use zero-bytes source account (placeholder for simulation — not submitted to network)
+	var sourceBytes [32]byte
+	sourceAccount := xdr.MuxedAccount{
+		Type: xdr.CryptoKeyTypeKeyTypeEd25519,
+		Ed25519: func() *xdr.Uint256 {
+			u := xdr.Uint256(sourceBytes)
+			return &u
+		}(),
+	}
+
+	tx := xdr.Transaction{
+		SourceAccount: sourceAccount,
+		Fee:           100,
+		SeqNum:        1,
+		Cond:          xdr.Preconditions{Type: xdr.PreconditionTypePrecondNone},
+		Memo:          xdr.Memo{Type: xdr.MemoTypeMemoNone},
+		Operations:    []xdr.Operation{op},
+		Ext:           xdr.TransactionExt{V: 0},
+	}
+
+	envelope := xdr.TransactionEnvelope{
+		Type: xdr.EnvelopeTypeEnvelopeTypeTx,
+		V1: &xdr.TransactionV1Envelope{
+			Tx:         tx,
+			Signatures: []xdr.DecoratedSignature{},
+		},
+	}
+
+	envBytes, err := envelope.MarshalBinary()
+	if err != nil {
+		return "", fmt.Errorf("marshal envelope: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(envBytes), nil
 }
 
-// updateLedgerState updates the session's ledger state based on simulation results
+// updateLedgerState updates the session's ledger state based on simulation results.
+// It parses ledger entry diffs from the simulator's inline snapshot payload and
+// merges them into s.ledgerEntries to maintain persistent shell session state.
 func (s *Session) updateLedgerState(resp *simulator.SimulationResponse) {
-	// Increment ledger sequence
 	s.ledgerSequence++
 
-	// Update timestamp
 	now := time.Now().Unix()
 	if now <= s.timestamp {
 		now = s.timestamp + 1
 	}
+	if now > maxShellTimestamp {
+		now = maxShellTimestamp
+	}
 	s.timestamp = now
 
-	// TODO: Extract and update ledger entries from simulation response
-	// This would involve parsing the ResultMetaXDR to get state changes
+	if resp.OptimizationReport == nil || resp.OptimizationReport.Snapshots == nil {
+		return
+	}
+
+	// Each inline snapshot contains ledger entry pairs: [keyXDR_b64, entryXDR_b64].
+	// Merge all snapshots so the session reflects the post-simulation state.
+	for _, snapshot := range resp.OptimizationReport.Snapshots.Inline {
+		for _, pair := range snapshot.LedgerEntries {
+			if len(pair) == 2 {
+				s.ledgerEntries[pair[0]] = pair[1]
+			}
+		}
+	}
 }
 
 // GetStateSummary returns a summary of the current ledger state

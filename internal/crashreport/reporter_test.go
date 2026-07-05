@@ -4,6 +4,7 @@
 package crashreport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,13 +45,15 @@ func setEnv(t *testing.T, key, value string) {
 // ---- IsEnabled --------------------------------------------------------------
 
 func TestIsEnabled_DisabledByDefault(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	err := os.Unsetenv(envOptIn)
+	require.NoError(t, err)
 	r := New(Config{Enabled: false})
 	assert.False(t, r.IsEnabled())
 }
 
 func TestIsEnabled_EnabledViaConfig(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	err := os.Unsetenv(envOptIn)
+	require.NoError(t, err)
 	r := New(Config{Enabled: true})
 	assert.True(t, r.IsEnabled())
 }
@@ -81,13 +85,15 @@ func TestIsEnabled_EnvVar0(t *testing.T) {
 // ---- New / config -----------------------------------------------------------
 
 func TestNew_DefaultEndpoint(t *testing.T) {
-	_ = os.Unsetenv(envEndpoint)
+	err := os.Unsetenv(envEndpoint)
+	require.NoError(t, err)
 	r := New(Config{})
 	assert.Equal(t, DefaultEndpoint, r.cfg.Endpoint)
 }
 
 func TestNew_CustomEndpointFromConfig(t *testing.T) {
-	_ = os.Unsetenv(envEndpoint)
+	err := os.Unsetenv(envEndpoint)
+	require.NoError(t, err)
 	r := New(Config{Endpoint: "https://example.com/crash"})
 	assert.Equal(t, "https://example.com/crash", r.cfg.Endpoint)
 }
@@ -101,14 +107,15 @@ func TestNew_EndpointEnvVarOverridesConfig(t *testing.T) {
 // ---- Send -------------------------------------------------------------------
 
 func TestSend_NoOpWhenDisabled(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	err := os.Unsetenv(envOptIn)
+	require.NoError(t, err)
 	srv := newTestServer(t, http.StatusOK, func(r *http.Request, body Report) {
 		t.Fatal("server should not be called when crash reporting is disabled")
 	})
 	defer srv.Close()
 
 	reporter := New(Config{Enabled: false, Endpoint: srv.URL})
-	err := reporter.Send(context.Background(), errors.New("test"), nil, "erst debug")
+	err = reporter.Send(context.Background(), errors.New("test"), nil, "erst debug")
 	assert.NoError(t, err)
 }
 
@@ -213,7 +220,8 @@ func TestSend_NilStackOmittedFromPayload(t *testing.T) {
 // ---- buildReport ------------------------------------------------------------
 
 func TestBuildReport_FieldsPopulated(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	err := os.Unsetenv(envOptIn)
+	require.NoError(t, err)
 	reporter := New(Config{Version: "2.0.0", CommitSHA: "deadbeef"})
 	report := reporter.buildReport(errors.New("something failed"), []byte("stack"), "erst session list")
 
@@ -297,8 +305,10 @@ func TestNew_SentryDSNFromEnv(t *testing.T) {
 // TestNew_SentryDSNFromConfig verifies that a DSN supplied directly via Config
 // is stored and does not fall back to DefaultEndpoint when it is the only sink.
 func TestNew_SentryDSNFromConfig(t *testing.T) {
-	_ = os.Unsetenv(envSentryDSN)
-	_ = os.Unsetenv(envEndpoint)
+	err := os.Unsetenv(envSentryDSN)
+	require.NoError(t, err)
+	err = os.Unsetenv(envEndpoint)
+	require.NoError(t, err)
 	r := New(Config{SentryDSN: "https://fakekey@o0.ingest.sentry.io/1"})
 	assert.Equal(t, "https://fakekey@o0.ingest.sentry.io/1", r.cfg.SentryDSN)
 	// Endpoint should remain empty — DSN is present, no fallback needed.
@@ -308,8 +318,10 @@ func TestNew_SentryDSNFromConfig(t *testing.T) {
 // TestNew_DefaultEndpointWhenNoSinks verifies that DefaultEndpoint is used
 // when neither SentryDSN nor Endpoint is configured.
 func TestNew_DefaultEndpointWhenNoSinks(t *testing.T) {
-	_ = os.Unsetenv(envSentryDSN)
-	_ = os.Unsetenv(envEndpoint)
+	err := os.Unsetenv(envSentryDSN)
+	require.NoError(t, err)
+	err = os.Unsetenv(envEndpoint)
+	require.NoError(t, err)
 	r := New(Config{})
 	assert.Equal(t, DefaultEndpoint, r.cfg.Endpoint)
 	assert.Equal(t, "", r.cfg.SentryDSN)
@@ -351,4 +363,78 @@ func TestIsEnabled_EnvVarNo(t *testing.T) {
 	setEnv(t, envOptIn, "no")
 	r := New(Config{Enabled: true})
 	assert.False(t, r.IsEnabled())
+}
+
+// ---- Resilience: timeout and network failure ---------------------------------
+
+func TestSend_TimeoutDoesNotHangCLI(t *testing.T) {
+	setEnv(t, envOptIn, "true")
+
+	// Server that stalls just long enough to trigger the client timeout, then exits.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(500 * time.Millisecond):
+		}
+	}))
+	defer srv.Close()
+
+	reporter := New(Config{Enabled: true, Endpoint: srv.URL})
+	// Use a very short client timeout so the test completes quickly.
+	reporter.client.Timeout = 50 * time.Millisecond
+
+	var buf bytes.Buffer
+	reporter.stderr = &buf
+
+	start := time.Now()
+	err := reporter.Send(context.Background(), errors.New("crash"), nil, "")
+	elapsed := time.Since(start)
+
+	require.Error(t, err, "should return an error on timeout")
+	assert.Less(t, elapsed, 5*time.Second, "Send should not block longer than the timeout")
+	assert.Contains(t, buf.String(), "warning: failed to submit crash report")
+}
+
+func TestSend_NetworkFailureDoesNotPanic(t *testing.T) {
+	setEnv(t, envOptIn, "true")
+
+	reporter := New(Config{Enabled: true, Endpoint: "http://localhost:0/unreachable"})
+
+	var buf bytes.Buffer
+	reporter.stderr = &buf
+
+	// Must not panic.
+	require.NotPanics(t, func() {
+		_ = reporter.Send(context.Background(), errors.New("crash"), nil, "")
+	})
+}
+
+func TestSend_WarningEmittedOnFailure(t *testing.T) {
+	setEnv(t, envOptIn, "true")
+
+	srv := newTestServer(t, http.StatusInternalServerError, nil)
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	reporter := New(Config{Enabled: true, Endpoint: srv.URL})
+	reporter.stderr = &buf
+
+	err := reporter.Send(context.Background(), errors.New("crash"), nil, "")
+	require.Error(t, err)
+	assert.Contains(t, buf.String(), "warning: failed to submit crash report")
+}
+
+func TestSend_NoWarningOnSuccess(t *testing.T) {
+	setEnv(t, envOptIn, "true")
+
+	srv := newTestServer(t, http.StatusOK, nil)
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	reporter := New(Config{Enabled: true, Endpoint: srv.URL})
+	reporter.stderr = &buf
+
+	err := reporter.Send(context.Background(), errors.New("crash"), nil, "")
+	require.NoError(t, err)
+	assert.Empty(t, buf.String(), "no warning should be emitted on success")
 }

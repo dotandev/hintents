@@ -8,13 +8,25 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use wasmparser::{ExternalKind, Operator, Parser, Payload, TypeRef, ValType};
 
-pub fn run_repl(wasm_path: &Path, initial_function: Option<&str>) -> Result<(), String> {
+#[derive(Debug, thiserror::Error)]
+pub enum ReplError {
+    #[error("Parsing error: {0}")]
+    Parsing(String),
+
+    #[error("Evaluation error: {0}")]
+    Evaluation(String),
+
+    #[error("System error: {0}")]
+    System(String),
+}
+
+pub fn run_repl(wasm_path: &Path, initial_function: Option<&str>) -> Result<(), ReplError> {
     let bytes = fs::read(wasm_path).map_err(|error| {
-        format!(
+        ReplError::System(format!(
             "failed to read wasm file '{}': {}",
             wasm_path.display(),
             error
-        )
+        ))
     })?;
     let module = ModuleDebugInfo::from_bytes(&bytes)?;
     let source_mapper = SourceMapper::load(wasm_path)?;
@@ -33,12 +45,12 @@ pub fn run_repl(wasm_path: &Path, initial_function: Option<&str>) -> Result<(), 
         print!("erst-sim> ");
         io::stdout()
             .flush()
-            .map_err(|error| format!("failed to flush stdout: {}", error))?;
+            .map_err(|error| ReplError::System(format!("failed to flush stdout: {}", error)))?;
 
         let mut line = String::new();
         let bytes_read = stdin
             .read_line(&mut line)
-            .map_err(|error| format!("failed to read command: {}", error))?;
+            .map_err(|error| ReplError::System(format!("failed to read command: {}", error)))?;
         if bytes_read == 0 {
             println!();
             break;
@@ -78,10 +90,10 @@ struct DebuggerSession {
 }
 
 impl DebuggerSession {
-    fn new(module: ModuleDebugInfo, source_mapper: SourceMapper) -> Result<Self, String> {
+    fn new(module: ModuleDebugInfo, source_mapper: SourceMapper) -> Result<Self, ReplError> {
         let current_function = module
             .default_function_index()
-            .ok_or_else(|| "wasm module does not contain any defined functions".to_string())?;
+            .ok_or_else(|| ReplError::Evaluation("wasm module does not contain any defined functions".to_string()))?;
         Ok(Self {
             module,
             source_mapper,
@@ -91,7 +103,7 @@ impl DebuggerSession {
         })
     }
 
-    fn handle_command(&mut self, command: &str) -> Result<CommandOutcome, String> {
+    fn handle_command(&mut self, command: &str) -> Result<CommandOutcome, ReplError> {
         if command.is_empty() {
             return Ok(CommandOutcome::Continue(String::new()));
         }
@@ -118,7 +130,7 @@ impl DebuggerSession {
             "use" => {
                 let selection = parts.collect::<Vec<_>>().join(" ");
                 if selection.is_empty() {
-                    return Err("use requires a function name or numeric index".to_string());
+                    return Err(ReplError::Evaluation("use requires a function name or numeric index".to_string()));
                 }
                 self.select_function(&selection)?;
                 Ok(CommandOutcome::Continue(format!(
@@ -128,7 +140,7 @@ impl DebuggerSession {
             }
             "step-inst" | "si" => Ok(CommandOutcome::Continue(self.step_instruction()?)),
             "quit" | "exit" => Ok(CommandOutcome::Exit("bye".to_string())),
-            other => Err(format!("unknown command '{}'", other)),
+            other => Err(ReplError::Evaluation(format!("unknown command '{}'", other))),
         }
     }
 
@@ -188,19 +200,19 @@ impl DebuggerSession {
         }
     }
 
-    fn select_function(&mut self, selection: &str) -> Result<(), String> {
+    fn select_function(&mut self, selection: &str) -> Result<(), ReplError> {
         let function_idx = if let Ok(index) = selection.parse::<u32>() {
             self.module
                 .functions
                 .iter()
                 .position(|function| function.index == index)
-                .ok_or_else(|| format!("function index {} not found", index))?
+                .ok_or_else(|| ReplError::Evaluation(format!("function index {} not found", index)))?
         } else {
             *self
                 .module
                 .function_lookup
                 .get(selection)
-                .ok_or_else(|| format!("function '{}' not found", selection))?
+                .ok_or_else(|| ReplError::Evaluation(format!("function '{}' not found", selection)))?
         };
 
         self.current_function = function_idx;
@@ -209,13 +221,13 @@ impl DebuggerSession {
         Ok(())
     }
 
-    fn step_instruction(&mut self) -> Result<String, String> {
+    fn step_instruction(&mut self) -> Result<String, ReplError> {
         let function = self.current_function();
         let step = function
             .instructions
             .get(self.current_instruction)
             .cloned()
-            .ok_or_else(|| format!("{} is already complete", function.label))?;
+            .ok_or_else(|| ReplError::Evaluation(format!("{} is already complete", function.label)))?;
 
         let action_summary = step.action.apply(&mut self.stack);
         self.current_instruction += 1;
@@ -261,7 +273,7 @@ struct ModuleDebugInfo {
 }
 
 impl ModuleDebugInfo {
-    fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, ReplError> {
         let mut types = Vec::new();
         let mut function_type_indices = Vec::new();
         let mut import_function_type_indices = Vec::new();
@@ -270,12 +282,12 @@ impl ModuleDebugInfo {
 
         for payload in Parser::new(0).parse_all(bytes) {
             let payload =
-                payload.map_err(|error| format!("failed to parse wasm module: {}", error))?;
+                payload.map_err(|error| ReplError::Parsing(format!("failed to parse wasm module: {}", error)))?;
             match payload {
                 Payload::TypeSection(reader) => {
                     for ty in reader.into_iter_err_on_gc_types() {
                         let ty = ty.map_err(|error| {
-                            format!("failed to parse wasm type section: {}", error)
+                            ReplError::Parsing(format!("failed to parse wasm type section: {}", error))
                         })?;
                         types.push(FunctionSignature {
                             params: ty.params().iter().copied().collect(),
@@ -286,7 +298,7 @@ impl ModuleDebugInfo {
                 Payload::ImportSection(reader) => {
                     for import in reader {
                         let import = import.map_err(|error| {
-                            format!("failed to parse wasm import section: {}", error)
+                            ReplError::Parsing(format!("failed to parse wasm import section: {}", error))
                         })?;
                         if let TypeRef::Func(type_index) = import.ty {
                             import_function_type_indices.push(type_index);
@@ -296,14 +308,14 @@ impl ModuleDebugInfo {
                 Payload::FunctionSection(reader) => {
                     for type_index in reader {
                         function_type_indices.push(type_index.map_err(|error| {
-                            format!("failed to parse wasm function section: {}", error)
+                            ReplError::Parsing(format!("failed to parse wasm function section: {}", error))
                         })?);
                     }
                 }
                 Payload::ExportSection(reader) => {
                     for export in reader {
                         let export = export.map_err(|error| {
-                            format!("failed to parse wasm export section: {}", error)
+                            ReplError::Parsing(format!("failed to parse wasm export section: {}", error))
                         })?;
                         if export.kind == ExternalKind::Func {
                             export_names.insert(export.index, export.name.to_string());
@@ -491,7 +503,7 @@ fn parse_function_body(
     imported_function_type_indices: &[u32],
     function_type_indices: &[u32],
     export_names: &HashMap<u32, String>,
-) -> Result<Vec<InstructionStep>, String> {
+) -> Result<Vec<InstructionStep>, ReplError> {
     let all_function_type_indices = imported_function_type_indices
         .iter()
         .chain(function_type_indices.iter())
@@ -500,14 +512,14 @@ fn parse_function_body(
 
     let mut reader = body
         .get_operators_reader()
-        .map_err(|error| format!("failed to read wasm function body: {}", error))?;
+        .map_err(|error| ReplError::Parsing(format!("failed to read wasm function body: {}", error)))?;
     let mut instructions = Vec::new();
 
     while !reader.eof() {
         let offset = reader.original_position() as u64;
         let operator = reader
             .read()
-            .map_err(|error| format!("failed to parse wasm instruction: {}", error))?;
+            .map_err(|error| ReplError::Parsing(format!("failed to parse wasm instruction: {}", error)))?;
         instructions.push(InstructionStep {
             offset,
             opcode: format!("{operator:?}"),
@@ -752,26 +764,26 @@ struct SourceMapper {
 }
 
 impl SourceMapper {
-    fn load(wasm_path: &Path) -> Result<Self, String> {
+    fn load(wasm_path: &Path) -> Result<Self, ReplError> {
         let map_path = source_map_path(wasm_path);
         if !map_path.exists() {
             return Ok(Self::default());
         }
 
         let raw = fs::read_to_string(&map_path).map_err(|error| {
-            format!(
+            ReplError::System(format!(
                 "failed to read source map '{}': {}",
                 map_path.display(),
                 error
-            )
+            ))
         })?;
 
         let entries: Vec<SourceLocation> = serde_json::from_str(&raw).map_err(|error| {
-            format!(
+            ReplError::Parsing(format!(
                 "failed to parse source map '{}': {}",
                 map_path.display(),
                 error
-            )
+            ))
         })?;
 
         let mut by_offset = BTreeMap::new();

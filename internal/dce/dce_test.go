@@ -115,7 +115,7 @@ func (b *testModuleBuilder) addTable() *testModuleBuilder {
 }
 
 // addMemory adds a memory section.
-func (b *testModuleBuilder) addMemory() *testModuleBuilder { //nolint:unused
+func (b *testModuleBuilder) addMemory() *testModuleBuilder { //nolint:unused // Reserved for future test use
 	// 1 memory, limits: min=1, no max
 	b.memories = []byte{0x01, 0x00, 0x01}
 	return b
