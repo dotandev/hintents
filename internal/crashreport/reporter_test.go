@@ -45,13 +45,15 @@ func setEnv(t *testing.T, key, value string) {
 // ---- IsEnabled --------------------------------------------------------------
 
 func TestIsEnabled_DisabledByDefault(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	err := os.Unsetenv(envOptIn)
+	require.NoError(t, err)
 	r := New(Config{Enabled: false})
 	assert.False(t, r.IsEnabled())
 }
 
 func TestIsEnabled_EnabledViaConfig(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	err := os.Unsetenv(envOptIn)
+	require.NoError(t, err)
 	r := New(Config{Enabled: true})
 	assert.True(t, r.IsEnabled())
 }
@@ -83,13 +85,15 @@ func TestIsEnabled_EnvVar0(t *testing.T) {
 // ---- New / config -----------------------------------------------------------
 
 func TestNew_DefaultEndpoint(t *testing.T) {
-	_ = os.Unsetenv(envEndpoint)
+	err := os.Unsetenv(envEndpoint)
+	require.NoError(t, err)
 	r := New(Config{})
 	assert.Equal(t, DefaultEndpoint, r.cfg.Endpoint)
 }
 
 func TestNew_CustomEndpointFromConfig(t *testing.T) {
-	_ = os.Unsetenv(envEndpoint)
+	err := os.Unsetenv(envEndpoint)
+	require.NoError(t, err)
 	r := New(Config{Endpoint: "https://example.com/crash"})
 	assert.Equal(t, "https://example.com/crash", r.cfg.Endpoint)
 }
@@ -103,14 +107,15 @@ func TestNew_EndpointEnvVarOverridesConfig(t *testing.T) {
 // ---- Send -------------------------------------------------------------------
 
 func TestSend_NoOpWhenDisabled(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	err := os.Unsetenv(envOptIn)
+	require.NoError(t, err)
 	srv := newTestServer(t, http.StatusOK, func(r *http.Request, body Report) {
 		t.Fatal("server should not be called when crash reporting is disabled")
 	})
 	defer srv.Close()
 
 	reporter := New(Config{Enabled: false, Endpoint: srv.URL})
-	err := reporter.Send(context.Background(), errors.New("test"), nil, "erst debug")
+	err = reporter.Send(context.Background(), errors.New("test"), nil, "erst debug")
 	assert.NoError(t, err)
 }
 
@@ -215,7 +220,8 @@ func TestSend_NilStackOmittedFromPayload(t *testing.T) {
 // ---- buildReport ------------------------------------------------------------
 
 func TestBuildReport_FieldsPopulated(t *testing.T) {
-	_ = os.Unsetenv(envOptIn)
+	err := os.Unsetenv(envOptIn)
+	require.NoError(t, err)
 	reporter := New(Config{Version: "2.0.0", CommitSHA: "deadbeef"})
 	report := reporter.buildReport(errors.New("something failed"), []byte("stack"), "erst session list")
 
@@ -299,8 +305,10 @@ func TestNew_SentryDSNFromEnv(t *testing.T) {
 // TestNew_SentryDSNFromConfig verifies that a DSN supplied directly via Config
 // is stored and does not fall back to DefaultEndpoint when it is the only sink.
 func TestNew_SentryDSNFromConfig(t *testing.T) {
-	_ = os.Unsetenv(envSentryDSN)
-	_ = os.Unsetenv(envEndpoint)
+	err := os.Unsetenv(envSentryDSN)
+	require.NoError(t, err)
+	err = os.Unsetenv(envEndpoint)
+	require.NoError(t, err)
 	r := New(Config{SentryDSN: "https://fakekey@o0.ingest.sentry.io/1"})
 	assert.Equal(t, "https://fakekey@o0.ingest.sentry.io/1", r.cfg.SentryDSN)
 	// Endpoint should remain empty — DSN is present, no fallback needed.
@@ -310,8 +318,10 @@ func TestNew_SentryDSNFromConfig(t *testing.T) {
 // TestNew_DefaultEndpointWhenNoSinks verifies that DefaultEndpoint is used
 // when neither SentryDSN nor Endpoint is configured.
 func TestNew_DefaultEndpointWhenNoSinks(t *testing.T) {
-	_ = os.Unsetenv(envSentryDSN)
-	_ = os.Unsetenv(envEndpoint)
+	err := os.Unsetenv(envSentryDSN)
+	require.NoError(t, err)
+	err = os.Unsetenv(envEndpoint)
+	require.NoError(t, err)
 	r := New(Config{})
 	assert.Equal(t, DefaultEndpoint, r.cfg.Endpoint)
 	assert.Equal(t, "", r.cfg.SentryDSN)

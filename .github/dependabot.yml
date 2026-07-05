@@ -1,5 +1,4 @@
 version: 2
-
 updates:
   # Rust / Cargo - simulator (soroban-env-host and related dependencies)
   - package-ecosystem: "cargo"
@@ -13,10 +12,12 @@ updates:
       - "rust"
     commit-message:
       prefix: "chore(deps)"
-    ignore:
-      # Do not auto-bump soroban-env-host major versions without review
-      - dependency-name: "soroban-env-host"
-        update-types: ["version-update:semver-major"]
+    rebase-strategy: "auto"
+    groups:
+      soroban:
+        dependency-type: "production"
+        patterns:
+          - "soroban-*"
 
   # Go modules
   - package-ecosystem: "gomod"
@@ -30,6 +31,7 @@ updates:
       - "go"
     commit-message:
       prefix: "chore(deps)"
+    rebase-strategy: "auto"
 
   # npm - erst_extension
   - package-ecosystem: "npm"
@@ -43,6 +45,7 @@ updates:
       - "npm"
     commit-message:
       prefix: "chore(deps)"
+    rebase-strategy: "auto"
 
   # npm - docs/showcase
   - package-ecosystem: "npm"
@@ -56,6 +59,7 @@ updates:
       - "npm"
     commit-message:
       prefix: "chore(deps)"
+    rebase-strategy: "auto"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -69,3 +73,4 @@ updates:
       - "github-actions"
     commit-message:
       prefix: "chore(deps)"
+    rebase-strategy: "auto"

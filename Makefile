@@ -25,7 +25,7 @@ build-release:
 
 # Run tests
 test:
-	go test ./...
+	go test -race ./...
 
 # Run full linter suite
 lint:
