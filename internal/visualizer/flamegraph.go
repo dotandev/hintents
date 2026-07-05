@@ -4,6 +4,7 @@
 package visualizer
 
 import (
+	"io"
 	"strings"
 )
 
@@ -521,4 +522,33 @@ func ExportFlamegraph(svg string, format ExportFormat) string {
 	default:
 		return InjectDarkMode(svg)
 	}
+}
+
+// ExportSVG writes a flamegraph SVG with dark mode support to the given writer
+func ExportSVG(w io.Writer, svg string) error {
+	enhancedSVG := InjectDarkMode(svg)
+	_, err := w.Write([]byte(enhancedSVG))
+	return err
+}
+
+// ExportHTML writes an interactive flamegraph HTML to the given writer
+func ExportHTML(w io.Writer, svg string) error {
+	html := GenerateInteractiveHTML(svg)
+	_, err := w.Write([]byte(html))
+	return err
+}
+
+// ExportFlamegraphTo writes a flamegraph in the specified format to the given writer
+func ExportFlamegraphTo(w io.Writer, svg string, format ExportFormat) error {
+	var content string
+	switch format {
+	case FormatHTML:
+		content = GenerateInteractiveHTML(svg)
+	case FormatSVG:
+		content = InjectDarkMode(svg)
+	default:
+		content = InjectDarkMode(svg)
+	}
+	_, err := w.Write([]byte(content))
+	return err
 }
