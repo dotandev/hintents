@@ -11,15 +11,17 @@
 use base64::Engine as _;
 use std::collections::HashMap;
 
+use super::types::IpcError;
+
 /// Decodes a base64-encoded Zstd blob produced by `bridge.CompressRequest`
 /// and returns the original `ledger_entries` map.
-pub fn decompress_ledger_entries(b64: &str) -> Result<HashMap<String, String>, String> {
+pub fn decompress_ledger_entries(b64: &str) -> Result<HashMap<String, String>, IpcError> {
     let compressed = base64::engine::general_purpose::STANDARD
         .decode(b64)
-        .map_err(|e| format!("ipc/decompress: base64 decode: {e}"))?;
+        .map_err(|e| IpcError::Decompress(format!("base64 decode: {e}")))?;
 
     let raw = zstd::decode_all(compressed.as_slice())
-        .map_err(|e| format!("ipc/decompress: zstd decode: {e}"))?;
+        .map_err(|e| IpcError::Decompress(format!("zstd decode: {e}")))?;
 
-    serde_json::from_slice(&raw).map_err(|e| format!("ipc/decompress: json parse: {e}"))
+    serde_json::from_slice(&raw).map_err(IpcError::from)
 }
