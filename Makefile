@@ -25,7 +25,7 @@ build-release:
 
 # Run tests
 test:
-	go test ./...
+	go test -race ./...
 
 # Run full linter suite
 lint:
@@ -65,7 +65,6 @@ clean:
 # Install dependencies
 deps:
 	go mod tidy
-	go mod download
 
 # Run benchmarks
 bench:
