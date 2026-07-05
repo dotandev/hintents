@@ -38,11 +38,7 @@ impl SimHost {
         memory_limit: Option<u64>,
     ) -> Self {
         let budget = Budget::default();
-        let cpu_limit = budget_limits.map(|(cpu, _)| cpu).filter(|&c| c > 0).unwrap_or(u64::MAX);
-        let mem_limit = memory_limit.or_else(|| budget_limits.map(|(_, mem)| mem)).filter(|&m| m > 0).unwrap_or(u64::MAX);
-        if cpu_limit < u64::MAX || mem_limit < u64::MAX {
-            let _ = budget.reset_limits(cpu_limit, mem_limit);
-        }
+        let _ = budget.reset_limits(0, 0);
 
         // If the caller requested a custom resource calibration, explicitly
         // fail early rather than silently ignoring the setting. This avoids
