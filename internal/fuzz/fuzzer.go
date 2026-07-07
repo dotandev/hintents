@@ -190,27 +190,6 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 	// Add seed input to corpus before workers start.
 	f.addToCorpus(ctx, seedInput, nil)
 
-	// Main fuzzing loop
-	for i := uint64(0); i < f.config.MaxIterations && ctx.Err() == nil; i++ {
-		// Select corpus entry for mutation (favor entries with recent coverage gains)
-		entry := f.selectCorpusEntry()
-		if entry == nil {
-			break
-		}
-
-		if err := validateSimulatorInput(entry.Input); err != nil {
-			return nil, fmt.Errorf("invalid corpus input: %w", err)
-		}
-
-		// Mutate the selected input
-		mutated := f.mutateInput(entry.Input)
-		if err := validateSimulatorInput(&mutated); err != nil {
-			return nil, fmt.Errorf("invalid mutated input: %w", err)
-		}
-
-		// Run the simulator
-		result, coverage := f.executeInput(ctx, &mutated)
-
 	// Shared atomic counters for lock-free progress tracking across workers.
 	var (
 		totalExecuted atomic.Uint64
@@ -220,7 +199,7 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 
 	// workQueue feeds iteration indices to workers so we can distribute
 	// exactly MaxIterations units of work across any number of goroutines.
-	workQueue := make(chan struct{}, numWorkers*2)
+	workQueue := make(chan struct{}, f.config.Workers*2)
 
 	var wg sync.WaitGroup
 
@@ -238,7 +217,12 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 		}
 	}()
 
-		stats.ExecutionCount = atomic.AddUint64(&f.executionCount, 1)
+	// Spawn Workers goroutines to process work from the queue.
+	for w := 0; w < f.config.Workers; w++ {
+		// Seed each worker with a unique seed from the shared seedRng.
+		f.mu.Lock()
+		workerSeed := f.seedRng.Int63()
+		f.mu.Unlock()
 
 		wg.Add(1)
 		go func(localRng *rand.Rand) {
