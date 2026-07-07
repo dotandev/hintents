@@ -17,9 +17,10 @@ import (
 
 // Config holds OpenTelemetry configuration
 type Config struct {
-	Enabled     bool
-	ExporterURL string
-	ServiceName string
+	Enabled        bool
+	ExporterURL    string
+	ServiceName    string
+	ServiceVersion string
 }
 
 // silentSpanExporter wraps a SpanExporter and swallows all export errors so
@@ -63,7 +64,7 @@ func Init(ctx context.Context, config Config) (func(), error) {
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(config.ServiceName),
-			semconv.ServiceVersionKey.String("dev"),
+			semconv.ServiceVersionKey.String(config.ServiceVersion),
 		),
 	)
 	if err != nil {

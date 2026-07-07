@@ -24,6 +24,9 @@ pub enum IpcError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("IPC decompress error: {0}")]
+    Decompress(String),
 }
 
 /// Identifies the kind of streaming frame emitted to stdout.

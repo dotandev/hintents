@@ -318,17 +318,37 @@ func (s *Server) getDocument(uri protocol.DocumentURI) (string, bool) {
 	return text, ok
 }
 
+// lineAtPosition returns the text of the line at the given LSP position without
+// splitting the entire document. It scans forward using strings.IndexByte to
+// find newline boundaries, which avoids allocating a slice of all lines and
+// copying every sub-string — important for large documents where
+// strings.Split("\n") would produce O(n) heap allocations on every hover.
 func lineAtPosition(text string, position protocol.Position) string {
 	if text == "" {
 		return ""
 	}
 
-	lines := strings.Split(text, "\n")
 	lineIndex := int(position.Line)
-	if lineIndex < 0 || lineIndex >= len(lines) {
+	if lineIndex < 0 {
 		return ""
 	}
-	return lines[lineIndex]
+
+	start := 0
+	for i := 0; i < lineIndex; i++ {
+		idx := strings.IndexByte(text[start:], '\n')
+		if idx < 0 {
+			// Requested line is beyond the last line in the document.
+			return ""
+		}
+		start += idx + 1
+	}
+
+	// start now points at the beginning of the target line.
+	rest := text[start:]
+	if end := strings.IndexByte(rest, '\n'); end >= 0 {
+		return rest[:end]
+	}
+	return rest
 }
 
 func hostFunctionAtPosition(line string, position protocol.Position) (string, uint32, uint32) {
@@ -359,9 +379,31 @@ func hostFunctionAtPosition(line string, position protocol.Position) (string, ui
 		return "", 0, 0
 	}
 
-	for _, candidate := range visualizer.KnownHostFunctions() {
+	candidates := visualizer.KnownHostFunctions()
+
+	// First try to match the full token as-is (e.g. a simple name like "require_auth").
+	for _, candidate := range candidates {
 		if word == candidate {
 			return word, uint32(start), uint32(end)
+		}
+	}
+
+	// For fully-qualified Rust paths (e.g. "soroban_sdk::require_auth" or
+	// "env.require_auth"), extract the final segment after the last "::" or "."
+	// and try to match that against known host functions. The hover range still
+	// covers the full qualified token so the editor highlights it correctly.
+	segment := word
+	if idx := strings.LastIndex(word, "::"); idx >= 0 {
+		segment = word[idx+2:]
+	} else if idx := strings.LastIndex(word, "."); idx >= 0 {
+		segment = word[idx+1:]
+	}
+
+	if segment != word && segment != "" {
+		for _, candidate := range candidates {
+			if segment == candidate {
+				return segment, uint32(start), uint32(end)
+			}
 		}
 	}
 

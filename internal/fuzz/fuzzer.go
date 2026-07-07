@@ -4,6 +4,8 @@
 package fuzz
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dotandev/hintents/internal/logger"
@@ -35,6 +38,37 @@ type CorpusEntry struct {
 	Timestamp   time.Time
 }
 
+// DeepCopy returns a fully independent copy of the CorpusEntry.
+// Both the entry metadata and the underlying FuzzerInput are copied so that
+// callers cannot mutate internal fuzzer state through the returned value.
+func (ce *CorpusEntry) DeepCopy() *CorpusEntry {
+	cp := &CorpusEntry{
+		ResultIdx:   ce.ResultIdx,
+		NewCoverage: ce.NewCoverage,
+		Timestamp:   ce.Timestamp,
+	}
+
+	if ce.Input != nil {
+		cp.Input = ce.Input.DeepCopy()
+	}
+
+	if ce.Coverage != nil {
+		covCopy := &CoverageMap{
+			totalCoverage: ce.Coverage.totalCoverage,
+			timestamp:     ce.Coverage.timestamp,
+		}
+		if ce.Coverage.coveredLines != nil {
+			covCopy.coveredLines = make(map[string]bool, len(ce.Coverage.coveredLines))
+			for k, v := range ce.Coverage.coveredLines {
+				covCopy.coveredLines[k] = v
+			}
+		}
+		cp.Coverage = covCopy
+	}
+
+	return cp
+}
+
 // CoverageGuidedFuzzer implements a coverage-guided fuzzer for Stellar contracts
 type CoverageGuidedFuzzer struct {
 	runner           simulator.RunnerInterface
@@ -46,6 +80,11 @@ type CoverageGuidedFuzzer struct {
 	mu               sync.RWMutex
 	executionCount   uint64
 	lastCoverageGrow time.Time
+
+	// coverageTmpMu guards the lazily-created LCOV temp file that is shared
+	// across every fuzzing iteration of this instance.
+	coverageTmpMu   sync.Mutex
+	coverageTmpPath string // path of the reusable LCOV temp file ("" until created)
 }
 
 // FuzzerConfig contains configuration for the coverage-guided fuzzer
@@ -126,6 +165,13 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 		return nil, fmt.Errorf("seed input required for fuzzing")
 	}
 
+	if err := validateSimulatorInput(seedInput); err != nil {
+		return nil, err
+	}
+	// The reusable LCOV temp file lives for the duration of the campaign and is
+	// removed once it ends, regardless of how the loop terminates.
+	defer f.cleanupCoverageTemp()
+
 	stats := &FuzzingStats{
 		StartTime: time.Now(),
 	}
@@ -141,8 +187,15 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 			break
 		}
 
+		if err := validateSimulatorInput(entry.Input); err != nil {
+			return nil, fmt.Errorf("invalid corpus input: %w", err)
+		}
+
 		// Mutate the selected input
 		mutated := f.mutateInput(entry.Input)
+		if err := validateSimulatorInput(&mutated); err != nil {
+			return nil, fmt.Errorf("invalid mutated input: %w", err)
+		}
 
 		// Run the simulator
 		result, coverage := f.executeInput(ctx, &mutated)
@@ -162,10 +215,7 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 			f.lastCoverageGrow = time.Now()
 		}
 
-		f.mu.Lock()
-		f.executionCount++
-		f.mu.Unlock()
-		stats.ExecutionCount = f.executionCount
+		stats.ExecutionCount = atomic.AddUint64(&f.executionCount, 1)
 
 		// Log progress periodically
 		if f.config.VerboseLogging && (i+1)%100 == 0 {
@@ -179,6 +229,14 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 	stats.UniqueInputsCount = len(f.corpus)
 
 	return stats, nil
+}
+
+func validateSimulatorInput(input *simulator.FuzzerInput) error {
+	if input == nil {
+		return fmt.Errorf("fuzzer input required")
+	}
+
+	return input.Validate()
 }
 
 // addToCorpus adds an input to the corpus if it improves coverage
@@ -421,17 +479,19 @@ func (f *CoverageGuidedFuzzer) executeInput(ctx context.Context, input *simulato
 	if f.config.EnableCoverage {
 		simReq.EnableCoverage = true
 		if simReq.CoverageLCOVPath == nil {
-			tmpFile, err := os.CreateTemp("", "erst-fuzz-*.lcov")
+			// Reuse a single temp file for the whole campaign instead of
+			// creating and deleting one on every iteration. The simulator
+			// overwrites the file each run, so a single per-instance file is
+			// sufficient and avoids per-iteration disk I/O. It is removed by
+			// cleanupCoverageTemp when the campaign ends.
+			coveragePath, err := f.coverageOutputPath()
 			if err != nil {
 				result.Status = "error"
 				result.ErrorMessage = fmt.Sprintf("failed to create coverage temp file: %v", err)
 				result.ExecutionTimeMs = 0
 				return result, nil
 			}
-			coveragePath := tmpFile.Name()
-			_ = tmpFile.Close()
 			simReq.CoverageLCOVPath = &coveragePath
-			defer os.Remove(coveragePath)
 		}
 	}
 
@@ -462,6 +522,45 @@ func (f *CoverageGuidedFuzzer) executeInput(ctx context.Context, input *simulato
 	}
 
 	return result, coverage
+}
+
+// coverageOutputPath returns the path of this fuzzer's reusable LCOV temp file,
+// creating it lazily on first use. The same file is handed to the simulator on
+// every iteration (the simulator overwrites it each run), which eliminates the
+// per-iteration os.CreateTemp/os.Remove churn that previously dominated disk I/O.
+func (f *CoverageGuidedFuzzer) coverageOutputPath() (string, error) {
+	f.coverageTmpMu.Lock()
+	defer f.coverageTmpMu.Unlock()
+
+	if f.coverageTmpPath != "" {
+		return f.coverageTmpPath, nil
+	}
+
+	tmpFile, err := os.CreateTemp("", "erst-fuzz-*.lcov")
+	if err != nil {
+		return "", err
+	}
+	path := tmpFile.Name()
+	if cerr := tmpFile.Close(); cerr != nil {
+		_ = os.Remove(path)
+		return "", cerr
+	}
+
+	f.coverageTmpPath = path
+	return path, nil
+}
+
+// cleanupCoverageTemp removes the reusable LCOV temp file, if one was created.
+// It is safe to call multiple times and resets the path so a subsequent Run
+// lazily recreates the file.
+func (f *CoverageGuidedFuzzer) cleanupCoverageTemp() {
+	f.coverageTmpMu.Lock()
+	defer f.coverageTmpMu.Unlock()
+
+	if f.coverageTmpPath != "" {
+		_ = os.Remove(f.coverageTmpPath)
+		f.coverageTmpPath = ""
+	}
 }
 
 // extractCoverage extracts coverage information from an input when explicit coverage is not available.
@@ -504,26 +603,35 @@ func (f *CoverageGuidedFuzzer) parseLCOVReport(report string) *CoverageMap {
 		timestamp:    time.Now(),
 	}
 
-	for _, line := range strings.Split(report, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "DA:") {
+	scanner := bufio.NewScanner(strings.NewReader(report))
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		// Trim whitespace
+		line = bytes.TrimSpace(line)
+
+		if !bytes.HasPrefix(line, []byte("DA:")) {
 			continue
 		}
 
-		parts := strings.SplitN(line[3:], ",", 2)
-		if len(parts) != 2 {
+		// Get part after DA:
+		rest := line[3:]
+		commaIdx := bytes.IndexByte(rest, ',')
+		if commaIdx == -1 {
 			continue
 		}
 
-		lineNum := strings.TrimSpace(parts[0])
-		countStr := strings.TrimSpace(parts[1])
-		count, err := strconv.Atoi(countStr)
+		// Extract line num part (trim whitespace)
+		lineNumPart := bytes.TrimSpace(rest[:commaIdx])
+		// Extract count part (trim whitespace)
+		countPart := bytes.TrimSpace(rest[commaIdx+1:])
+
+		count, err := strconv.Atoi(string(countPart))
 		if err != nil {
 			continue
 		}
 
 		if count > 0 {
-			coverage.coveredLines[lineNum] = true
+			coverage.coveredLines[string(lineNumPart)] = true
 			coverage.totalCoverage++
 		}
 	}
@@ -564,23 +672,29 @@ func (f *CoverageGuidedFuzzer) logProgress(iteration uint64) {
 	)
 }
 
-// GetCrashingInputs returns all inputs that caused crashes
+// GetCrashingInputs returns deep copies of all inputs that caused crashes.
+// Callers may freely mutate the returned values without affecting internal state.
 func (f *CoverageGuidedFuzzer) GetCrashingInputs() []*simulator.FuzzerInput {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
 	result := make([]*simulator.FuzzerInput, len(f.crashingInputs))
-	copy(result, f.crashingInputs)
+	for i, input := range f.crashingInputs {
+		result[i] = input.DeepCopy()
+	}
 	return result
 }
 
-// GetCorpus returns a copy of the current corpus
+// GetCorpus returns deep copies of the current corpus entries.
+// Callers may freely mutate the returned values without affecting internal state.
 func (f *CoverageGuidedFuzzer) GetCorpus() []*CorpusEntry {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
 	result := make([]*CorpusEntry, len(f.corpus))
-	copy(result, f.corpus)
+	for i, entry := range f.corpus {
+		result[i] = entry.DeepCopy()
+	}
 	return result
 }
 
@@ -605,7 +719,7 @@ func (f *CoverageGuidedFuzzer) CoverageStats() CoverageStatistics {
 		CorpusSize:          len(f.corpus),
 		UniqueCoverageCount: len(f.coverageMap),
 		CrashCount:          len(f.crashingInputs),
-		ExecutionCount:      f.executionCount,
+		ExecutionCount:      atomic.LoadUint64(&f.executionCount),
 	}
 
 	// Calculate max coverage
