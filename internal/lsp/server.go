@@ -113,11 +113,36 @@ func (s *Server) handler() jsonrpc2.Handler {
 			return reply(ctx, nil, s.DidOpen(ctx, &params))
 
 		case protocol.MethodTextDocumentDidChange:
-			var params protocol.DidChangeTextDocumentParams
-			if err := dec.Decode(&params); err != nil {
+			var customParams customDidChangeTextDocumentParams
+			if err := dec.Decode(&customParams); err != nil {
 				return reply(ctx, nil, fmt.Errorf("%w: %v", jsonrpc2.ErrParse, err))
 			}
-			return reply(ctx, nil, s.DidChange(ctx, &params))
+			// Process the changes manually
+			if customParams.TextDocument.URI == "" {
+				return reply(ctx, nil, fmt.Errorf("document URI is empty"))
+			}
+
+			s.mu.Lock()
+			defer s.mu.Unlock()
+
+			text, ok := s.documents[customParams.TextDocument.URI]
+			if !ok {
+				return reply(ctx, nil, fmt.Errorf("document not found: %s", customParams.TextDocument.URI))
+			}
+
+			for _, change := range customParams.ContentChanges {
+				if change.Range == nil {
+					text = change.Text
+					continue
+				}
+
+				start := positionToOffset(text, change.Range.Start)
+				end := positionToOffset(text, change.Range.End)
+				text = text[:start] + change.Text + text[end:]
+			}
+
+			s.documents[customParams.TextDocument.URI] = text
+			return reply(ctx, nil, nil)
 
 		case protocol.MethodTextDocumentDidClose:
 			var params protocol.DidCloseTextDocumentParams
@@ -209,6 +234,21 @@ func (s *Server) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocume
 	return nil
 }
 
+// customTextDocumentContentChangeEvent is a helper struct to unmarshal text document
+// change events with optional Range.
+type customTextDocumentContentChangeEvent struct {
+	Range       *protocol.Range `json:"range,omitempty"`
+	RangeLength uint32          `json:"rangeLength,omitempty"`
+	Text        string          `json:"text"`
+}
+
+// customDidChangeTextDocumentParams is a helper struct to unmarshal didChange params
+// with optional range fields.
+type customDidChangeTextDocumentParams struct {
+	TextDocument   protocol.VersionedTextDocumentIdentifier   `json:"textDocument"`
+	ContentChanges []customTextDocumentContentChangeEvent `json:"contentChanges"`
+}
+
 // DidChange handles textDocument/didChange.
 func (s *Server) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) error {
 	if params.TextDocument.URI == "" {
@@ -224,8 +264,8 @@ func (s *Server) DidChange(ctx context.Context, params *protocol.DidChangeTextDo
 	}
 
 	for _, change := range params.ContentChanges {
-		// If Range is nil, it's a full document change
-		if change.Range == nil {
+		// If Range is the zero value, treat as full document change for compatibility
+		if (protocol.Range{}) == change.Range {
 			text = change.Text
 			continue
 		}
