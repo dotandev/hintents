@@ -1,6 +1,8 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
+//go:build unix && cgo
+
 package protocolreg
 
 import (
@@ -12,10 +14,13 @@ import (
 // as a native shared library and responds with the expected slot information.
 //
 // To run this test, build the mock library first:
-//   cd simulator && cargo build --release
+//
+//	cd simulator && cargo build --release
+//
 // Then set the environment variable:
-//   export HSM_LIB_PATH=$(pwd)/simulator/target/release/libmock.so
-//   go test -v ./internal/protocolreg/hsm_test.go
+//
+//	export HSM_LIB_PATH=$(pwd)/simulator/target/release/libmock.so
+//	go test -v ./internal/protocolreg/hsm_test.go
 func TestMockHsmIntegration(t *testing.T) {
 	libPath := os.Getenv("HSM_LIB_PATH")
 	if libPath == "" {

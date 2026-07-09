@@ -34,10 +34,8 @@ use super::types::IpcError;
 /// Valid payloads are returned unchanged as a [`serde_json::Value`].
 #[allow(dead_code)]
 pub fn validate_request(input: &str) -> Result<Value, IpcError> {
-    let schema_json =
-        include_str!("../../../docs/schema/simulation-request.schema.json");
-    let common_json =
-        include_str!("../../../docs/schema/common.schema.json");
+    let schema_json = include_str!("../../../docs/schema/simulation-request.schema.json");
+    let common_json = include_str!("../../../docs/schema/common.schema.json");
 
     // Compile the embedded schemas. Map any schema-compile error into
     // IpcError::Validation rather than panicking or returning a raw String.
@@ -47,25 +45,27 @@ pub fn validate_request(input: &str) -> Result<Value, IpcError> {
         .map_err(|e| IpcError::Validation(format!("invalid common schema JSON: {e}")))?;
 
     // Register the common schema so that references to it are resolved offline.
-    let registry = jsonschema::Registry::new()
-        .add("https://simulator.stellar.org/schemas/v1/common.schema.json", common.clone())
-        .map_err(|e| IpcError::Validation(format!("failed to register schema: {e}")))?
-        .add("common.schema.json", common)
-        .map_err(|e| IpcError::Validation(format!("failed to register schema: {e}")))?
-        .prepare()
-        .map_err(|e| IpcError::Validation(format!("failed to prepare registry: {e}")))?;
+    let common_resource1 = jsonschema::Resource::from_contents(common.clone());
+    let common_resource2 = jsonschema::Resource::from_contents(common);
+    let registry = jsonschema::Registry::try_from_resources([
+        (
+            "https://simulator.stellar.org/schemas/v1/common.schema.json",
+            common_resource1,
+        ),
+        ("common.schema.json", common_resource2),
+    ])
+    .map_err(|e| IpcError::Validation(format!("failed to build registry: {e}")))?;
 
     let validator = jsonschema::options()
-        .with_registry(&registry)
+        .with_registry(registry)
         .build(&schema)
         .map_err(|e| IpcError::Validation(format!("failed to compile schema: {e}")))?;
 
     // Parse the caller-supplied JSON.  A malformed payload surfaces here as a
     // descriptive IpcError::Validation instead of propagating a raw serde error
     // or panicking.
-    let instance: Value = serde_json::from_str(input).map_err(|e| {
-        IpcError::Validation(format!("malformed JSON in request payload: {e}"))
-    })?;
+    let instance: Value = serde_json::from_str(input)
+        .map_err(|e| IpcError::Validation(format!("malformed JSON in request payload: {e}")))?;
 
     // Collect every schema violation and return them as a single error.
     let errors: Vec<String> = validator
@@ -111,7 +111,10 @@ mod tests {
     #[test]
     fn test_valid_payload_returns_ok() {
         let result = validate_request(valid_payload());
-        assert!(result.is_ok(), "expected Ok for valid payload, got: {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok for valid payload, got: {result:?}"
+        );
     }
 
     #[test]
@@ -143,10 +146,7 @@ mod tests {
     #[test]
     fn test_malformed_json_returns_validation_error() {
         let result = validate_request("{not valid json at all!!!}");
-        assert!(
-            result.is_err(),
-            "expected Err for malformed JSON, got Ok"
-        );
+        assert!(result.is_err(), "expected Err for malformed JSON, got Ok");
         match result.unwrap_err() {
             IpcError::Validation(msg) => {
                 assert!(
@@ -177,7 +177,10 @@ mod tests {
         let result = std::panic::catch_unwind(|| {
             let _ = validate_request("}{broken");
         });
-        assert!(result.is_ok(), "validate_request panicked on malformed JSON");
+        assert!(
+            result.is_ok(),
+            "validate_request panicked on malformed JSON"
+        );
     }
 
     // ------------------------------------------------------------------

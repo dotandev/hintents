@@ -27,6 +27,9 @@ pub enum IpcError {
 
     #[error("IPC decompress error: {0}")]
     Decompress(String),
+
+    #[error("IPC validation error: {0}")]
+    Validation(String),
 }
 
 /// Identifies the kind of streaming frame emitted to stdout.
