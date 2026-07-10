@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"strings"
 )
 
 // FuzzerInput represents a single fuzz test input
@@ -17,6 +18,44 @@ type FuzzerInput struct {
 	Timestamp     int64
 	Args          []string
 	Seed          uint64
+}
+
+// Validate checks that the input has the minimum structure required by the simulator.
+func (input *FuzzerInput) Validate() error {
+	if input == nil {
+		return fmt.Errorf("fuzzer input required")
+	}
+
+	if strings.TrimSpace(input.EnvelopeXdr) == "" {
+		return fmt.Errorf("envelope XDR required")
+	}
+
+	return nil
+}
+
+// DeepCopy returns a fully independent copy of the FuzzerInput.
+// The returned value shares no underlying memory with the original, so
+// mutations to LedgerEntries or Args on either side are isolated.
+func (fi *FuzzerInput) DeepCopy() *FuzzerInput {
+	cp := &FuzzerInput{
+		EnvelopeXdr: fi.EnvelopeXdr,
+		Timestamp:   fi.Timestamp,
+		Seed:        fi.Seed,
+	}
+
+	if fi.LedgerEntries != nil {
+		cp.LedgerEntries = make(map[string]string, len(fi.LedgerEntries))
+		for k, v := range fi.LedgerEntries {
+			cp.LedgerEntries[k] = v
+		}
+	}
+
+	if fi.Args != nil {
+		cp.Args = make([]string, len(fi.Args))
+		copy(cp.Args, fi.Args)
+	}
+
+	return cp
 }
 
 // FuzzingConfig contains configuration for fuzzing operations
