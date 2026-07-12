@@ -38,6 +38,7 @@ impl SimHost {
         memory_limit: Option<u64>,
     ) -> Self {
         let budget = Budget::default();
+        let _ = budget.reset_limits(0, 0);
 
         // If the caller requested a custom resource calibration, explicitly
         // fail early rather than silently ignoring the setting. This avoids

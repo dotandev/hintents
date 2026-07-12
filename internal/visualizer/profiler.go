@@ -44,12 +44,6 @@ func DescribeHostFunction(name string) string {
 	return fmt.Sprintf("%s is a Soroban host function. Hover for more details.", name)
 }
 
-// HostFunctionHoverContent builds markdown-friendly hover content for the given host function.
-func HostFunctionHoverContent(name string) string {
-	desc := DescribeHostFunction(name)
-	return fmt.Sprintf("**%s**\n\n%s", name, desc)
-}
-
 // FormatGasSummary returns a short, readable summary of CPU and memory consumption.
 func FormatGasSummary(cpu, mem uint64) string {
 	return fmt.Sprintf("CPU: %d instructions · Memory: %d bytes", cpu, mem)

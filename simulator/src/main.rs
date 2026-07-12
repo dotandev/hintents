@@ -529,7 +529,7 @@ fn main() {
             match ipc::decompress::decompress_ledger_entries(b64) {
                 Ok(entries) => Some(entries),
                 Err(e) => {
-                    send_error(format!("Failed to decompress ledger entries: {}", e));
+                    send_error(format!("Failed to decompress ledger entries: {e}"));
                     return;
                 }
             }
