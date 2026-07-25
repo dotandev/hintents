@@ -222,12 +222,12 @@ impl SimHost {
     /// [`SimHostError::Panic`] so callers receive a typed error instead of an
     /// uncontrolled process abort.
     ///
-    /// # Safety
+    /// # Note on unwind safety
     /// The closure is wrapped in [`AssertUnwindSafe`].  Callers must ensure
     /// that no `RefCell` borrow or other unwind-unsafe state can be left in an
     /// inconsistent state after a caught panic.  In practice the host should be
     /// treated as poisoned after a panic and not reused.
-    pub fn run_with_panic_recovery<F, T>(&self, f: F) -> Result<T, SimHostError>
+    pub fn run_with_panic_recovery<F, T>(f: F) -> Result<T, SimHostError>
     where
         F: FnOnce() -> Result<T, SimHostError>,
     {
@@ -286,30 +286,27 @@ mod tests {
 
     #[test]
     fn test_run_with_panic_recovery_returns_ok_on_success() {
-        let host = SimHost::new(None, None, None);
-        let result = host.run_with_panic_recovery(|| Ok(42u32));
+        let result = SimHost::run_with_panic_recovery(|| Ok(42u32));
         assert_eq!(result.unwrap(), 42);
     }
 
     #[test]
     fn test_run_with_panic_recovery_catches_str_panic() {
-        let host = SimHost::new(None, None, None);
         let result: Result<u32, SimHostError> =
-            host.run_with_panic_recovery(|| panic!("memory violation"));
+            SimHost::run_with_panic_recovery(|| panic!("memory violation"));
         match result {
             Err(SimHostError::Panic(msg)) => assert_eq!(msg, "memory violation"),
-            other => panic!("expected SimHostError::Panic, got {:?}", other),
+            _ => panic!("expected SimHostError::Panic"),
         }
     }
 
     #[test]
     fn test_run_with_panic_recovery_catches_string_panic() {
-        let host = SimHost::new(None, None, None);
         let result: Result<u32, SimHostError> =
-            host.run_with_panic_recovery(|| panic!("{}", "out-of-bounds access".to_string()));
+            SimHost::run_with_panic_recovery(|| panic!("out-of-bounds access"));
         match result {
             Err(SimHostError::Panic(msg)) => assert!(msg.contains("out-of-bounds")),
-            other => panic!("expected SimHostError::Panic, got {:?}", other),
+            _ => panic!("expected SimHostError::Panic"),
         }
     }
 
