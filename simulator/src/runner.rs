@@ -9,6 +9,7 @@ use soroban_env_host::{
     xdr::{Hash, Limits, ScErrorCode, ScErrorType, WriteXdr},
     DiagnosticLevel, Error as EnvError, Host, HostError, TryIntoVal, Val,
 };
+use std::panic::{self, AssertUnwindSafe};
 use std::rc::Rc;
 
 use crate::snapshot::{LedgerSnapshot, SnapshotError};
@@ -19,6 +20,8 @@ pub enum SimHostError {
     Host(#[from] HostError),
     #[error(transparent)]
     Snapshot(#[from] SnapshotError),
+    #[error("WASM execution panicked: {0}")]
+    Panic(String),
 }
 
 pub struct SimHost {
@@ -210,6 +213,35 @@ impl SimHost {
     pub fn drain_events_for_snapshot(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_events)
     }
+
+    /// Execute `f` with graceful panic recovery for memory violations.
+    ///
+    /// WASM execution can, in rare edge cases (e.g. severe memory violations),
+    /// cause the host to panic rather than returning a structured error.  This
+    /// wrapper catches any such panic and converts it into a
+    /// [`SimHostError::Panic`] so callers receive a typed error instead of an
+    /// uncontrolled process abort.
+    ///
+    /// # Safety
+    /// The closure is wrapped in [`AssertUnwindSafe`].  Callers must ensure
+    /// that no `RefCell` borrow or other unwind-unsafe state can be left in an
+    /// inconsistent state after a caught panic.  In practice the host should be
+    /// treated as poisoned after a panic and not reused.
+    pub fn run_with_panic_recovery<F, T>(&self, f: F) -> Result<T, SimHostError>
+    where
+        F: FnOnce() -> Result<T, SimHostError>,
+    {
+        panic::catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(|payload| {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic payload".to_string()
+            };
+            Err(SimHostError::Panic(msg))
+        })
+    }
 }
 
 #[cfg(test)]
@@ -250,6 +282,35 @@ mod tests {
         let res_b = host.val_to_u32(val_b).expect("conversion failed");
 
         assert_eq!(res_a + res_b, 30);
+    }
+
+    #[test]
+    fn test_run_with_panic_recovery_returns_ok_on_success() {
+        let host = SimHost::new(None, None, None);
+        let result = host.run_with_panic_recovery(|| Ok(42u32));
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[test]
+    fn test_run_with_panic_recovery_catches_str_panic() {
+        let host = SimHost::new(None, None, None);
+        let result: Result<u32, SimHostError> =
+            host.run_with_panic_recovery(|| panic!("memory violation"));
+        match result {
+            Err(SimHostError::Panic(msg)) => assert_eq!(msg, "memory violation"),
+            other => panic!("expected SimHostError::Panic, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_run_with_panic_recovery_catches_string_panic() {
+        let host = SimHost::new(None, None, None);
+        let result: Result<u32, SimHostError> =
+            host.run_with_panic_recovery(|| panic!("{}", "out-of-bounds access".to_string()));
+        match result {
+            Err(SimHostError::Panic(msg)) => assert!(msg.contains("out-of-bounds")),
+            other => panic!("expected SimHostError::Panic, got {:?}", other),
+        }
     }
 
     #[test]
