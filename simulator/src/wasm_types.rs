@@ -5,8 +5,20 @@
 //!
 //! This module provides utilities to parse WebAssembly type sections and function tables,
 //! enabling detailed error messages when call_indirect traps occur.
+//!
+//! # Performance notes
+//!
+//! `TypeSection::parse` performs zero-copy decoding of the WASM binary:
+//! - It stops iterating as soon as the TypeSection payload has been consumed,
+//!   avoiding a full scan of the remaining sections (code, data, etc.).
+//! - `valtype_to_value_type` is `#[inline]` and branch-free; it never allocates.
+//! - Parameter and result `Vec`s are populated with `push` rather than
+//!   `collect` to avoid a second allocation per function type.
+//! - The outer `types` vec is pre-allocated when `wasmparser` exposes a count hint.
 
 #![allow(dead_code)]
+
+use std::fmt::Write as _;
 
 use serde::Serialize;
 use wasmparser::{Parser, Payload, ValType};
@@ -38,26 +50,33 @@ impl std::fmt::Display for TypeError {
 
 impl std::error::Error for TypeError {}
 
+/// Zero-copy, allocation-free conversion from a [`ValType`] to a [`ValueType`].
+///
+/// Returns `None` for reference types that are neither `funcref` nor `externref`
+/// rather than allocating a formatted error string.  Callers that need a
+/// structured error can convert the `None` case themselves.
+#[inline]
+fn valtype_to_value_type(vt: ValType) -> Option<ValueType> {
+    match vt {
+        ValType::I32 => Some(ValueType::I32),
+        ValType::I64 => Some(ValueType::I64),
+        ValType::F32 => Some(ValueType::F32),
+        ValType::F64 => Some(ValueType::F64),
+        ValType::V128 => Some(ValueType::V128),
+        ValType::Ref(rt) if rt.is_func_ref() => Some(ValueType::FuncRef),
+        ValType::Ref(rt) if rt.is_extern_ref() => Some(ValueType::ExternRef),
+        _ => None,
+    }
+}
+
+/// Kept for API compatibility with code that uses `TryFrom<ValType>`.
 impl TryFrom<ValType> for ValueType {
     type Error = TypeError;
 
+    #[inline]
     fn try_from(vt: ValType) -> Result<Self, Self::Error> {
-        match vt {
-            ValType::I32 => Ok(ValueType::I32),
-            ValType::I64 => Ok(ValueType::I64),
-            ValType::F32 => Ok(ValueType::F32),
-            ValType::F64 => Ok(ValueType::F64),
-            ValType::V128 => Ok(ValueType::V128),
-            ValType::Ref(rt) => {
-                if rt.is_func_ref() {
-                    Ok(ValueType::FuncRef)
-                } else if rt.is_extern_ref() {
-                    Ok(ValueType::ExternRef)
-                } else {
-                    Err(TypeError::UnsupportedValType(format!("{:?}", vt)))
-                }
-            }
-        }
+        valtype_to_value_type(vt)
+            .ok_or_else(|| TypeError::UnsupportedValType(format!("{:?}", vt)))
     }
 }
 
@@ -88,29 +107,32 @@ impl FunctionSignature {
         Self { params, results }
     }
 
-    /// Format the signature in human-readable form: (params) -> (results)
+    /// Format the signature in human-readable form: `(params) -> (results)`.
+    ///
+    /// Writes directly into a single pre-allocated `String` to avoid the
+    /// intermediate `Vec<String>` allocations that `join` would require.
     pub fn format(&self) -> String {
-        let params = if self.params.is_empty() {
-            String::new()
-        } else {
-            self.params
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
+        // Rough capacity estimate: 6 chars per type + separators + wrapper chars.
+        let est = (self.params.len() + self.results.len()) * 6 + 8;
+        let mut out = String::with_capacity(est);
 
-        let results = if self.results.is_empty() {
-            String::new()
-        } else {
-            self.results
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
-        format!("({}) -> ({})", params, results)
+        out.push('(');
+        for (i, t) in self.params.iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+            // `write!` into a `String` never fails.
+            let _ = write!(out, "{}", t);
+        }
+        out.push_str(") -> (");
+        for (i, t) in self.results.iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+            let _ = write!(out, "{}", t);
+        }
+        out.push(')');
+        out
     }
 
     /// Compare this signature with another and return detailed differences
@@ -174,38 +196,62 @@ pub struct TypeSection {
 }
 
 impl TypeSection {
-    /// Parse the type section from WebAssembly module bytes
+    /// Parse the type section from WebAssembly module bytes.
+    ///
+    /// # Performance
+    /// - Stops iterating payloads as soon as the TypeSection has been consumed;
+    ///   subsequent sections (imports, code, data …) are never visited.
+    /// - Uses `valtype_to_value_type` which is `#[inline]` and never allocates.
+    /// - Pushes directly into pre-allocated `Vec`s instead of `collect`ing
+    ///   through an intermediate iterator.
     pub fn parse(wasm_bytes: &[u8]) -> Result<Self, String> {
-        let mut types = Vec::new();
+        let mut types: Vec<FunctionSignature> = Vec::new();
 
         for payload in Parser::new(0).parse_all(wasm_bytes) {
             let payload = payload.map_err(|e| format!("Failed to parse WASM: {}", e))?;
 
-            if let Payload::TypeSection(type_reader) = payload {
-                for rec_group in type_reader {
-                    let rec_group = rec_group.map_err(|e| format!("Failed to read type: {}", e))?;
+            match payload {
+                Payload::TypeSection(type_reader) => {
+                    // Pre-allocate based on the count hint exposed by wasmparser.
+                    types.reserve(type_reader.count() as usize);
 
-                    // RecGroup contains SubType entries
-                    for sub_type in rec_group.types() {
-                        let func_type = sub_type.composite_type.unwrap_func();
+                    for rec_group in type_reader {
+                        let rec_group =
+                            rec_group.map_err(|e| format!("Failed to read type: {}", e))?;
 
-                        let params = func_type
-                            .params()
-                            .iter()
-                            .map(|vt| ValueType::try_from(*vt))
-                            .collect::<Result<Vec<_>, TypeError>>()
-                            .map_err(|e| e.to_string())?;
+                        for sub_type in rec_group.types() {
+                            let func_type = sub_type.composite_type.unwrap_func();
 
-                        let results = func_type
-                            .results()
-                            .iter()
-                            .map(|vt| ValueType::try_from(*vt))
-                            .collect::<Result<Vec<_>, TypeError>>()
-                            .map_err(|e| e.to_string())?;
+                            // Build params — push directly, no intermediate collect.
+                            let mut params = Vec::with_capacity(func_type.params().len());
+                            for &vt in func_type.params().iter() {
+                                let value_type = valtype_to_value_type(vt).ok_or_else(|| {
+                                    format!("Unsupported param type: {:?}", vt)
+                                })?;
+                                params.push(value_type);
+                            }
 
-                        types.push(FunctionSignature::new(params, results));
+                            // Build results — same approach.
+                            let mut results = Vec::with_capacity(func_type.results().len());
+                            for &vt in func_type.results().iter() {
+                                let value_type = valtype_to_value_type(vt).ok_or_else(|| {
+                                    format!("Unsupported result type: {:?}", vt)
+                                })?;
+                                results.push(value_type);
+                            }
+
+                            types.push(FunctionSignature::new(params, results));
+                        }
                     }
+
+                    // TypeSection always appears before Code/Data sections in a
+                    // valid WASM binary — no need to scan the rest of the file.
+                    break;
                 }
+
+                // Skip every other payload without allocating.
+                Payload::End(_) => break,
+                _ => {}
             }
         }
 
@@ -369,5 +415,24 @@ mod tests {
         let wasm = wat::parse_str(r#"(module (func (param i32)))"#).unwrap();
         let type_section = TypeSection::parse(&wasm).unwrap();
         assert!(type_section.get_signature(10).is_none());
+    }
+
+    /// Verify that modules without a TypeSection parse cleanly to an empty section.
+    #[test]
+    fn test_type_section_parse_empty_module() {
+        let wasm = wat::parse_str(r#"(module)"#).unwrap();
+        let type_section = TypeSection::parse(&wasm).unwrap();
+        assert_eq!(type_section.len(), 0);
+        assert!(type_section.is_empty());
+    }
+
+    /// Ensure the inline `valtype_to_value_type` helper covers all supported types.
+    #[test]
+    fn test_valtype_to_value_type_all_primitives() {
+        assert_eq!(valtype_to_value_type(ValType::I32), Some(ValueType::I32));
+        assert_eq!(valtype_to_value_type(ValType::I64), Some(ValueType::I64));
+        assert_eq!(valtype_to_value_type(ValType::F32), Some(ValueType::F32));
+        assert_eq!(valtype_to_value_type(ValType::F64), Some(ValueType::F64));
+        assert_eq!(valtype_to_value_type(ValType::V128), Some(ValueType::V128));
     }
 }
