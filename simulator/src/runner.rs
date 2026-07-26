@@ -10,8 +10,71 @@ use soroban_env_host::{
     DiagnosticLevel, Error as EnvError, Host, HostError, TryIntoVal, Val,
 };
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::snapshot::{LedgerSnapshot, SnapshotError};
+
+/// Process-wide count of memory (in bytes) currently reserved by active
+/// [`SimHost`] instances that were constructed with an explicit
+/// `memory_limit`.
+///
+/// Each [`SimHost`]'s own `Budget` already enforces that *that one*
+/// simulation stays within its own `memory_limit`, but that check is purely
+/// per-instance: if several simulations run concurrently (e.g. one per
+/// simulation thread/connection), each can individually be within its own
+/// budget while their combined memory footprint still overwhelms the
+/// process. This atomic counter tracks that aggregate so a global ceiling
+/// (see [`set_global_memory_ceiling`]) can be enforced across concurrently
+/// active hosts, regardless of which thread constructs or drops them.
+static GLOBAL_RESERVED_MEMORY: AtomicU64 = AtomicU64::new(0);
+
+/// Process-wide memory ceiling (in bytes) shared across all concurrently
+/// active [`SimHost`] instances. `u64::MAX` (the default) means no global
+/// ceiling is enforced, only each host's own `memory_limit`.
+static GLOBAL_MEMORY_CEILING: AtomicU64 = AtomicU64::new(u64::MAX);
+
+/// Sets the process-wide memory ceiling (in bytes) shared across all
+/// concurrently active [`SimHost`] instances. Pass `None` to disable the
+/// global ceiling (the default), leaving only each host's own
+/// `memory_limit` in effect.
+#[allow(dead_code)]
+pub fn set_global_memory_ceiling(ceiling: Option<u64>) {
+    GLOBAL_MEMORY_CEILING.store(ceiling.unwrap_or(u64::MAX), Ordering::SeqCst);
+}
+
+/// Returns the total memory (bytes) currently reserved across all active
+/// [`SimHost`] instances that were constructed with a `memory_limit`.
+///
+/// This is a snapshot: under concurrent construction/drop of hosts on other
+/// threads it can change immediately after being read, same as any other
+/// atomic counter used for monitoring rather than mutual exclusion.
+#[allow(dead_code)]
+pub fn global_reserved_memory() -> u64 {
+    GLOBAL_RESERVED_MEMORY.load(Ordering::SeqCst)
+}
+
+/// Attempts to reserve `bytes` against the global memory ceiling.
+///
+/// On success, `GLOBAL_RESERVED_MEMORY` has been incremented by `bytes` and
+/// the caller is responsible for releasing it later (see
+/// [`release_global_memory_reservation`]), typically via `Drop`. On failure,
+/// no reservation is retained: the attempted increment is rolled back before
+/// returning, so a rejected host doesn't leave a phantom reservation behind.
+fn try_reserve_global_memory(bytes: u64) -> Result<(), (u64, u64)> {
+    let reserved_after = GLOBAL_RESERVED_MEMORY.fetch_add(bytes, Ordering::SeqCst) + bytes;
+    let ceiling = GLOBAL_MEMORY_CEILING.load(Ordering::SeqCst);
+    if reserved_after > ceiling {
+        GLOBAL_RESERVED_MEMORY.fetch_sub(bytes, Ordering::SeqCst);
+        return Err((reserved_after, ceiling));
+    }
+    Ok(())
+}
+
+/// Releases a previously successful reservation made via
+/// [`try_reserve_global_memory`].
+fn release_global_memory_reservation(bytes: u64) {
+    GLOBAL_RESERVED_MEMORY.fetch_sub(bytes, Ordering::SeqCst);
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SimHostError {
@@ -19,6 +82,11 @@ pub enum SimHostError {
     Host(#[from] HostError),
     #[error(transparent)]
     Snapshot(#[from] SnapshotError),
+    #[error(
+        "global memory limit exceeded: reserving this host would bring concurrently \
+         reserved memory to {reserved} bytes, exceeding the {ceiling} byte ceiling"
+    )]
+    GlobalMemoryLimitExceeded { reserved: u64, ceiling: u64 },
 }
 
 pub struct SimHost {
@@ -26,7 +94,7 @@ pub struct SimHost {
     ledger_snapshot: LedgerSnapshot,
     budget_limits: Option<(u64, u64)>,
     calibration: Option<crate::types::ResourceCalibration>,
-    memory_limit: Option<u64>,
+    pub(crate) memory_limit: Option<u64>,
     pending_events: Vec<String>,
 }
 
@@ -37,6 +105,16 @@ impl SimHost {
         calibration: Option<crate::types::ResourceCalibration>,
         memory_limit: Option<u64>,
     ) -> Self {
+        if let Some(mem) = memory_limit {
+            if let Err((reserved, ceiling)) = try_reserve_global_memory(mem) {
+                panic!(
+                    "ERR_GLOBAL_MEMORY_LIMIT_EXCEEDED: reserving this host would bring \
+                     concurrently reserved memory to {reserved} bytes, exceeding the \
+                     {ceiling} byte ceiling"
+                );
+            }
+        }
+
         let budget = Budget::default();
 
         if let Some((cpu, mem)) = budget_limits {
@@ -76,6 +154,12 @@ impl SimHost {
         memory_limit: Option<u64>,
         snapshot: &LedgerSnapshot,
     ) -> Result<Self, SimHostError> {
+        if let Some(mem) = memory_limit {
+            if let Err((reserved, ceiling)) = try_reserve_global_memory(mem) {
+                return Err(SimHostError::GlobalMemoryLimitExceeded { reserved, ceiling });
+            }
+        }
+
         let budget = Budget::default();
 
         if let Some((cpu, mem)) = budget_limits {
@@ -91,9 +175,22 @@ impl SimHost {
             );
         }
 
-        let storage = Self::storage_from_snapshot(snapshot, &budget)?;
+        let storage = match Self::storage_from_snapshot(snapshot, &budget) {
+            Ok(storage) => storage,
+            Err(e) => {
+                if let Some(mem) = memory_limit {
+                    release_global_memory_reservation(mem);
+                }
+                return Err(e);
+            }
+        };
         let host = Host::with_storage_and_budget(storage, budget);
-        host.set_diagnostic_level(DiagnosticLevel::Debug)?;
+        if let Err(e) = host.set_diagnostic_level(DiagnosticLevel::Debug) {
+            if let Some(mem) = memory_limit {
+                release_global_memory_reservation(mem);
+            }
+            return Err(e.into());
+        }
 
         Ok(Self {
             inner: host,
@@ -210,6 +307,35 @@ impl SimHost {
     pub fn drain_events_for_snapshot(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_events)
     }
+
+    /// Checks this host's own memory consumption against its per-instance
+    /// `memory_limit`, panicking if it has been exceeded.
+    ///
+    /// This only enforces *this* host's individual budget. It does not by
+    /// itself account for other concurrently active hosts - that aggregate
+    /// tracking happens separately via the global reservation taken in
+    /// [`SimHost::new`]/[`SimHost::from_snapshot`] and released on
+    /// [`Drop`].
+    #[allow(dead_code)]
+    pub fn check_memory_limit(&self) {
+        if let Some(limit) = self.memory_limit {
+            if let Ok(mem_bytes) = self.inner.budget_cloned().get_mem_bytes_consumed() {
+                if mem_bytes > limit {
+                    panic!(
+                        "ERR_MEMORY_LIMIT_EXCEEDED: consumed {mem_bytes} bytes, limit {limit} bytes"
+                    );
+                }
+            }
+        }
+    }
+}
+
+impl Drop for SimHost {
+    fn drop(&mut self) {
+        if let Some(mem) = self.memory_limit {
+            release_global_memory_reservation(mem);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -318,5 +444,97 @@ mod tests {
             host.events().expect("events should read").0.is_empty(),
             "fresh host should not retain post-rollback host events"
         );
+    }
+
+    // Tests below manipulate the process-wide GLOBAL_MEMORY_CEILING, so they
+    // serialize against each other via this lock. Tests elsewhere in this
+    // module (and other test modules) that never touch the global ceiling
+    // are unaffected and continue to run in parallel as normal.
+    static GLOBAL_CEILING_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn global_memory_reservation_tracks_construction_and_drop() {
+        let _guard = GLOBAL_CEILING_TEST_LOCK.lock().unwrap();
+        set_global_memory_ceiling(None);
+
+        let before = global_reserved_memory();
+        {
+            let _host = SimHost::new(None, None, Some(4096));
+            assert_eq!(global_reserved_memory(), before + 4096);
+        }
+        // The host has been dropped; its reservation should be released.
+        assert_eq!(global_reserved_memory(), before);
+    }
+
+    #[test]
+    fn global_memory_ceiling_rejects_from_snapshot_when_exceeded() {
+        let _guard = GLOBAL_CEILING_TEST_LOCK.lock().unwrap();
+        let current = global_reserved_memory();
+        set_global_memory_ceiling(Some(current + 10));
+
+        let snapshot = LedgerSnapshot::new();
+        let result = SimHost::from_snapshot(None, None, Some(1_000_000), &snapshot);
+
+        set_global_memory_ceiling(None);
+
+        assert!(matches!(
+            result,
+            Err(SimHostError::GlobalMemoryLimitExceeded { .. })
+        ));
+        // A rejected reservation must not leak: total reserved memory
+        // should be unchanged from before the attempt.
+        assert_eq!(global_reserved_memory(), current);
+    }
+
+    #[test]
+    fn global_memory_ceiling_panics_in_new_when_exceeded() {
+        let _guard = GLOBAL_CEILING_TEST_LOCK.lock().unwrap();
+        let current = global_reserved_memory();
+        set_global_memory_ceiling(Some(current + 10));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            SimHost::new(None, None, Some(1_000_000))
+        }));
+
+        set_global_memory_ceiling(None);
+
+        assert!(
+            result.is_err(),
+            "expected SimHost::new to panic when the global ceiling would be exceeded"
+        );
+        // The panicking construction must not leave a phantom reservation behind.
+        assert_eq!(global_reserved_memory(), current);
+    }
+
+    #[test]
+    fn concurrent_hosts_share_the_global_reservation_counter() {
+        let _guard = GLOBAL_CEILING_TEST_LOCK.lock().unwrap();
+        set_global_memory_ceiling(None);
+
+        let before = global_reserved_memory();
+        let per_host_bytes: u64 = 2048;
+        let thread_count = 8;
+
+        let handles: Vec<_> = (0..thread_count)
+            .map(|_| {
+                std::thread::spawn(move || {
+                    let host = SimHost::new(None, None, Some(per_host_bytes));
+                    // Hold the host briefly so all threads' reservations
+                    // are simultaneously live at some point.
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    drop(host);
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("host thread should not panic");
+        }
+
+        // All threads have finished and dropped their hosts, so the
+        // aggregate reservation should be back to exactly where it
+        // started, regardless of how the increments/decrements from each
+        // thread interleaved.
+        assert_eq!(global_reserved_memory(), before);
     }
 }

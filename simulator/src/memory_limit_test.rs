@@ -6,7 +6,6 @@
 #[cfg(test)]
 mod tests {
     use crate::runner::SimHost;
-    use crate::types::ResourceCalibration;
     use std::panic;
 
     #[test]
