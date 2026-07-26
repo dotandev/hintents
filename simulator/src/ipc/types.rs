@@ -27,6 +27,35 @@ pub enum IpcError {
 
     #[error("IPC decompress error: {0}")]
     Decompress(String),
+
+    /// Returned when `validate_request` finds one or more schema violations.
+    /// Each [`ValidationErrorDetail`] pinpoints a specific failing field,
+    /// explains why it failed, and optionally suggests how to fix it.
+    #[error("IPC validation error: {message}")]
+    Validation {
+        message: String,
+        details: Vec<ValidationErrorDetail>,
+    },
+}
+
+/// A single structured validation error produced by [`validate_request`].
+///
+/// Captures the failing JSON path, a human-readable message, the optional
+/// line number in the original input, and an optional suggestion for how
+/// the caller can fix the issue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationErrorDetail {
+    /// JSON pointer to the failing element (e.g. `"/params/networkPassphrase"`).
+    pub path: String,
+    /// Schema path where the constraint is defined (e.g. `"$defs/Foo/properties/bar"`).
+    pub schema_path: String,
+    /// Human-readable message describing the failure.
+    pub message: String,
+    /// 1-based line number in the original input where the error originates,
+    /// when available (currently populated for JSON parse errors).
+    pub line: Option<usize>,
+    /// Suggestion for how to fix the error, when applicable.
+    pub suggestion: Option<String>,
 }
 
 /// Identifies the kind of streaming frame emitted to stdout.

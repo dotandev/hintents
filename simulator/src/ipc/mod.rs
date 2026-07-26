@@ -5,7 +5,8 @@ pub mod decompress;
 pub mod types;
 pub mod validate;
 
-pub use types::IpcError;
+#[allow(unused_imports)]
+pub use types::{IpcError, ValidationErrorDetail};
 
 /// Binds a TCP listener to `addr` and returns it.
 ///
