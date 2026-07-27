@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::runner::SimHost;
+    use crate::runner::{HostConfig, SimHost};
     use crate::types::ResourceCalibration;
     use std::panic;
 
@@ -13,7 +13,10 @@ mod tests {
     fn test_memory_limit_field() {
         // Test that SimHost can be created with a memory limit
         let memory_limit = Some(1000000); // 1MB limit
-        let host = SimHost::new(None, None, memory_limit);
+        let host = SimHost::new(HostConfig {
+            memory_limit,
+            ..Default::default()
+        });
 
         assert_eq!(host.memory_limit, memory_limit);
     }
@@ -21,7 +24,7 @@ mod tests {
     #[test]
     fn test_no_memory_limit() {
         // Test that SimHost can be created without memory limit
-        let host = SimHost::new(None, None, None);
+        let host = SimHost::new(HostConfig::new());
 
         assert_eq!(host.memory_limit, None);
     }
@@ -30,7 +33,10 @@ mod tests {
     fn test_memory_limit_check_no_panic() {
         // Test memory limit checking functionality when within limits
         let memory_limit = Some(1000); // Very small limit
-        let host = SimHost::new(None, None, memory_limit);
+        let host = SimHost::new(HostConfig {
+            memory_limit,
+            ..Default::default()
+        });
 
         // This should not panic as we haven't executed any operations yet
         host.check_memory_limit();
@@ -41,7 +47,10 @@ mod tests {
         // Use catch_unwind to ensure panics from check_memory_limit do not
         // abort the entire test process.
         let memory_limit = Some(100);
-        let host = SimHost::new(None, None, memory_limit);
+        let host = SimHost::new(HostConfig {
+            memory_limit,
+            ..Default::default()
+        });
 
         let result = panic::catch_unwind(|| {
             host.check_memory_limit();

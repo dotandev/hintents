@@ -68,7 +68,7 @@ mod restore_preamble_tests {
             include_linear_memory: false,
         };
         // Simulate main logic: inject restore_preamble into host storage
-        let sim_host = crate::runner::SimHost::new(None, None, None);
+        let sim_host = crate::runner::SimHost::new(crate::runner::HostConfig::new());
         let host = sim_host.inner;
         if let Some(ref preamble) = req.restore_preamble {
             if let Some(obj) = preamble.as_object() {

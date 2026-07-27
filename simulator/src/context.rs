@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use soroban_env_host::events::HostEvent;
 use soroban_env_host::xdr::{LedgerEntry, LedgerKey};
 
-use crate::runner::{SimHost, SimHostError};
+use crate::runner::{HostConfig, SimHost, SimHostError};
 use crate::snapshot::LedgerSnapshot;
 use crate::types::SimulationRequest;
 
@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn rollback_to_restores_exact_snapshot_and_truncates_future_events() {
-        let host = SimHost::new(None, None, None);
+        let host = SimHost::new(HostConfig::new());
         let mut context = SimulationContext::new(host);
 
         let first_key = contract_data_key(7, 1);
