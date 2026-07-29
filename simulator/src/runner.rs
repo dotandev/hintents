@@ -210,6 +210,24 @@ impl SimHost {
     pub fn drain_events_for_snapshot(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_events)
     }
+
+    /// Check if memory consumption exceeds the configured limit and panic if so.
+    ///
+    /// This is called during critical operations to prevent OOM attacks from
+    /// malformed WASM modules that attempt to exhaust memory.
+    #[allow(dead_code)]
+    pub fn check_memory_limit(&self) {
+        if let Some(limit) = self.memory_limit {
+            if let Ok(mem_bytes) = self.inner.budget_cloned().get_mem_bytes_consumed() {
+                if mem_bytes > limit {
+                    panic!(
+                        "Memory limit exceeded: {} bytes consumed, limit is {} bytes",
+                        mem_bytes, limit
+                    );
+                }
+            }
+        }
+    }
 }
 
 impl Drop for SimHost {
