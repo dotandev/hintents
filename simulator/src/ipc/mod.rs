@@ -12,6 +12,67 @@ pub use types::{emit_chunk_frame, emit_chunk_raw, stream_to_stdout, IpcError, Re
 #[allow(dead_code)]
 pub const DEFAULT_CHUNK_TARGET: usize = 64 * 1024;
 
+/// A structured diagnostic emitted by the IPC bridge.
+///
+/// Log entries are newline-delimited JSON so consumers can parse them without
+/// depending on the human-readable formatting used by `tracing`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct LogEntry {
+    pub level: LogLevel,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Trace,
+    Debug,
+}
+
+impl LogEntry {
+    pub fn trace(message: impl Into<String>) -> Self {
+        Self::new(LogLevel::Trace, message)
+    }
+
+    pub fn debug(message: impl Into<String>) -> Self {
+        Self::new(LogLevel::Debug, message)
+    }
+
+    pub fn new(level: LogLevel, message: impl Into<String>) -> Self {
+        Self {
+            level,
+            message: message.into(),
+            target: None,
+        }
+    }
+
+    pub fn with_target(mut self, target: impl Into<String>) -> Self {
+        self.target = Some(target.into());
+        self
+    }
+
+    /// Serializes the entry as one NDJSON record on stderr.
+    pub fn emit(&self) -> Result<(), IpcError> {
+        use std::io::Write;
+
+        let stderr = std::io::stderr();
+        let mut handle = stderr.lock();
+        serde_json::to_writer(&mut handle, self)?;
+        writeln!(handle)?;
+        Ok(())
+    }
+}
+
+pub fn emit_trace(message: impl Into<String>) -> Result<(), IpcError> {
+    LogEntry::trace(message).emit()
+}
+
+pub fn emit_debug(message: impl Into<String>) -> Result<(), IpcError> {
+    LogEntry::debug(message).emit()
+}
+
 /// Binds a TCP listener to `addr` and returns it.
 ///
 /// If the socket cannot be established (e.g. the port is already in use or
@@ -43,6 +104,24 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&FrameType::FetchResponse).unwrap(),
             "\"fetchresponse\""
+        );
+    }
+
+    #[test]
+    fn test_log_entry_serialization_uses_standard_schema() {
+        let entry = super::LogEntry::debug("snapshot emitted").with_target("ipc");
+        assert_eq!(
+            serde_json::to_string(&entry).unwrap(),
+            r#"{\"level\":\"debug\",\"message\":\"snapshot emitted\",\"target\":\"ipc\"}"#
+        );
+    }
+
+    #[test]
+    fn test_log_entry_omits_missing_target() {
+        let entry = super::LogEntry::trace("bridge ready");
+        assert_eq!(
+            serde_json::to_string(&entry).unwrap(),
+            r#"{\"level\":\"trace\",\"message\":\"bridge ready\"}"#
         );
     }
 
