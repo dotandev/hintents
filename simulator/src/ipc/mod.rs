@@ -6,7 +6,10 @@ pub mod types;
 pub mod validate;
 
 #[allow(unused_imports)]
-pub use types::{emit_chunk_frame, emit_chunk_raw, stream_to_stdout, IpcError, ResponseStreamer};
+pub use types::{
+    emit_chunk_frame, emit_chunk_raw, emit_rollback_diff, stream_to_stdout, IpcError,
+    MemoryDiff, MemoryEntry, ResponseStreamer,
+};
 
 /// Default chunk target size (64 KiB) for streaming large simulation responses.
 #[allow(dead_code)]
@@ -43,6 +46,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&FrameType::FetchResponse).unwrap(),
             "\"fetchresponse\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FrameType::RollbackDiff).unwrap(),
+            "\"rollbackdiff\""
         );
     }
 
@@ -293,5 +300,98 @@ mod tests {
         assert_eq!(parsed.total, Some(2));
         // Data should be the original raw bytes, decoded from JSON string
         assert_eq!(parsed.data.as_str().unwrap(), r#"{"key":"value"}"#);
+    }
+
+    // ── MemoryDiff / RollbackDiff tests ──────────────────────────────
+
+    #[test]
+    fn test_memory_entry_roundtrip() {
+        let entry = MemoryEntry {
+            address: "0x00001a2b".to_string(),
+            old_value: 99,
+            new_value: 42,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let decoded: MemoryEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, entry);
+    }
+
+    #[test]
+    fn test_memory_diff_roundtrip() {
+        let diff = MemoryDiff {
+            rollback_to_seq: 5,
+            entries: vec![
+                MemoryEntry {
+                    address: "0x00001000".to_string(),
+                    old_value: 100,
+                    new_value: 1,
+                },
+                MemoryEntry {
+                    address: "0x00001008".to_string(),
+                    old_value: 0,
+                    new_value: 255,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&diff).unwrap();
+        let decoded: MemoryDiff = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, diff);
+        assert_eq!(decoded.entries.len(), 2);
+    }
+
+    #[test]
+    fn test_memory_diff_empty_entries() {
+        let diff = MemoryDiff {
+            rollback_to_seq: 0,
+            entries: vec![],
+        };
+        let json = serde_json::to_string(&diff).unwrap();
+        let decoded: MemoryDiff = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.entries.len(), 0);
+    }
+
+    #[test]
+    fn test_rollback_diff_frame_roundtrip() {
+        let diff = MemoryDiff {
+            rollback_to_seq: 3,
+            entries: vec![MemoryEntry {
+                address: "0x0000abcd".to_string(),
+                old_value: 7,
+                new_value: 3,
+            }],
+        };
+        let data = serde_json::to_value(&diff).unwrap();
+        let frame = StreamFrame {
+            frame_type: FrameType::RollbackDiff,
+            seq: 7,
+            total: None,
+            data,
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        let decoded: StreamFrame = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.frame_type, FrameType::RollbackDiff);
+        assert_eq!(decoded.seq, 7);
+        assert!(
+            !json.contains("total"),
+            "total must be omitted for rollbackdiff: {json}"
+        );
+        let decoded_diff: MemoryDiff = serde_json::from_value(decoded.data).unwrap();
+        assert_eq!(decoded_diff.rollback_to_seq, 3);
+        assert_eq!(decoded_diff.entries[0].new_value, 3);
+    }
+
+    #[test]
+    fn test_emit_rollback_diff_does_not_panic() {
+        emit_rollback_diff(
+            1,
+            MemoryDiff {
+                rollback_to_seq: 0,
+                entries: vec![MemoryEntry {
+                    address: "0x00000000".to_string(),
+                    old_value: 0,
+                    new_value: 1,
+                }],
+            },
+        );
     }
 }
