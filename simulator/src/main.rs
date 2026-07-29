@@ -10,6 +10,7 @@ mod events;
 mod gas_optimizer;
 mod git_detector;
 mod ipc;
+mod profiler;
 mod runner;
 mod snapshot;
 mod source_map_cache;
@@ -20,6 +21,7 @@ mod vm;
 mod wasm;
 
 use crate::gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor, CPU_LIMIT, MEMORY_LIMIT};
+use crate::profiler::{build_flamegraph_input, FlamegraphKind};
 use crate::source_mapper::SourceMapper;
 use crate::stack_trace::WasmStackTrace;
 use crate::types::*;
@@ -606,7 +608,7 @@ fn main() {
 
     let mut flamegraph_svg = None;
     if request.profile.unwrap_or(false) {
-        let folded_data = format!("Total;CPU {}\nTotal;Memory {}\n", cpu_insns, mem_bytes);
+        let folded_data = build_flamegraph_input(cpu_insns, mem_bytes, FlamegraphKind::Cpu);
         let mut result_vec = Vec::new();
         let mut options = inferno::flamegraph::Options::default();
         options.title = "Soroban Resource Consumption".to_string();

@@ -13,7 +13,7 @@
 use crate::source_mapper::SourceLocation;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -105,6 +105,7 @@ pub struct SourceMapCacheEntry {
 pub struct SourceMapCache {
     cache_dir: PathBuf,
     max_cache_size: Option<u64>,
+    recent_keys: std::sync::Arc<std::sync::Mutex<VecDeque<String>>>,
 }
 
 impl SourceMapCache {
@@ -114,6 +115,7 @@ impl SourceMapCache {
         Ok(Self {
             cache_dir,
             max_cache_size: None,
+            recent_keys: std::sync::Arc::new(std::sync::Mutex::new(VecDeque::new())),
         })
     }
 
@@ -124,6 +126,7 @@ impl SourceMapCache {
         Ok(Self {
             cache_dir,
             max_cache_size: None,
+            recent_keys: std::sync::Arc::new(std::sync::Mutex::new(VecDeque::new())),
         })
     }
 
@@ -137,6 +140,7 @@ impl SourceMapCache {
         Ok(Self {
             cache_dir,
             max_cache_size: Some(max_cache_size),
+            recent_keys: std::sync::Arc::new(std::sync::Mutex::new(VecDeque::new())),
         })
     }
 
@@ -302,6 +306,7 @@ impl SourceMapCache {
                     }
                 }
 
+                self.mark_recent(cache_key);
                 println!(
                     "Cache hit! Loading source map from cache for WASM: {}",
                     &cache_key[..8.min(cache_key.len())]
@@ -343,6 +348,7 @@ impl SourceMapCache {
         }
 
         let cache_path = self.get_cache_path(&entry.wasm_hash);
+        self.mark_recent(&entry.wasm_hash);
 
         // Acquire an exclusive OS-level lock before writing.
         let lock_file = Self::open_lock_file(&cache_path)
@@ -396,7 +402,14 @@ impl SourceMapCache {
         Ok(())
     }
 
-    /// Evicts oldest cache entries if current size exceeds max_size
+    fn mark_recent(&self, cache_key: &str) {
+        if let Ok(mut recent_keys) = self.recent_keys.lock() {
+            recent_keys.retain(|key| key != cache_key);
+            recent_keys.push_back(cache_key.to_string());
+        }
+    }
+
+    /// Evicts least-recently-used cache entries if current size exceeds max_size.
     fn evict_if_needed(&self, max_size: u64) -> Result<(), String> {
         let current_size = self.get_cache_size()?;
         if current_size <= max_size {
@@ -408,8 +421,20 @@ impl SourceMapCache {
             return Ok(());
         }
 
+        let mut recent_keys = self.recent_keys.lock().unwrap_or_else(|e| e.into_inner());
+
         let mut sorted_entries = entries;
-        sorted_entries.sort_by_key(|e| e.created_at);
+        sorted_entries.sort_by(|left, right| {
+            let left_rank = recent_keys
+                .iter()
+                .position(|key| key == &left.wasm_hash)
+                .unwrap_or(usize::MAX);
+            let right_rank = recent_keys
+                .iter()
+                .position(|key| key == &right.wasm_hash)
+                .unwrap_or(usize::MAX);
+            left_rank.cmp(&right_rank)
+        });
 
         let mut freed_space = 0u64;
         let target_free = current_size - max_size + (max_size / 4);
@@ -430,6 +455,7 @@ impl SourceMapCache {
                     eprintln!("Failed to remove cache file {:?}: {}", cache_path, e);
                 } else {
                     println!("Evicted cache entry: {}", &entry.wasm_hash[..8]);
+                    recent_keys.retain(|key| key != entry.wasm_hash);
                 }
             }
 
@@ -545,6 +571,7 @@ impl Default for SourceMapCache {
                     .join("cache")
                     .join(CACHE_DIR_NAME),
                 max_cache_size: None,
+                recent_keys: std::sync::Arc::new(std::sync::Mutex::new(VecDeque::new())),
             }
         })
     }
@@ -802,6 +829,55 @@ mod tests {
         let list = cache.list_cached().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].wasm_hash, wasm_hash);
+    }
+
+    #[test]
+    fn test_lru_eviction_prefers_recent_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache = SourceMapCache::with_cache_dir_and_max_size(temp_dir.path().to_path_buf(), 300)
+            .unwrap();
+
+        let wasm_bytes1 = vec![0x00, 0x61, 0x73, 0x6d, 0x01];
+        let wasm_hash1 = SourceMapCache::compute_wasm_hash(&wasm_bytes1);
+        let entry1 = SourceMapCacheEntry {
+            wasm_hash: wasm_hash1.clone(),
+            wasm_mtime: None,
+            has_symbols: true,
+            mappings: HashMap::new(),
+            created_at: 1000,
+        };
+        cache.store_sync(entry1).unwrap();
+
+        let wasm_bytes2 = vec![0x00, 0x61, 0x73, 0x6d, 0x02];
+        let wasm_hash2 = SourceMapCache::compute_wasm_hash(&wasm_bytes2);
+        let entry2 = SourceMapCacheEntry {
+            wasm_hash: wasm_hash2.clone(),
+            wasm_mtime: None,
+            has_symbols: true,
+            mappings: HashMap::new(),
+            created_at: 2000,
+        };
+        cache.store_sync(entry2).unwrap();
+
+        cache.get(&wasm_hash1, false);
+
+        let wasm_bytes3 = vec![0x00, 0x61, 0x73, 0x6d, 0x03];
+        let wasm_hash3 = SourceMapCache::compute_wasm_hash(&wasm_bytes3);
+        let entry3 = SourceMapCacheEntry {
+            wasm_hash: wasm_hash3.clone(),
+            wasm_mtime: None,
+            has_symbols: true,
+            mappings: HashMap::new(),
+            created_at: 3000,
+        };
+        cache.store_sync(entry3).unwrap();
+
+        let cached = cache.list_cached().unwrap();
+        let cached_hashes: std::collections::HashSet<_> =
+            cached.iter().map(|entry| entry.wasm_hash.clone()).collect();
+        assert!(cached_hashes.contains(&wasm_hash1));
+        assert!(!cached_hashes.contains(&wasm_hash2));
+        assert!(cached_hashes.contains(&wasm_hash3));
     }
 
     #[test]
