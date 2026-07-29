@@ -81,6 +81,7 @@ var (
 	saveSnapshotsFlag    string
 	wasmBase64           string
 	assetSafetyFlag      bool
+	stepBackFlag         int
 )
 
 // DebugCommand holds dependencies for the debug command
@@ -685,6 +686,34 @@ Local WASM Replay Mode:
 
 		if lastSimResp == nil {
 			return errors.WrapSimulationLogicError("no simulation results generated")
+		}
+
+		// Time-travel: Step back N steps from the end of execution trace
+		if stepBackFlag > 0 {
+			originalEventCount := len(lastSimResp.Events)
+			originalLogCount := len(lastSimResp.Logs)
+
+			if stepBackFlag >= originalEventCount {
+				fmt.Printf("%s Cannot step back %d steps: only %d events in trace\n", visualizer.Error(), stepBackFlag, originalEventCount)
+				return errors.WrapSimulationLogicError("step-back value exceeds trace length")
+			}
+
+			// Truncate events and logs to step back from the end
+			newEventCount := originalEventCount - stepBackFlag
+			lastSimResp.Events = lastSimResp.Events[:newEventCount]
+
+			// Also truncate logs proportionally
+			if originalLogCount > 0 {
+				newLogCount := originalLogCount - stepBackFlag
+				if newLogCount < 0 {
+					newLogCount = 0
+				}
+				lastSimResp.Logs = lastSimResp.Logs[:newLogCount]
+			}
+
+			fmt.Printf("%s Time-travel: Stepped back %d steps from end of trace\n", visualizer.Symbol("clock"), stepBackFlag)
+			fmt.Printf("  Events: %d → %d\n", originalEventCount, len(lastSimResp.Events))
+			fmt.Printf("  Logs: %d → %d\n", originalLogCount, len(lastSimResp.Logs))
 		}
 
 		// Persist snapshot registry to disk when --save-snapshots is set.
@@ -1710,6 +1739,7 @@ func init() {
 	debugCmd.Flags().StringVar(&loadSnapshotsFlag, "load-snapshots", "", "Load simulation from a snapshot registry")
 	debugCmd.Flags().StringVar(&saveSnapshotsFlag, "save-snapshots", "", "Save simulation results to a snapshot registry")
 	debugCmd.Flags().BoolVar(&assetSafetyFlag, "asset-safety", true, "Enable Move-level Asset Safety tracing (on by default for debug)")
+	debugCmd.Flags().IntVar(&stepBackFlag, "step-back", 0, "Step back N steps from the end of execution trace (time-travel)")
 	rootCmd.AddCommand(debugCmd)
 }
 
