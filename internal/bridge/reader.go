@@ -49,7 +49,35 @@ const (
 	// to reconstruct the full JSON payload.  Each chunk frame carries a
 	// "total" field indicating how many chunks to expect.
 	FrameTypeChunk FrameType = "chunk"
+
+	// FrameTypeRollbackDiff is emitted by the simulator immediately after it
+	// applies a rollback step.  The Data field of the enclosing StreamFrame
+	// decodes to a MemoryDiff describing every memory slot that changed value
+	// so the UI can render a highlighted delta view.
+	FrameTypeRollbackDiff FrameType = "rollbackdiff"
 )
+
+// MemoryEntry records the state change of a single memory address during a
+// rollback step.  Address is a hex string (e.g. "0x00001a2b") matching the
+// format emitted by the Rust simulator.
+type MemoryEntry struct {
+	// Address is the hex-formatted memory address (e.g. "0x00001a2b").
+	Address string `json:"address"`
+	// OldValue is the slot value before the rollback was applied.
+	OldValue uint64 `json:"old_value"`
+	// NewValue is the slot value after the rollback was applied (the restored value).
+	NewValue uint64 `json:"new_value"`
+}
+
+// MemoryDiff is the complete set of memory changes produced by a single
+// rollback step.  It is the decoded payload of a FrameTypeRollbackDiff frame.
+type MemoryDiff struct {
+	// RollbackToSeq is the sequence number of the snapshot that was restored.
+	RollbackToSeq uint32 `json:"rollback_to_seq"`
+	// Entries lists every memory slot whose value changed.  Empty when no
+	// observable state changed (no-op rollback).
+	Entries []MemoryEntry `json:"entries"`
+}
 
 // StreamFrame is one NDJSON line emitted by the simulator subprocess.
 type StreamFrame struct {
@@ -140,6 +168,24 @@ func (fr *FrameReader) ReadFrames(ctx context.Context, frames chan<- StreamFrame
 		case FrameTypeSnapshot:
 			frame := StreamFrame{
 				Type: FrameTypeSnapshot,
+				Seq:  envelope.Seq,
+				Data: envelope.Data,
+			}
+			select {
+			case frames <- frame:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+
+		case FrameTypeRollbackDiff:
+			// Validate that the data field is a well-formed MemoryDiff before
+			// forwarding, so consumers receive only valid diffs.
+			var diff MemoryDiff
+			if err := json.Unmarshal(envelope.Data, &diff); err != nil {
+				return nil, fmt.Errorf("bridge: decode rollback diff payload: %w", err)
+			}
+			frame := StreamFrame{
+				Type: FrameTypeRollbackDiff,
 				Seq:  envelope.Seq,
 				Data: envelope.Data,
 			}

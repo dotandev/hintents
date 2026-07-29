@@ -44,6 +44,39 @@ pub enum FrameType {
     /// The consumer concatenates all Chunk frames in seq order to
     /// reconstruct the full JSON payload.
     Chunk,
+    /// Memory-diff frame emitted when the simulator applies a rollback step.
+    /// The payload is a [`MemoryDiff`] describing every address whose value
+    /// changed during the rollback so the UI can highlight the delta.
+    RollbackDiff,
+}
+
+/// A single memory address whose value changed during a rollback step.
+///
+/// `address` is a hex string (e.g. `"0x0000_1a2b"`) so that the UI can
+/// display it without further conversion.  `old_value` is the value the
+/// slot held *before* the rollback; `new_value` is what it was restored to.
+/// Both values are decimal `u64` strings so they round-trip through JSON
+/// without loss.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryEntry {
+    /// Hex-formatted memory address (e.g. `"0x00001a2b"`).
+    pub address: String,
+    /// Slot value before the rollback was applied.
+    pub old_value: u64,
+    /// Slot value after the rollback was applied (i.e. the restored value).
+    pub new_value: u64,
+}
+
+/// The complete set of memory changes produced by a single rollback step.
+///
+/// Emitted as the `data` payload of a [`FrameType::RollbackDiff`] frame.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryDiff {
+    /// The sequence number of the snapshot that was restored.
+    pub rollback_to_seq: u32,
+    /// Every memory slot that changed value during this rollback.
+    /// Empty when no observable state changed (no-op rollback).
+    pub entries: Vec<MemoryEntry>,
 }
 
 /// A single newline-delimited JSON (NDJSON) frame written to stdout.
@@ -309,6 +342,37 @@ pub fn emit_final_frame(seq: u32, data: serde_json::Value) {
         data,
     }
     .emit();
+}
+
+/// Emit a [`FrameType::RollbackDiff`] frame carrying the given [`MemoryDiff`].
+///
+/// Call this after each rollback step so that the Go bridge—and ultimately
+/// the UI—can display a live delta of every memory slot that changed.
+///
+/// # Example
+///
+/// ```ignore
+/// emit_rollback_diff(7, MemoryDiff {
+///     rollback_to_seq: 5,
+///     entries: vec![
+///         MemoryEntry { address: "0x00001000".to_string(), old_value: 99, new_value: 42 },
+///     ],
+/// });
+/// ```
+#[allow(dead_code)]
+pub fn emit_rollback_diff(seq: u32, diff: MemoryDiff) {
+    match serde_json::to_value(&diff) {
+        Ok(data) => StreamFrame {
+            frame_type: FrameType::RollbackDiff,
+            seq,
+            total: None,
+            data,
+        }
+        .emit(),
+        Err(e) => {
+            eprintln!("bridge: failed to serialize MemoryDiff: {e}");
+        }
+    }
 }
 
 /// Emit a single chunk frame with `serde_json::Value` data.
