@@ -9,9 +9,14 @@
 //!
 //! If the host function traps, the After snapshot is still recorded with
 //! `trapped = true` so callers can inspect the state at the point of failure.
+//!
+//! When sandbox boundary checking is enabled, each snapshot also carries
+//! the contract ID and call depth at the point of capture, allowing callers
+//! to correlate state changes with cross-contract call boundaries.
 
 #![allow(dead_code)]
 
+use crate::sandbox::{SandboxBoundaryChecker, SandboxBoundaryError};
 use crate::snapshot::LedgerSnapshot;
 use std::fmt;
 
@@ -53,24 +58,66 @@ pub struct CapturedSnapshot {
     pub before_id: Option<SnapshotId>,
     /// Whether the host function trapped (only meaningful for After snapshots).
     pub trapped: bool,
+    /// The contract ID in scope at the time of capture, if sandbox checking is active.
+    pub contract_id: Option<String>,
+    /// The cross-contract call depth at the time of capture.
+    pub call_depth: u32,
 }
 
 /// Manages snapshot capture around host function calls.
+///
+/// When sandbox boundary checking is enabled, the tracker also validates
+/// cross-contract call integrity during each snapshot window.
 pub struct HostSnapshotTracker {
     next_id: u64,
     pairs: Vec<SnapshotPair>,
     /// Holds the "before" snapshot while a host function is in-flight.
     pending_before: Option<CapturedSnapshot>,
+    /// Optional sandbox boundary checker for cross-contract call validation.
+    sandbox_checker: Option<SandboxBoundaryChecker>,
 }
 
 impl HostSnapshotTracker {
-    /// Creates a new empty tracker.
+    /// Creates a new empty tracker without sandbox checking.
     pub fn new() -> Self {
         Self {
             next_id: 0,
             pairs: Vec::new(),
             pending_before: None,
+            sandbox_checker: None,
         }
+    }
+
+    /// Creates a new tracker with an attached sandbox boundary checker.
+    pub fn with_sandbox_checker(checker: SandboxBoundaryChecker) -> Self {
+        Self {
+            next_id: 0,
+            pairs: Vec::new(),
+            pending_before: None,
+            sandbox_checker: Some(checker),
+        }
+    }
+
+    /// Attach a sandbox boundary checker to this tracker.
+    ///
+    /// Replaces any previously attached checker.
+    pub fn set_sandbox_checker(&mut self, checker: SandboxBoundaryChecker) {
+        self.sandbox_checker = Some(checker);
+    }
+
+    /// Returns a mutable reference to the attached sandbox checker, if any.
+    pub fn sandbox_checker_mut(&mut self) -> Option<&mut SandboxBoundaryChecker> {
+        self.sandbox_checker.as_mut()
+    }
+
+    /// Returns a shared reference to the attached sandbox checker, if any.
+    pub fn sandbox_checker(&self) -> Option<&SandboxBoundaryChecker> {
+        self.sandbox_checker.as_ref()
+    }
+
+    /// Detach the sandbox checker, returning it if present.
+    pub fn take_sandbox_checker(&mut self) -> Option<SandboxBoundaryChecker> {
+        self.sandbox_checker.take()
     }
 
     /// Allocate the next snapshot ID.
@@ -83,16 +130,34 @@ impl HostSnapshotTracker {
     /// Call this immediately **before** a host function executes.
     ///
     /// Takes a snapshot of the current ledger state and stores it as
-    /// the pending "before" snapshot.
+    /// the pending "before" snapshot. If sandbox checking is active,
+    /// the current contract ID and call depth are recorded.
     pub fn take_before_snapshot(&mut self, host_fn_name: &str, state: LedgerSnapshot) {
         let id = self.next_snapshot_id();
+        let (contract_id, call_depth) = self.sandbox_context();
         self.pending_before = Some(CapturedSnapshot {
             id,
             host_fn_name: host_fn_name.to_string(),
             state,
             before_id: None,
             trapped: false,
+            contract_id,
+            call_depth,
         });
+    }
+
+    /// Returns the current sandbox context (contract_id, call_depth)
+    /// from the attached checker, or (None, 0) if no checker is attached.
+    fn sandbox_context(&self) -> (Option<String>, u32) {
+        self.sandbox_checker
+            .as_ref()
+            .map(|sc| {
+                (
+                    sc.current_contract_id().map(|s| s.to_string()),
+                    sc.current_depth(),
+                )
+            })
+            .unwrap_or((None, 0))
     }
 
     /// Call this immediately **after** a host function returns.
@@ -112,6 +177,7 @@ impl HostSnapshotTracker {
         let before = self.pending_before.take()?;
         let before_id = before.id;
         let after_id = self.next_snapshot_id();
+        let (contract_id, call_depth) = self.sandbox_context();
 
         let after = CapturedSnapshot {
             id: after_id,
@@ -119,6 +185,8 @@ impl HostSnapshotTracker {
             state,
             before_id: Some(before_id),
             trapped,
+            contract_id,
+            call_depth,
         };
 
         let pair = SnapshotPair { before, after };
@@ -156,6 +224,49 @@ impl HostSnapshotTracker {
             }
         }
         None
+    }
+
+    // ── Sandbox boundary helpers ────────────────────────────────────
+
+    /// Record entering a cross-contract call context.
+    ///
+    /// Delegates to the attached `SandboxBoundaryChecker` if one is present.
+    /// Returns `Ok(())` if no checker is attached.
+    pub fn begin_cross_contract_call(
+        &mut self,
+        caller_id: &str,
+        callee_id: &str,
+        function_name: &str,
+    ) -> Result<(), SandboxBoundaryError> {
+        match self.sandbox_checker.as_mut() {
+            Some(checker) => checker.push_call(caller_id, callee_id, function_name),
+            None => Ok(()),
+        }
+    }
+
+    /// Record returning from a cross-contract call context.
+    ///
+    /// Delegates to the attached `SandboxBoundaryChecker` if one is present.
+    /// Returns `Ok(())` if no checker is attached.
+    pub fn end_cross_contract_call(&mut self) -> Result<(), SandboxBoundaryError> {
+        match self.sandbox_checker.as_mut() {
+            Some(checker) => {
+                checker.pop_call()?;
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Validate that the current sandbox context permits access to
+    /// storage owned by `contract_id`.
+    ///
+    /// Returns `Ok(())` if no checker is attached or if the access is valid.
+    pub fn check_storage_boundary(&self, contract_id: &str) -> Result<(), SandboxBoundaryError> {
+        match self.sandbox_checker.as_ref() {
+            Some(checker) => checker.check_storage_access(contract_id),
+            None => Ok(()),
+        }
     }
 }
 
@@ -275,5 +386,127 @@ mod tests {
     fn test_snapshot_id_display() {
         let id = SnapshotId(42);
         assert_eq!(format!("{}", id), "snap-42");
+    }
+
+    // ── Sandbox integration tests ───────────────────────────────────
+
+    #[test]
+    fn test_sandbox_checker_is_optional() {
+        let mut tracker = HostSnapshotTracker::new();
+        assert!(tracker.sandbox_checker().is_none());
+        assert!(tracker.begin_cross_contract_call("a", "b", "fn").is_ok());
+        assert!(tracker.end_cross_contract_call().is_ok());
+    }
+
+    #[test]
+    fn test_with_sandbox_checker_constructor() {
+        let checker = crate::sandbox::SandboxBoundaryChecker::new();
+        let tracker = HostSnapshotTracker::with_sandbox_checker(checker);
+        assert!(tracker.sandbox_checker().is_some());
+        assert_eq!(tracker.sandbox_checker().unwrap().current_depth(), 0);
+    }
+
+    #[test]
+    fn test_set_and_take_sandbox_checker() {
+        let mut tracker = HostSnapshotTracker::new();
+        assert!(tracker.take_sandbox_checker().is_none());
+
+        let checker = crate::sandbox::SandboxBoundaryChecker::new();
+        tracker.set_sandbox_checker(checker);
+        assert!(tracker.sandbox_checker().is_some());
+
+        let taken = tracker.take_sandbox_checker();
+        assert!(taken.is_some());
+        assert!(tracker.sandbox_checker().is_none());
+    }
+
+    #[test]
+    fn test_snapshot_records_sandbox_context() {
+        let mut checker = crate::sandbox::SandboxBoundaryChecker::with_max_depth(4);
+        checker.authorize_call("root", "alpha");
+        let mut tracker = HostSnapshotTracker::with_sandbox_checker(checker);
+
+        // snapshot before any call — depth 0, no contract
+        tracker.take_before_snapshot("init", empty_snapshot());
+        let before_init = tracker.pending_before.as_ref().unwrap();
+        assert_eq!(before_init.call_depth, 0);
+        assert!(before_init.contract_id.is_none());
+        tracker.take_after_snapshot(empty_snapshot(), false);
+
+        // enter cross-contract call root -> alpha
+        tracker
+            .begin_cross_contract_call("root", "alpha", "hello")
+            .expect("authorized call");
+
+        tracker.take_before_snapshot("invoke_contract", empty_snapshot());
+        let before_call = tracker.pending_before.as_ref().unwrap();
+        assert_eq!(before_call.call_depth, 1);
+        assert_eq!(before_call.contract_id.as_deref(), Some("alpha"));
+        tracker.take_after_snapshot(empty_snapshot(), false);
+
+        // return from cross-contract call
+        tracker.end_cross_contract_call().expect("pop");
+
+        let pairs = tracker.pairs();
+        assert_eq!(pairs.len(), 2);
+
+        // first pair: no sandbox context
+        assert!(pairs[0].before.contract_id.is_none());
+        assert_eq!(pairs[0].before.call_depth, 0);
+        assert!(pairs[0].after.contract_id.is_none());
+        assert_eq!(pairs[0].after.call_depth, 0);
+
+        // second pair: inside cross-contract call
+        assert_eq!(
+            pairs[1].before.contract_id.as_deref(),
+            Some("alpha")
+        );
+        assert_eq!(pairs[1].before.call_depth, 1);
+    }
+
+    #[test]
+    fn test_cross_contract_call_depth_enforcement() {
+        let mut checker = crate::sandbox::SandboxBoundaryChecker::with_max_depth(2);
+        checker.authorize_call("a", "b");
+        checker.authorize_call("b", "c");
+        checker.authorize_call("c", "d");
+        let mut tracker = HostSnapshotTracker::with_sandbox_checker(checker);
+
+        tracker
+            .begin_cross_contract_call("a", "b", "f1")
+            .expect("depth 1");
+        tracker
+            .begin_cross_contract_call("b", "c", "f2")
+            .expect("depth 2");
+        let err = tracker
+            .begin_cross_contract_call("c", "d", "f3")
+            .expect_err("depth 3 should exceed limit");
+        assert!(
+            matches!(err, crate::sandbox::SandboxBoundaryError::MaxCallDepthExceeded { max: 2, current: 3 }),
+            "expected MaxCallDepthExceeded, got {err}"
+        );
+    }
+
+    #[test]
+    fn test_check_storage_boundary_without_checker() {
+        let tracker = HostSnapshotTracker::new();
+        assert!(tracker.check_storage_boundary("any_contract").is_ok());
+    }
+
+    #[test]
+    fn test_check_storage_boundary_with_checker() {
+        let mut checker = crate::sandbox::SandboxBoundaryChecker::new();
+        checker.authorize_call("root", "alpha");
+        let mut tracker = HostSnapshotTracker::with_sandbox_checker(checker);
+
+        tracker
+            .begin_cross_contract_call("root", "alpha", "fn")
+            .expect("push");
+
+        // Accessing alpha's own storage should pass
+        assert!(tracker.check_storage_boundary("alpha").is_ok());
+
+        // Accessing another contract's storage should fail
+        assert!(tracker.check_storage_boundary("other").is_err());
     }
 }
