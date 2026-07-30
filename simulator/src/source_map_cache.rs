@@ -18,7 +18,7 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Monotonically increasing counter used to generate unique temp-file names,
 /// preventing concurrent writes from clobbering each other's `.tmp` files.
@@ -99,6 +99,9 @@ pub struct SourceMapCacheEntry {
     pub mappings: HashMap<u64, SourceLocation>,
     /// Timestamp when the entry was created
     pub created_at: u64,
+    /// Timestamp when the entry was last accessed; used for LRU eviction
+    #[serde(default)]
+    pub last_accessed_at: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -232,6 +235,13 @@ impl SourceMapCache {
             .map_err(|e| format!("Failed to open lock file {:?}: {}", lock_path, e))
     }
 
+    fn current_timestamp() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    }
+
     /// Gets a cached source map entry if it exists and is valid.
     /// When `no_cache` is true, skips the cache and returns None immediately,
     /// forcing the caller to re-parse WASM symbols from scratch.
@@ -306,6 +316,11 @@ impl SourceMapCache {
                     "Cache hit! Loading source map from cache for WASM: {}",
                     &cache_key[..8.min(cache_key.len())]
                 );
+                let mut entry = entry;
+                entry.last_accessed_at = Some(Self::current_timestamp());
+                if let Err(e) = self.write_entry_to_disk(&cache_path, &entry) {
+                    eprintln!("Failed to update cache access metadata: {}", e);
+                }
                 Some(entry)
             }
             Err(e) => {
@@ -342,10 +357,27 @@ impl SourceMapCache {
             Err(e) => return Err(format!("Failed to create cache directory: {}", e)),
         }
 
+        let mut entry = entry;
+        entry.last_accessed_at = Some(Self::current_timestamp());
         let cache_path = self.get_cache_path(&entry.wasm_hash);
+        self.write_entry_to_disk(&cache_path, &entry)?;
 
+        println!("Cached source map for WASM: {}", &entry.wasm_hash[..8]);
+
+        if let Some(max_size) = self.max_cache_size {
+            self.evict_if_needed(max_size)?;
+        }
+
+        Ok(())
+    }
+
+    fn write_entry_to_disk(
+        &self,
+        cache_path: &Path,
+        entry: &SourceMapCacheEntry,
+    ) -> Result<(), String> {
         // Acquire an exclusive OS-level lock before writing.
-        let lock_file = Self::open_lock_file(&cache_path)
+        let lock_file = Self::open_lock_file(cache_path)
             .map_err(|e| format!("Failed to open lock file {:?}: {}", cache_path, e))?;
         flock::lock_exclusive(&lock_file).map_err(|e| {
             format!(
@@ -355,7 +387,7 @@ impl SourceMapCache {
         })?;
 
         // Serialize the entry
-        let bytes = bincode::serialize(&entry)
+        let bytes = bincode::serialize(entry)
             .map_err(|e| format!("Failed to serialize cache entry: {}", e))?;
 
         // Write atomically: write to a unique tmp file then rename to avoid
@@ -371,7 +403,7 @@ impl SourceMapCache {
                 .map_err(|e| format!("Failed to create temp cache file {:?}: {}", tmp_path, e))?;
             file.write_all(&bytes)
                 .map_err(|e| format!("Failed to write temp cache file {:?}: {}", tmp_path, e))?;
-            fs::rename(&tmp_path, &cache_path).map_err(|e| {
+            fs::rename(&tmp_path, cache_path).map_err(|e| {
                 format!(
                     "Failed to rename temp cache file {:?} to {:?}: {}",
                     tmp_path, cache_path, e
@@ -385,15 +417,8 @@ impl SourceMapCache {
             let _ = fs::remove_file(&tmp_path);
         }
 
-        write_result?;
-
-        println!("Cached source map for WASM: {}", &entry.wasm_hash[..8]);
-
-        if let Some(max_size) = self.max_cache_size {
-            self.evict_if_needed(max_size)?;
-        }
-
-        Ok(())
+        let _ = flock::unlock(&lock_file);
+        write_result
     }
 
     /// Evicts oldest cache entries if current size exceeds max_size
@@ -409,7 +434,7 @@ impl SourceMapCache {
         }
 
         let mut sorted_entries = entries;
-        sorted_entries.sort_by_key(|e| e.created_at);
+        sorted_entries.sort_by_key(|e| e.last_accessed_at.unwrap_or(e.created_at));
 
         let mut freed_space = 0u64;
         let target_free = current_size - max_size + (max_size / 4);
@@ -516,6 +541,7 @@ impl SourceMapCache {
                                 has_symbols: cache_entry.has_symbols,
                                 mappings_count: cache_entry.mappings.len() as u64,
                                 created_at: cache_entry.created_at,
+                                last_accessed_at: cache_entry.last_accessed_at,
                                 file_size,
                             });
                         }
@@ -558,6 +584,7 @@ pub struct CachedEntryInfo {
     pub has_symbols: bool,
     pub mappings_count: u64,
     pub created_at: u64,
+    pub last_accessed_at: Option<u64>,
     pub file_size: u64,
 }
 
@@ -631,6 +658,7 @@ mod tests {
             has_symbols: true,
             mappings: HashMap::new(),
             created_at: 1_234_567_890,
+            last_accessed_at: None,
         };
 
         cache.store_sync(entry).unwrap();
@@ -673,6 +701,7 @@ mod tests {
             has_symbols: true,
             mappings,
             created_at: 1_234_567_890,
+            last_accessed_at: None,
         };
 
         // Store the entry
@@ -709,6 +738,7 @@ mod tests {
             has_symbols: true,
             mappings: HashMap::new(),
             created_at: 1_234_567_890,
+            last_accessed_at: None,
         };
 
         // Store an entry so it exists on disk
@@ -771,6 +801,7 @@ mod tests {
             has_symbols: true,
             mappings,
             created_at: 1_234_567_890,
+            last_accessed_at: None,
         };
 
         cache.store_sync(entry).unwrap();
@@ -832,6 +863,7 @@ mod tests {
             has_symbols: true,
             mappings: mappings1,
             created_at: 1000,
+            last_accessed_at: None,
         };
 
         cache.store_sync(entry1).unwrap();
@@ -862,6 +894,7 @@ mod tests {
             has_symbols: true,
             mappings: mappings2,
             created_at: 2000,
+            last_accessed_at: None,
         };
 
         cache.store_sync(entry2).unwrap();
@@ -922,6 +955,90 @@ mod tests {
                 "Oldest entries should have been evicted"
             );
         }
+    }
+
+    #[test]
+    fn test_eviction_prefers_least_recently_used_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache =
+            SourceMapCache::with_cache_dir_and_max_size(temp_dir.path().to_path_buf(), 25_000)
+                .unwrap();
+
+        let entry1 = SourceMapCacheEntry {
+            wasm_hash: "entry-1".to_string(),
+            wasm_mtime: None,
+            has_symbols: true,
+            mappings: (0..4000)
+                .map(|i| {
+                    (
+                        i,
+                        SourceLocation {
+                            file: format!("file-{i}.rs"),
+                            line: i as u32,
+                            column: Some(i as u32),
+                            column_end: None,
+                            github_link: None,
+                        },
+                    )
+                })
+                .collect(),
+            created_at: 1000,
+        };
+
+        let entry2 = SourceMapCacheEntry {
+            wasm_hash: "entry-2".to_string(),
+            wasm_mtime: None,
+            has_symbols: true,
+            mappings: (0..4000)
+                .map(|i| {
+                    (
+                        i + 4000,
+                        SourceLocation {
+                            file: format!("file-{i}.rs"),
+                            line: i as u32,
+                            column: Some(i as u32),
+                            column_end: None,
+                            github_link: None,
+                        },
+                    )
+                })
+                .collect(),
+            created_at: 2000,
+        };
+
+        let entry3 = SourceMapCacheEntry {
+            wasm_hash: "entry-3".to_string(),
+            wasm_mtime: None,
+            has_symbols: true,
+            mappings: (0..4000)
+                .map(|i| {
+                    (
+                        i + 8000,
+                        SourceLocation {
+                            file: format!("file-{i}.rs"),
+                            line: i as u32,
+                            column: Some(i as u32),
+                            column_end: None,
+                            github_link: None,
+                        },
+                    )
+                })
+                .collect(),
+            created_at: 3000,
+            last_accessed_at: None,
+        };
+
+        cache.store_sync(entry1).unwrap();
+        cache.store_sync(entry2).unwrap();
+        let _ = cache.get("entry-1", false);
+        cache.store_sync(entry3).unwrap();
+
+        let list = cache.list_cached().unwrap();
+        assert!(list.len() < 3, "Expected one entry to be evicted");
+        let remaining_hashes: Vec<_> = list.iter().map(|e| e.wasm_hash.clone()).collect();
+        assert!(remaining_hashes.contains(&"entry-1".to_string()));
+        assert!(remaining_hashes.contains(&"entry-3".to_string()));
+        assert!(!remaining_hashes.contains(&"entry-2".to_string()));
     }
 
     #[test]

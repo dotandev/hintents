@@ -52,6 +52,7 @@ fn test_concurrency_source_map_cache() {
                         has_symbols: true,
                         mappings,
                         created_at: 1000 + i,
+                        last_accessed_at: None,
                     };
 
                     cache

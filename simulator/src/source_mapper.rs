@@ -438,6 +438,7 @@ mod tests {
             has_symbols: true,
             mappings,
             created_at: 1_234_567_890,
+            last_accessed_at: None,
         };
 
         cache.store_sync(entry).unwrap();
