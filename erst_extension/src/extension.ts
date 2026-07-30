@@ -5,7 +5,8 @@ import * as vscode from 'vscode';
 import { ERSTClient } from './erstClient';
 import { TraceTreeDataProvider, TraceItem } from './traceTreeView';
 import { buildTraceTreeExport, renderStandaloneHtml } from './traceExport';
-
+import { Worker } from 'worker_threads';
+import * as path from 'path';
 export function activate(context: vscode.ExtensionContext) {
     const client = new ERSTClient('127.0.0.1', 8080);
     let treeView: vscode.TreeView<vscode.TreeItem> | undefined;
@@ -16,6 +17,29 @@ export function activate(context: vscode.ExtensionContext) {
     treeView = vscode.window.createTreeView('erst-traces', { treeDataProvider: traceDataProvider });
     // Patch: set treeView reference in provider for auto-reveal
     (traceDataProvider as any).treeView = treeView;
+
+    // Spawn background worker for expensive initialization
+    const workerPath = path.join(__dirname, 'worker.js');
+    const worker = new Worker(workerPath);
+    
+    worker.on('message', (msg) => {
+        if (msg.type === 'done') {
+            // Handle initialization results here if needed
+        } else if (msg.type === 'error') {
+            vscode.window.showErrorMessage(`ERST Worker Error: ${msg.error}`);
+        }
+    });
+
+    worker.on('error', (err) => {
+        vscode.window.showErrorMessage(`ERST Worker Thread Error: ${err.message}`);
+    });
+
+    worker.postMessage({ 
+        type: 'start', 
+        workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '' 
+    });
+
+    context.subscriptions.push({ dispose: () => worker.terminate() });
 
     // Register TextDocumentContentProvider for states
     const stateProvider = new class implements vscode.TextDocumentContentProvider {
