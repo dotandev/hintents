@@ -16,6 +16,7 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/dotandev/hintents/internal/dwarf"
+	"github.com/dotandev/hintents/internal/trace/views"
 	"github.com/dotandev/hintents/internal/visualizer"
 )
 
@@ -224,6 +225,8 @@ func (v *InteractiveViewer) handleCommand(command string) bool {
 		v.undoNavigation()
 	case "s", "show", "state":
 		v.displayCurrentState()
+	case "d", "diff":
+		v.showVarDiff()
 	case "r", "replay":
 		v.replayFromCurrent(parts[1:])
 	case "rc", "reconstruct":
@@ -917,6 +920,42 @@ func (v *InteractiveViewer) showSplitPane() {
 	pane.Render(os.Stdout, node, src)
 }
 
+// showVarDiff computes and displays a side-by-side diff of variable changes
+// (HostState and Memory) between the previous step and the current step.
+func (v *InteractiveViewer) showVarDiff() {
+	if v.trace.CurrentStep <= 0 {
+		fmt.Printf("%s Already at the first step — no previous state to diff against.\n", visualizer.Error())
+		return
+	}
+	if len(v.trace.States) == 0 {
+		fmt.Printf("%s No states in trace.\n", visualizer.Error())
+		return
+	}
+
+	// Reconstruct full states for before (step-1) and after (current step)
+	// so that aggregated HostState/Memory values are available.
+	beforeStep := v.trace.CurrentStep - 1
+	afterStep := v.trace.CurrentStep
+
+	before, err := v.trace.ReconstructStateAt(beforeStep)
+	if err != nil {
+		fmt.Printf("%s Failed to reconstruct state at step %d: %s\n", visualizer.Error(), beforeStep, err)
+		return
+	}
+	after, err := v.trace.ReconstructStateAt(afterStep)
+	if err != nil {
+		fmt.Printf("%s Failed to reconstruct state at step %d: %s\n", visualizer.Error(), afterStep, err)
+		return
+	}
+
+	termW := getTermWidth()
+	fmt.Printf("\n%s Variable Diff: step %d -> step %d\n", visualizer.Symbol("chart"), beforeStep, afterStep)
+	fmt.Println(separator(termW))
+
+	result := views.ComputeVarDiff(before.HostState, after.HostState, before.Memory, after.Memory)
+	views.RenderVarDiff(os.Stdout, result, termW)
+}
+
 // executionStateToNode derives a TraceNode from an ExecutionState for display
 // in the split pane. The SourceRef field is populated when the state carries
 // enough information to identify a source location.
@@ -980,6 +1019,7 @@ func (v *InteractiveViewer) showHelp() {
 	fmt.Println("  ESC                  - Clear search")
 	fmt.Println()
 	fmt.Println("Other:")
+	fmt.Println("  d, diff              - Side-by-side variable diff (current vs previous step)")
 	fmt.Println("  sp, split            - Open expanded split pane")
 	fmt.Println("  ?, h, help           - Show this help")
 	fmt.Println("  y, yank <a/r> [idx]  - Copy raw XDR")
