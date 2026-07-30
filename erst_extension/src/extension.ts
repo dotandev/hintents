@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { ERSTClient } from './erstClient';
 import { TraceTreeDataProvider, TraceItem } from './traceTreeView';
 import { buildTraceTreeExport, renderStandaloneHtml } from './traceExport';
+import { SorobanCodeLensProvider } from './providers/codeLensProvider';
 import { TraceHoverProvider } from './providers/hoverProvider';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -26,6 +27,19 @@ export function activate(context: vscode.ExtensionContext) {
         }
     };
     context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('erst-state', stateProvider));
+
+    const codeLensProvider = new SorobanCodeLensProvider();
+    const codeLensDisposable = vscode.languages.registerCodeLensProvider(
+        { language: 'rust', scheme: 'file' },
+        codeLensProvider
+    );
+
+    let runSorobanFunctionDisposable = vscode.commands.registerCommand('erst.runSorobanFunction', async (uri: vscode.Uri, functionName: string) => {
+        const document = await vscode.workspace.openTextDocument(uri);
+        const selection = new vscode.Selection(0, 0, 0, 0);
+        await vscode.window.showTextDocument(document, { preview: false, selection });
+        vscode.window.showInformationMessage(`ERST: Ready to simulate ${functionName} from ${document.fileName}`);
+    });
 
     // Register command: erst.triggerDebug
     let triggerDebugDisposable = vscode.commands.registerCommand('erst.triggerDebug', async () => {
@@ -168,6 +182,8 @@ export function activate(context: vscode.ExtensionContext) {
         hoverProviderDisposable,
         nextStepDisposable,
         prevStepDisposable,
+        codeLensDisposable,
+        runSorobanFunctionDisposable,
         client
     );
 }
