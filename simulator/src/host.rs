@@ -147,6 +147,16 @@ impl HostSnapshotTracker {
     pub fn discard_pending(&mut self) -> Option<CapturedSnapshot> {
         self.pending_before.take()
     }
+
+    /// Rewinds the tracker to a specific instruction pointer.
+    pub fn rewind_to(&mut self, instruction_pointer: u32) -> Option<LedgerSnapshot> {
+        for pair in &self.pairs {
+            if pair.before.id.as_u64() == instruction_pointer as u64 {
+                return Some(pair.before.state.clone());
+            }
+        }
+        None
+    }
 }
 
 impl Default for HostSnapshotTracker {

@@ -33,6 +33,14 @@ pub struct FrameState {
     pub capture_result: SnapshotCaptureResult,
 }
 
+impl FrameState {
+    /// Rewinds the frame state to a previously captured state.
+    pub fn rewind_to(&mut self, state: &[u8]) {
+        self.data.clear();
+        self.data.extend_from_slice(state);
+    }
+}
+
 /// Attempts to capture a snapshot for the current frame.
 ///
 /// Strategy:

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/rpc"
@@ -35,24 +36,32 @@ type RegressionTestSuite struct {
 	mu          sync.Mutex
 }
 
+// DefaultTransactionTimeout is the default maximum time to wait for a single
+// transaction simulation before terminating the child process with SIGKILL.
+const DefaultTransactionTimeout = 30 * time.Second
+
 // RegressionHarness manages protocol regression testing against historic transactions
 type RegressionHarness struct {
-	Runner     RunnerInterface
-	RPCClient  *rpc.Client
-	MaxWorkers int
-	Verbose    bool
+	Runner             RunnerInterface
+	RPCClient          *rpc.Client
+	MaxWorkers         int
+	TransactionTimeout time.Duration
+	Verbose            bool
 }
 
-// NewRegressionHarness creates a new regression test harness
+// NewRegressionHarness creates a new regression test harness.
+// maxWorkers controls the concurrency of parallel transaction testing.
+// If maxWorkers <= 0, a default of 4 is used.
 func NewRegressionHarness(runner RunnerInterface, client *rpc.Client, maxWorkers int) *RegressionHarness {
 	if maxWorkers <= 0 {
 		maxWorkers = 4
 	}
 	return &RegressionHarness{
-		Runner:     runner,
-		RPCClient:  client,
-		MaxWorkers: maxWorkers,
-		Verbose:    false,
+		Runner:             runner,
+		RPCClient:          client,
+		MaxWorkers:         maxWorkers,
+		TransactionTimeout: DefaultTransactionTimeout,
+		Verbose:            false,
 	}
 }
 
@@ -129,7 +138,14 @@ func (h *RegressionHarness) RunRegressionTests(
 			sem <- struct{}{}        // Acquire semaphore
 			defer func() { <-sem }() // Release semaphore
 
-			result := h.testTransaction(ctx, hash, protocolVersion)
+			// Each transaction gets its own deadline so that a single hung
+			// simulator process cannot block the entire regression suite.
+			// If the process ignores SIGTERM, the Runner's context-cancellation
+			// path will escalate to SIGKILL after a brief grace period.
+			txCtx, cancel := context.WithTimeout(ctx, h.TransactionTimeout)
+			defer cancel()
+
+			result := h.testTransaction(txCtx, hash, protocolVersion)
 			suite.addResult(result)
 
 			current := processedCount.Add(1)
