@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -104,12 +105,20 @@ func TestNewRegressionHarness(t *testing.T) {
 
 		assert.Equal(t, mockRunner, harness.Runner)
 		assert.Equal(t, 4, harness.MaxWorkers) // Default worker count
+		assert.Equal(t, DefaultTransactionTimeout, harness.TransactionTimeout)
 		assert.False(t, harness.Verbose)
 	})
 
 	t.Run("respects custom worker count", func(t *testing.T) {
 		harness := NewRegressionHarness(&MockRunner{}, nil, 8)
 		assert.Equal(t, 8, harness.MaxWorkers)
+		assert.Equal(t, DefaultTransactionTimeout, harness.TransactionTimeout)
+	})
+
+	t.Run("can set custom transaction timeout", func(t *testing.T) {
+		harness := NewRegressionHarness(&MockRunner{}, nil, 4)
+		harness.TransactionTimeout = 5 * time.Second
+		assert.Equal(t, 5*time.Second, harness.TransactionTimeout)
 	})
 }
 

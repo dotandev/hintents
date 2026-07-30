@@ -50,6 +50,19 @@ export function activate(context: vscode.ExtensionContext) {
     };
     context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('erst-state', stateProvider));
 
+    const codeLensProvider = new SorobanCodeLensProvider();
+    const codeLensDisposable = vscode.languages.registerCodeLensProvider(
+        { language: 'rust', scheme: 'file' },
+        codeLensProvider
+    );
+
+    let runSorobanFunctionDisposable = vscode.commands.registerCommand('erst.runSorobanFunction', async (uri: vscode.Uri, functionName: string) => {
+        const document = await vscode.workspace.openTextDocument(uri);
+        const selection = new vscode.Selection(0, 0, 0, 0);
+        await vscode.window.showTextDocument(document, { preview: false, selection });
+        vscode.window.showInformationMessage(`ERST: Ready to simulate ${functionName} from ${document.fileName}`);
+    });
+
     // Register command: erst.triggerDebug
     let triggerDebugDisposable = vscode.commands.registerCommand('erst.triggerDebug', async () => {
         const hash = await vscode.window.showInputBox({
@@ -156,6 +169,12 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.executeCommand('vscode.diff', beforeUri, afterUri, 'State Diff (Before vs After)');
     });
 
+    // Register hover provider for ERST trace JSON documents
+    const hoverProviderDisposable = vscode.languages.registerHoverProvider(
+        { scheme: 'file', language: 'json' },
+        new TraceHoverProvider(client, traceDataProvider)
+    );
+
     // Navigation: next/prev step commands
     let nextStepDisposable = vscode.commands.registerCommand('erst.nextTraceStep', () => {
         const trace = traceDataProvider.getCurrentTrace();
@@ -174,6 +193,26 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // =========================================
+    // DAP Debug Adapter Registration
+    // =========================================
+
+    // Register the inline debug adapter factory for the "erst" debug type.
+    // This enables VS Code's native step-through debugging of Soroban
+    // transaction traces via the Debug Adapter Protocol.
+    const debugAdapterFactory = new ERSTDebugAdapterFactory();
+    const debugAdapterDisposable = vscode.debug.registerDebugAdapterDescriptorFactory(
+        ERST_DEBUG_TYPE,
+        debugAdapterFactory
+    );
+
+    // Register the debug configuration provider for launch configs.
+    const debugConfigProvider = new ERSTDebugConfigurationProvider();
+    const debugConfigDisposable = vscode.debug.registerDebugConfigurationProvider(
+        ERST_DEBUG_TYPE,
+        debugConfigProvider
+    );
+
     context.subscriptions.push(
         triggerDebugDisposable,
         selectTraceStepDisposable,
@@ -182,8 +221,13 @@ export function activate(context: vscode.ExtensionContext) {
         treeView,
         showXdrDisposable,
         showStateDiffDisposable,
+        hoverProviderDisposable,
         nextStepDisposable,
         prevStepDisposable,
+        debugAdapterDisposable,
+        debugConfigDisposable,
+        codeLensDisposable,
+        runSorobanFunctionDisposable,
         client
     );
 }
