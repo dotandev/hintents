@@ -15,6 +15,7 @@ type SimulationResponse struct {
 	DiagnosticEvents   []DiagnosticEvent    `json:"diagnostic_events,omitempty"`
 	Logs               []string             `json:"logs,omitempty"`
 	Flamegraph         string               `json:"flamegraph,omitempty"`
+	MemoryFlamegraph   string               `json:"memory_flamegraph,omitempty"`
 	AuthTrace          *authtrace.AuthTrace `json:"auth_trace,omitempty"`
 	OptimizationReport *OptimizationReport  `json:"optimization_report,omitempty"`
 	BudgetUsage        *BudgetUsage         `json:"budget_usage,omitempty"`

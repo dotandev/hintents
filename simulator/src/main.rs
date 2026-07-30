@@ -71,6 +71,7 @@ fn send_error(msg: String) {
         categorized_events: vec![],
         logs: vec![],
         flamegraph: None,
+        memory_flamegraph: None,
         optimization_report: None,
         budget_usage: None,
         source_location: None,
@@ -153,6 +154,7 @@ fn emit_panic_response(
             logs
         },
         flamegraph: None,
+        memory_flamegraph: None,
         optimization_report: None,
         budget_usage: None,
         source_location: None,
@@ -708,19 +710,36 @@ fn main() {
     };
 
     let mut flamegraph_svg = None;
+    let mut memory_flamegraph_svg = None;
     if request.profile.unwrap_or(false) {
-        let folded_data = format!("Total;CPU {}\nTotal;Memory {}\n", cpu_insns, mem_bytes);
-        let mut result_vec = Vec::new();
+        let cpu_folded_data = format!("Total;CPU {}\n", cpu_insns);
+        let memory_folded_data = format!("Total;Memory {}\n", mem_bytes);
+
+        let mut cpu_result_vec = Vec::new();
+        let mut memory_result_vec = Vec::new();
         let mut options = inferno::flamegraph::Options::default();
-        options.title = "Soroban Resource Consumption".to_string();
+        options.title = "Soroban CPU Consumption".to_string();
 
         if let Err(e) =
-            inferno::flamegraph::from_reader(&mut options, folded_data.as_bytes(), &mut result_vec)
+            inferno::flamegraph::from_reader(&mut options, cpu_folded_data.as_bytes(), &mut cpu_result_vec)
         {
-            tracing::warn!("Failed to generate flamegraph: {}", e);
-            eprintln!("Failed to generate flamegraph: {e}");
+            tracing::warn!("Failed to generate CPU flamegraph: {}", e);
+            eprintln!("Failed to generate CPU flamegraph: {e}");
         } else {
-            flamegraph_svg = Some(String::from_utf8_lossy(&result_vec).to_string());
+            flamegraph_svg = Some(String::from_utf8_lossy(&cpu_result_vec).to_string());
+        }
+
+        let mut memory_options = inferno::flamegraph::Options::default();
+        memory_options.title = "Soroban Memory Consumption".to_string();
+        if let Err(e) = inferno::flamegraph::from_reader(
+            &mut memory_options,
+            memory_folded_data.as_bytes(),
+            &mut memory_result_vec,
+        ) {
+            tracing::warn!("Failed to generate memory flamegraph: {}", e);
+            eprintln!("Failed to generate memory flamegraph: {e}");
+        } else {
+            memory_flamegraph_svg = Some(String::from_utf8_lossy(&memory_result_vec).to_string());
         }
     }
 
@@ -935,6 +954,7 @@ fn main() {
                         categorized_events,
                         logs: final_logs,
                         flamegraph: flamegraph_svg,
+                        memory_flamegraph: memory_flamegraph_svg.clone(),
                         optimization_report,
                         budget_usage: Some(budget_usage),
                         source_location: None,
@@ -965,6 +985,7 @@ fn main() {
                 categorized_events,
                 logs: final_logs,
                 flamegraph: flamegraph_svg,
+                memory_flamegraph: memory_flamegraph_svg,
                 optimization_report,
                 budget_usage: Some(budget_usage),
                 stack_trace: None,
@@ -1138,6 +1159,7 @@ fn main() {
                     logs
                 },
                 flamegraph: None,
+                memory_flamegraph: None,
                 optimization_report: None,
                 budget_usage: None,
                 source_location,
@@ -1201,6 +1223,7 @@ fn main() {
                     logs
                 },
                 flamegraph: None,
+                memory_flamegraph: None,
                 optimization_report: None,
                 budget_usage: None,
                 source_location: None,

@@ -17,9 +17,11 @@ func TestProfilingSchema(t *testing.T) {
 	assert.True(t, req.Profile)
 
 	resp := SimulationResponse{
-		Status:     "success",
-		Flamegraph: "<svg>...</svg>",
+		Status:            "success",
+		Flamegraph:        "<svg>...</svg>",
+		MemoryFlamegraph: "<svg>...</svg>",
 	}
 	assert.Equal(t, "success", resp.Status)
 	assert.NotEmpty(t, resp.Flamegraph)
+	assert.NotEmpty(t, resp.MemoryFlamegraph)
 }

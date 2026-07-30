@@ -90,6 +90,8 @@ pub struct SimulationResponse {
     pub categorized_events: Vec<CategorizedEvent>,
     pub logs: Vec<String>,
     pub flamegraph: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_flamegraph: Option<String>,
     pub optimization_report: Option<OptimizationReport>,
     pub budget_usage: Option<BudgetUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
