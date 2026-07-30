@@ -52,3 +52,49 @@ jobs:
       - name: Reclaim runner temp space after fuzz build
         if: always()
         run: bash ./scripts/ci-clean-build-space.sh
+
+  libfuzzer_target:
+    name: Build and Smoke-Test libFuzzer Target
+    runs-on: ubuntu-latest
+    # A job whose purpose is catching hangs should not be able to hang itself.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # cargo-fuzz needs nightly for -Zsanitizer=address.
+      - name: Install Rust Nightly Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache Cargo dependencies and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            simulator/fuzz/target
+          key: ${{ runner.os }}-cargo-fuzz-${{ hashFiles('simulator/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-fuzz-
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Reclaim runner temp space before fuzz build
+        run: bash ./scripts/ci-clean-build-space.sh
+
+      - name: Build the simulate target
+        working-directory: ./simulator
+        run: cargo fuzz build simulate
+
+      # The harness caps each run at 2 s of wall clock and 256 MiB of live heap,
+      # so libFuzzer's own -timeout is only a backstop. A campaign that hangs
+      # here means the in-harness ceilings regressed.
+      - name: Smoke-test the CPU and memory ceilings
+        working-directory: ./simulator
+        run: cargo fuzz run simulate -- -runs=2000 -timeout=10 -rss_limit_mb=1024
+
+      - name: Reclaim runner temp space after fuzz build
+        if: always()
+        run: bash ./scripts/ci-clean-build-space.sh

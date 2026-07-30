@@ -54,18 +54,10 @@ func (tv *TreeViewerWithMouse) StartWithMouse() error {
 	}
 	defer func() { _ = tv.mouseTracker.Disable() }() //nolint:errcheck // Best-effort mouse tracking disable on exit
 
-	// Build initial tree
+	// Build initial tree from the execution trace, nesting cross-contract steps.
 	nodes := make([]*TraceNode, 0)
-	if tv.trace != nil && len(tv.trace.States) > 0 {
-		// For now, create a simplified tree from trace states
-		root := NewTraceNode("root", "trace")
-		for i, state := range tv.trace.States {
-			node := NewTraceNode(fmt.Sprintf("step-%d", i), state.Operation)
-			node.Function = state.Function
-			node.ContractID = state.ContractID
-			node.Error = state.Error
-			root.AddChild(node)
-		}
+	if tv.trace != nil {
+		root := tv.trace.BuildTraceTree()
 		nodes = append(nodes, root)
 	}
 

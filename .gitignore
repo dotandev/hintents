@@ -41,6 +41,7 @@ create_phase9.py
 .gemini/
 .idea/
 .vscode/
+.next/
 
 ishus.py
 # Temporary docs/notes

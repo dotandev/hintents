@@ -1,0 +1,596 @@
+diff --git a/.github/PULL_REQUEST_TEMPLATE.md b/.github/PULL_REQUEST_TEMPLATE.md
+index e2b63897..7372ba5c 100644
+--- a/.github/PULL_REQUEST_TEMPLATE.md
++++ b/.github/PULL_REQUEST_TEMPLATE.md
+@@ -7,11 +7,11 @@
+ 
+ ## Type of Change
+ <!-- Check all that apply -->
+-- [ ] 🐛 Bug fix (non-breaking change which fixes an issue)
+-- [ ] ✨ New feature (non-breaking change which adds functionality)
+-- [ ] 💥 Breaking change (fix or feature that would cause existing functionality to not work as expected)
+-- [ ] 📝 Documentation update
+-- [ ] 🧹 Chore / Maintenance
++- [ ] Bug fix (non-breaking change which fixes an issue)
++- [ ] New feature (non-breaking change which adds functionality)
++- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
++- [ ] Documentation update
++- [ ] Chore / Maintenance
+ 
+ ## Checklist
+ - [ ] I have followed the guidelines in `CONTRIBUTING.md`.
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 8c6df1bf..b0d3bdfd 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -125,9 +125,9 @@ jobs:
+ 
+       - name: Install golangci-lint
+         if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.25.0'
+-        uses: golangci/golangci-lint-action@v6
++        uses: golangci/golangci-lint-action@v7
+         with:
+-          version: v1.63.4
++          version: latest
+           args: --config=.golangci.yml --timeout=5m
+ 
+       - name: Run gosec
+diff --git a/.github/workflows/fuzz.yml b/.github/workflows/fuzz.yml
+index b307393a..8b2e7a4a 100644
+--- a/.github/workflows/fuzz.yml
++++ b/.github/workflows/fuzz.yml
+@@ -47,7 +47,7 @@ jobs:
+ 
+       - name: Execute LLVM SanitizerCoverage Pass
+         working-directory: ./simulator
+-        run: cargo rustc --bin simulator -- -C passes=sancov-module
++        run: cargo rustc --bin erst-sim -- -C passes=sancov-module
+ 
+       - name: Reclaim runner temp space after fuzz build
+         if: always()
+diff --git a/.golangci.yml b/.golangci.yml
+index fdea5ba5..1a31f517 100644
+--- a/.golangci.yml
++++ b/.golangci.yml
+@@ -1,3 +1,4 @@
++version: "2"
+ run:
+   timeout: 5m
+   modules-download-mode: readonly
+diff --git a/internal/bridge/reader.go b/internal/bridge/reader.go
+index acaee178..a8497e92 100644
+--- a/internal/bridge/reader.go
++++ b/internal/bridge/reader.go
+@@ -14,8 +14,23 @@ import (
+ 	"encoding/json"
+ 	"fmt"
+ 	"io"
++	"sort"
++	"strings"
+ )
+ 
++// chunkEntry is an internal helper for collecting and sorting chunk frames.
++type chunkEntry struct {
++	seq uint32
++	raw json.RawMessage
++}
++
++// sortChunksBySeq sorts chunk entries by their seq number in ascending order.
++func sortChunksBySeq(chunks []chunkEntry) {
++	sort.Slice(chunks, func(i, j int) bool {
++		return chunks[i].seq < chunks[j].seq
++	})
++}
++
+ // FrameType is the discriminator field written by the Rust simulator into every
+ // NDJSON line it emits.
+ type FrameType string
+@@ -28,17 +43,26 @@ const (
+ 	// FrameTypeFinal is the terminal frame whose Data field contains the
+ 	// complete SimulationResponse JSON object.
+ 	FrameTypeFinal FrameType = "final"
++
++	// FrameTypeChunk is a partial-payload frame within a multi-frame large
++	// response.  The consumer must concatenate all Chunk frames in seq order
++	// to reconstruct the full JSON payload.  Each chunk frame carries a
++	// "total" field indicating how many chunks to expect.
++	FrameTypeChunk FrameType = "chunk"
+ )
+ 
+ // StreamFrame is one NDJSON line emitted by the simulator subprocess.
+ type StreamFrame struct {
+-	// Type discriminates snapshot frames from the terminal final frame.
++	// Type discriminates snapshot, chunk, final, etc.
+ 	Type FrameType `json:"type"`
+ 	// Seq is a monotonically increasing sequence number (0-based) within
+ 	// a single simulation run.  Out-of-order delivery is possible when the
+ 	// simulator is extended to use concurrent goroutines; callers that care
+ 	// about ordering should sort by Seq before processing.
+ 	Seq uint32 `json:"seq"`
++	// Total is the expected number of frames in this logical batch.
++	// Only populated for chunk frames; callers should ignore it otherwise.
++	Total uint32 `json:"total,omitempty"`
+ 	// Data holds the frame payload as raw JSON so that callers can decode
+ 	// it into the appropriate concrete type without a second allocation.
+ 	Data json.RawMessage `json:"data"`
+@@ -100,9 +124,10 @@ func (fr *FrameReader) ReadFrames(ctx context.Context, frames chan<- StreamFrame
+ 
+ 		// Fast-path: peek at the "type" field without a full unmarshal.
+ 		var envelope struct {
+-			Type FrameType       `json:"type"`
+-			Seq  uint32          `json:"seq"`
+-			Data json.RawMessage `json:"data"`
++			Type  FrameType       `json:"type"`
++			Seq   uint32          `json:"seq"`
++			Total uint32          `json:"total,omitempty"`
++			Data  json.RawMessage `json:"data"`
+ 		}
+ 		if err := json.Unmarshal(line, &envelope); err != nil {
+ 			return nil, fmt.Errorf("bridge: unmarshal frame: %w", err)
+@@ -124,6 +149,61 @@ func (fr *FrameReader) ReadFrames(ctx context.Context, frames chan<- StreamFrame
+ 				return nil, ctx.Err()
+ 			}
+ 
++		case FrameTypeChunk:
++			total := envelope.Total
++			if total == 0 {
++				total = 1
++			}
++			chunks := make([]chunkEntry, 0, total)
++			chunks = append(chunks, chunkEntry{seq: envelope.Seq, raw: envelope.Data})
++
++			for uint32(len(chunks)) < total {
++				select {
++				case <-ctx.Done():
++					return nil, ctx.Err()
++				default:
++				}
++
++				if !scanner.Scan() {
++					if err := scanner.Err(); err != nil {
++						return nil, fmt.Errorf("bridge: reading chunk: %w", err)
++					}
++					return nil, fmt.Errorf("bridge: unexpected EOF before all %d chunks arrived", total)
++				}
++
++				nextLine := scanner.Bytes()
++				if len(nextLine) == 0 {
++					continue
++				}
++
++				var nextEnv struct {
++					Type FrameType       `json:"type"`
++					Seq  uint32          `json:"seq"`
++					Data json.RawMessage `json:"data"`
++				}
++				if err := json.Unmarshal(nextLine, &nextEnv); err != nil {
++					return nil, fmt.Errorf("bridge: unmarshal chunk frame: %w", err)
++				}
++				if nextEnv.Type != FrameTypeChunk {
++					return nil, fmt.Errorf("bridge: expected chunk frame, got %q", nextEnv.Type)
++				}
++				chunks = append(chunks, chunkEntry{seq: nextEnv.Seq, raw: nextEnv.Data})
++			}
++
++			sortChunksBySeq(chunks)
++
++			// Each chunk's data field is a JSON string containing a fragment
++			// of the full payload. Decode each string and concatenate.
++			var sb strings.Builder
++			for _, c := range chunks {
++				var fragment string
++				if err := json.Unmarshal(c.raw, &fragment); err != nil {
++					return nil, fmt.Errorf("bridge: decode chunk data: %w", err)
++				}
++				sb.WriteString(fragment)
++			}
++			return json.RawMessage(sb.String()), nil
++
+ 		default:
+ 			// The "type" field is absent or unknown.  Check for a legacy
+ 			// single-shot response (simulator not yet upgraded to streaming).
+diff --git a/simulator/src/ipc/mod.rs b/simulator/src/ipc/mod.rs
+index 66698461..7b249f4c 100644
+--- a/simulator/src/ipc/mod.rs
++++ b/simulator/src/ipc/mod.rs
+@@ -5,7 +5,12 @@ pub mod decompress;
+ pub mod types;
+ pub mod validate;
+ 
+-pub use types::IpcError;
++#[allow(unused_imports)]
++pub use types::{emit_chunk_frame, emit_chunk_raw, stream_to_stdout, IpcError, ResponseStreamer};
++
++/// Default chunk target size (64 KiB) for streaming large simulation responses.
++#[allow(dead_code)]
++pub const DEFAULT_CHUNK_TARGET: usize = 64 * 1024;
+ 
+ /// Binds a TCP listener to `addr` and returns it.
+ ///
+@@ -23,6 +28,7 @@ pub fn start_ipc_bridge<A: std::net::ToSocketAddrs>(
+ #[cfg(test)]
+ mod tests {
+     use super::types::*;
++    use std::io::Write;
+ 
+     #[test]
+     fn test_frame_type_serialization() {
+@@ -45,6 +51,7 @@ mod tests {
+         let frame = StreamFrame {
+             frame_type: FrameType::Snapshot,
+             seq: 3,
++            total: None,
+             data: serde_json::json!({"entries": 42}),
+         };
+         let json = serde_json::to_string(&frame).unwrap();
+@@ -131,4 +138,160 @@ mod tests {
+             "unexpected error message: {err_msg}"
+         );
+     }
++
++    // ── Chunked streaming tests ──────────────────────────────────────
++
++    #[test]
++    fn test_chunk_frame_serialization() {
++        let frame = StreamFrame {
++            frame_type: FrameType::Chunk,
++            seq: 0,
++            total: Some(3),
++            data: serde_json::json!({"partial": "data"}),
++        };
++        let json = serde_json::to_string(&frame).unwrap();
++        assert!(json.contains(r#""type":"chunk""#));
++        assert!(json.contains(r#""total":3"#));
++        // total field must be present in the serialized output
++        let decoded: StreamFrame = serde_json::from_str(&json).unwrap();
++        assert_eq!(decoded.frame_type, FrameType::Chunk);
++        assert_eq!(decoded.total, Some(3));
++    }
++
++    #[test]
++    fn test_chunk_frame_omit_total_for_non_chunk() {
++        let frame = StreamFrame {
++            frame_type: FrameType::Final,
++            seq: 0,
++            total: None,
++            data: serde_json::json!({"status": "ok"}),
++        };
++        let json = serde_json::to_string(&frame).unwrap();
++        // total must not appear in non-chunk frames
++        assert!(!json.contains("total"), "total should be omitted: {json}");
++    }
++
++    #[test]
++    fn test_emit_chunk_frame_does_not_panic() {
++        emit_chunk_frame(0, 3, serde_json::json!({"seq": 0}));
++        emit_chunk_frame(1, 3, serde_json::json!({"seq": 1}));
++        emit_chunk_frame(2, 3, serde_json::json!({"seq": 2}));
++    }
++
++    #[test]
++    fn test_response_streamer_single_chunk() {
++        let mut buf = Vec::new();
++        let mut streamer = ResponseStreamer::new(&mut buf, 1, 1024);
++        streamer.feed(b"{}").unwrap();
++        let total = streamer.finish().unwrap();
++        assert_eq!(total, 1, "expected exactly 1 chunk");
++
++        let output = String::from_utf8(buf).unwrap();
++        assert!(output.contains(r#""type":"chunk""#));
++        assert!(output.contains(r#""seq":0"#));
++        assert!(output.contains(r#""total":1"#));
++        assert!(
++            output.ends_with("}\n"),
++            "output should end with newline: {output:?}"
++        );
++
++        // Data field should be a JSON string containing "{}"
++        let parsed: StreamFrame = serde_json::from_str(output.trim()).unwrap();
++        assert_eq!(parsed.data.as_str().unwrap(), "{}");
++    }
++
++    #[test]
++    fn test_response_streamer_multi_chunk() {
++        let mut buf = Vec::new();
++        // Use a tiny chunk_target so each feed triggers a flush
++        let mut streamer = ResponseStreamer::new(&mut buf, 3, 4);
++
++        streamer.feed(br#"{"a":"#).unwrap(); // flushed immediately (5 bytes > 4)
++        streamer.feed(br#""b"}"#).unwrap(); // flushed immediately (4 bytes >= 4)
++        let total = streamer.finish().unwrap();
++        assert_eq!(total, 2, "expected exactly 2 chunks");
++
++        let output = String::from_utf8(buf).unwrap();
++        let lines: Vec<&str> = output.lines().collect();
++        assert_eq!(lines.len(), 2, "expected 2 NDJSON lines");
++
++        // Each line is valid JSON. The data field is a JSON string.
++        let mut reconstructed = String::new();
++        for (i, line) in lines.iter().enumerate() {
++            let parsed: StreamFrame = serde_json::from_str(line).unwrap();
++            assert_eq!(parsed.frame_type, FrameType::Chunk);
++            assert_eq!(parsed.seq, i as u32);
++            assert_eq!(parsed.total, Some(3));
++            // The data is a JSON string containing a raw JSON fragment
++            let fragment = parsed
++                .data
++                .as_str()
++                .unwrap_or_else(|| panic!("chunk {i} data is not a string"));
++            reconstructed.push_str(fragment);
++        }
++
++        // The reconstructed string should be valid JSON
++        let val: serde_json::Value =
++            serde_json::from_str(&reconstructed).expect("reconstructed payload must be valid JSON");
++        assert_eq!(val["a"], "b");
++    }
++
++    #[test]
++    fn test_response_streamer_large_payload() {
++        // Simulate a payload larger than default chunk target
++        let mut buf = Vec::new();
++        let mut streamer = ResponseStreamer::new(&mut buf, 2, 64);
++
++        // Build a payload that exceeds chunk_target
++        let chunk1 = vec![b'x'; 128];
++        let chunk2 = vec![b'y'; 128];
++        streamer.feed(&chunk1).unwrap();
++        streamer.feed(&chunk2).unwrap();
++        let total = streamer.finish().unwrap();
++        assert!(total >= 2, "large payload should produce at least 2 chunks");
++
++        let output = String::from_utf8(buf).unwrap();
++        let lines: Vec<&str> = output.lines().collect();
++        assert_eq!(lines.len() as u32, total);
++    }
++
++    #[test]
++    fn test_emit_chunk_raw_equal_to_stream_frame() {
++        // Verify the format produced by emit_chunk_raw matches what
++        // a StreamFrame with FrameType::Chunk would produce.
++        let mut raw_buf = Vec::new();
++        let seq = 0u32;
++        let total = 2u32;
++        let data = br#"{"key":"value"}"#;
++
++        // Write using same logic as emit_chunk_raw / flush_chunk
++        write!(
++            raw_buf,
++            r#"{{"type":"chunk","seq":{},"total":{},"data":""#,
++            seq, total
++        )
++        .unwrap();
++        for &b in data {
++            match b {
++                b'"' => raw_buf.write_all(b"\\\"").unwrap(),
++                b'\\' => raw_buf.write_all(b"\\\\").unwrap(),
++                0x08 => raw_buf.write_all(b"\\b").unwrap(),
++                0x0C => raw_buf.write_all(b"\\f").unwrap(),
++                b'\n' => raw_buf.write_all(b"\\n").unwrap(),
++                b'\r' => raw_buf.write_all(b"\\r").unwrap(),
++                b'\t' => raw_buf.write_all(b"\\t").unwrap(),
++                0x20..=0x7E => raw_buf.write_all(&[b]).unwrap(),
++                _ => write!(raw_buf, "\\u{:04x}", b).unwrap(),
++            }
++        }
++        writeln!(raw_buf, "\"}}").unwrap();
++
++        let output = String::from_utf8(raw_buf).unwrap();
++        let parsed: StreamFrame = serde_json::from_str(output.trim()).unwrap();
++        assert_eq!(parsed.frame_type, FrameType::Chunk);
++        assert_eq!(parsed.seq, 0);
++        assert_eq!(parsed.total, Some(2));
++        // Data should be the original raw bytes, decoded from JSON string
++        assert_eq!(parsed.data.as_str().unwrap(), r#"{"key":"value"}"#);
++    }
+ }
+diff --git a/simulator/src/ipc/types.rs b/simulator/src/ipc/types.rs
+index 84937b4b..c8692724 100644
+--- a/simulator/src/ipc/types.rs
++++ b/simulator/src/ipc/types.rs
+@@ -40,6 +40,10 @@ pub enum FrameType {
+     Final,
+     /// Response to a FETCH_SNAPSHOT command from the Go bridge.
+     FetchResponse,
++    /// Partial payload chunk within a multi-frame large response.
++    /// The consumer concatenates all Chunk frames in seq order to
++    /// reconstruct the full JSON payload.
++    Chunk,
+ }
+ 
+ /// A single newline-delimited JSON (NDJSON) frame written to stdout.
+@@ -49,6 +53,10 @@ pub struct StreamFrame {
+     #[serde(rename = "type")]
+     pub frame_type: FrameType,
+     pub seq: u32,
++    /// Total number of frames in this logical batch (e.g. total chunks).
++    /// Only set on chunk frames; omitted for snapshot/final frames.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub total: Option<u32>,
+     pub data: serde_json::Value,
+ }
+ 
+@@ -76,6 +84,138 @@ impl StreamFrame {
+     }
+ }
+ 
++/// Streaming response writer that emits large simulation payloads as
++/// chunked NDJSON frames without buffering the entire response in memory.
++///
++/// Each chunk's payload is written as a JSON-escaped string in the `data`
++/// field so that every individual chunk frame is valid JSON. The consumer
++/// JSON-parses the data field and concatenates the decoded strings in `seq`
++/// order to reconstruct the full response payload.
++///
++/// # Example
++///
++/// ```ignore
++/// let mut streamer = ResponseStreamer::new_stdout(3, 64 * 1024);
++/// streamer.feed(br#"{"status":"success","events":"#)?;
++/// streamer.feed(br#"[{"id":1},{"id":2}]"#)?;
++/// streamer.feed(b"}")?;
++/// let total = streamer.finish()?;
++/// ```
++#[allow(dead_code)]
++pub struct ResponseStreamer<W: Write> {
++    writer: W,
++    seq: u32,
++    total_chunks: u32,
++    buffer: Vec<u8>,
++    chunk_target: usize,
++}
++
++#[allow(dead_code)]
++impl<W: Write> ResponseStreamer<W> {
++    /// Create a new streamer that writes chunked NDJSON frames to `writer`.
++    ///
++    /// `total_chunks` is the expected number of chunks (known upfront or
++    /// estimated). `chunk_target` is the approximate byte size at which a
++    /// buffered chunk is flushed as a separate NDJSON frame.
++    pub fn new(writer: W, total_chunks: u32, chunk_target: usize) -> Self {
++        ResponseStreamer {
++            writer,
++            seq: 0,
++            total_chunks,
++            buffer: Vec::with_capacity(chunk_target),
++            chunk_target,
++        }
++    }
++
++    /// Feed raw JSON bytes. When the internal buffer exceeds `chunk_target`,
++    /// it is flushed as a chunk frame to the underlying writer.
++    pub fn feed(&mut self, bytes: &[u8]) -> Result<(), IpcError> {
++        self.buffer.extend_from_slice(bytes);
++        if self.buffer.len() >= self.chunk_target {
++            self.flush_chunk()?;
++        }
++        Ok(())
++    }
++
++    /// Flush any remaining buffered data as the final chunk and return the
++    /// total number of chunks emitted.
++    pub fn finish(&mut self) -> Result<u32, IpcError> {
++        if !self.buffer.is_empty() {
++            self.flush_chunk()?;
++        }
++        self.writer.flush()?;
++        Ok(self.seq)
++    }
++
++    fn flush_chunk(&mut self) -> Result<(), IpcError> {
++        let data_bytes = core::mem::take(&mut self.buffer);
++        write!(
++            self.writer,
++            r#"{{"type":"chunk","seq":{},"total":{},"data":""#,
++            self.seq, self.total_chunks
++        )?;
++        for &b in &data_bytes {
++            match b {
++                b'"' => self.writer.write_all(b"\\\"")?,
++                b'\\' => self.writer.write_all(b"\\\\")?,
++                0x08 => self.writer.write_all(b"\\b")?,
++                0x0C => self.writer.write_all(b"\\f")?,
++                b'\n' => self.writer.write_all(b"\\n")?,
++                b'\r' => self.writer.write_all(b"\\r")?,
++                b'\t' => self.writer.write_all(b"\\t")?,
++                0x20..=0x7E => self.writer.write_all(&[b])?,
++                _ => write!(self.writer, "\\u{:04x}", b)?,
++            }
++        }
++        self.writer.write_all(b"\"}\n")?;
++        self.seq += 1;
++        Ok(())
++    }
++}
++
++/// Create a `ResponseStreamer` wrapping `std::io::stdout().lock()`.
++#[allow(dead_code)]
++pub fn stream_to_stdout(
++    total_chunks: u32,
++    chunk_target: usize,
++) -> ResponseStreamer<std::io::StdoutLock<'static>> {
++    ResponseStreamer::new(std::io::stdout().lock(), total_chunks, chunk_target)
++}
++
++/// Emit a single chunk frame with raw bytes written as a JSON-escaped
++/// string in the `data` field. Prefer `ResponseStreamer` for multi-chunk
++/// payloads.
++#[allow(dead_code)]
++pub fn emit_chunk_raw(seq: u32, total: u32, data: &[u8]) {
++    let stdout = std::io::stdout();
++    let mut handle = stdout.lock();
++    let res = write!(
++        handle,
++        r#"{{"type":"chunk","seq":{},"total":{},"data":""#,
++        seq, total
++    )
++    .and_then(|_| {
++        for &b in data {
++            match b {
++                b'"' => handle.write_all(b"\\\"")?,
++                b'\\' => handle.write_all(b"\\\\")?,
++                0x08 => handle.write_all(b"\\b")?,
++                0x0C => handle.write_all(b"\\f")?,
++                b'\n' => handle.write_all(b"\\n")?,
++                b'\r' => handle.write_all(b"\\r")?,
++                b'\t' => handle.write_all(b"\\t")?,
++                0x20..=0x7E => handle.write_all(&[b])?,
++                _ => write!(handle, "\\u{:04x}", b)?,
++            }
++        }
++        Ok(())
++    })
++    .and_then(|_| writeln!(handle, "\"}}"));
++    if res.is_err() {
++        eprintln!("bridge: failed to emit chunk frame (seq={seq})");
++    }
++}
++
+ #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+ #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+ #[allow(dead_code)]
+@@ -108,6 +248,8 @@ struct FetchResponseFrame {
+     #[serde(rename = "type")]
+     frame_type: FrameType,
+     seq: u32,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    total: Option<u32>,
+     data: FetchResponseData,
+ }
+ 
+@@ -152,6 +294,7 @@ pub fn emit_snapshot_frame(seq: u32, data: serde_json::Value) {
+     StreamFrame {
+         frame_type: FrameType::Snapshot,
+         seq,
++        total: None,
+         data,
+     }
+     .emit();
+@@ -162,6 +305,19 @@ pub fn emit_final_frame(seq: u32, data: serde_json::Value) {
+     StreamFrame {
+         frame_type: FrameType::Final,
+         seq,
++        total: None,
++        data,
++    }
++    .emit();
++}
++
++/// Emit a single chunk frame with `serde_json::Value` data.
++#[allow(dead_code)]
++pub fn emit_chunk_frame(seq: u32, total: u32, data: serde_json::Value) {
++    StreamFrame {
++        frame_type: FrameType::Chunk,
++        seq,
++        total: Some(total),
+         data,
+     }
+     .emit();
+@@ -188,6 +344,7 @@ pub fn handle_stdin_command(registry: &SnapshotRegistry) -> Result<(), IpcError>
+             let response = FetchResponseFrame {
+                 frame_type: FrameType::FetchResponse,
+                 seq: cmd.id,
++                total: None,
+                 data: FetchResponseData { snapshots },
+             };
+             let json_line = serde_json::to_string(&response)?;

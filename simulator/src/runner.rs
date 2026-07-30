@@ -6,12 +6,13 @@ use soroban_env_host::{
     budget::Budget,
     events::{Events, HostEvent},
     storage::{AccessType, Footprint, FootprintMap, Storage, StorageMap},
-    xdr::{Hash, Limits, ScErrorCode, ScErrorType, WriteXdr},
+    xdr::{Hash, HostFunction, Limits, ScErrorCode, ScErrorType, ScVal, WriteXdr},
     DiagnosticLevel, Error as EnvError, Host, HostError, TryIntoVal, Val,
 };
 use std::rc::Rc;
 
 use crate::snapshot::{LedgerSnapshot, SnapshotError};
+use tracing::{debug, instrument};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SimHostError {
@@ -19,6 +20,8 @@ pub enum SimHostError {
     Host(#[from] HostError),
     #[error(transparent)]
     Snapshot(#[from] SnapshotError),
+    #[error("host execution panicked: {0}")]
+    Panic(String),
 }
 
 pub struct SimHost {
@@ -31,12 +34,51 @@ pub struct SimHost {
 }
 
 impl SimHost {
+    fn panic_payload_to_string(panic_info: &(dyn std::any::Any + Send)) -> String {
+        if let Some(s) = panic_info.downcast_ref::<String>() {
+            s.clone()
+        } else if let Some(s) = panic_info.downcast_ref::<&'static str>() {
+            (*s).to_string()
+        } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+            (*s).to_string()
+        } else {
+            "Unknown panic".to_string()
+        }
+    }
+
+    pub fn with_panic_recovery<T, F>(&self, f: F) -> Result<T, SimHostError>
+    where
+        F: FnOnce() -> T,
+    {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+            Ok(result) => Ok(result),
+            Err(panic_info) => {
+                let message = Self::panic_payload_to_string(panic_info.as_ref());
+                Err(SimHostError::Panic(message))
+            }
+        }
+    }
+
+    pub fn invoke_function(&self, host_function: HostFunction) -> Result<ScVal, SimHostError> {
+        self.with_panic_recovery(|| self.inner.invoke_function(host_function))
+            .and_then(|result| result.map_err(SimHostError::Host))
+    }
+
     /// Initialize a new Host with optional budget settings and resource calibration.
+    #[instrument(
+        level = "debug",
+        fields(
+            budget_limits = ?budget_limits,
+            calibration = ?calibration,
+            memory_limit = ?memory_limit
+        )
+    )]
     pub fn new(
         budget_limits: Option<(u64, u64)>,
         calibration: Option<crate::types::ResourceCalibration>,
         memory_limit: Option<u64>,
     ) -> Self {
+        debug!("initializing simulator host");
         let budget = Budget::default();
 
         if let Some((cpu, mem)) = budget_limits {
@@ -59,6 +101,8 @@ impl SimHost {
         host.set_diagnostic_level(DiagnosticLevel::Debug)
             .expect("failed to set diagnostic level");
 
+        debug!("simulator host initialized");
+
         Self {
             inner: host,
             ledger_snapshot: LedgerSnapshot::new(),
@@ -70,12 +114,22 @@ impl SimHost {
     }
 
     /// Creates a new host initialized with the provided snapshot contents.
+    #[instrument(
+        level = "debug",
+        fields(
+            budget_limits = ?budget_limits,
+            calibration = ?calibration,
+            memory_limit = ?memory_limit,
+            snapshot_len = snapshot.len()
+        )
+    )]
     pub fn from_snapshot(
         budget_limits: Option<(u64, u64)>,
         calibration: Option<crate::types::ResourceCalibration>,
         memory_limit: Option<u64>,
         snapshot: &LedgerSnapshot,
     ) -> Result<Self, SimHostError> {
+        debug!("restoring simulator host from snapshot");
         let budget = Budget::default();
 
         if let Some((cpu, mem)) = budget_limits {
@@ -95,6 +149,8 @@ impl SimHost {
         let host = Host::with_storage_and_budget(storage, budget);
         host.set_diagnostic_level(DiagnosticLevel::Debug)?;
 
+        debug!("simulator host restored from snapshot");
+
         Ok(Self {
             inner: host,
             ledger_snapshot: snapshot.fork(),
@@ -106,7 +162,9 @@ impl SimHost {
     }
 
     /// Replaces the current host with a freshly initialized host loaded from the snapshot.
+    #[instrument(level = "debug", fields(snapshot_len = snapshot.len()), skip(self))]
     pub fn restore_from_snapshot(&mut self, snapshot: &LedgerSnapshot) -> Result<(), SimHostError> {
+        debug!("restoring current host from snapshot");
         let restored = Self::from_snapshot(
             self.budget_limits,
             self.calibration.clone(),
@@ -118,26 +176,37 @@ impl SimHost {
     }
 
     /// Captures the current host storage as a reusable ledger snapshot.
+    #[instrument(level = "debug", skip(self))]
     pub fn capture_snapshot(&self) -> Result<LedgerSnapshot, SimHostError> {
+        debug!(
+            snapshot_len = self.ledger_snapshot.len(),
+            "capturing ledger snapshot"
+        );
         Ok(self.ledger_snapshot.fork())
     }
 
     /// Returns the host events that have been emitted so far.
+    #[instrument(level = "debug", skip(self))]
     pub fn events(&self) -> Result<Events, SimHostError> {
+        debug!("fetching host events");
         Ok(self.inner.get_events()?)
     }
 
     /// Returns the host events as a cloned vector for external history tracking.
+    #[instrument(level = "debug", skip(self))]
     pub fn event_log(&self) -> Result<Vec<HostEvent>, SimHostError> {
+        debug!("fetching host event log");
         Ok(self.events()?.0)
     }
 
     /// Stores or replaces a ledger entry by rebuilding the host from the updated snapshot.
+    #[instrument(level = "debug", skip(self, entry))]
     pub fn set_ledger_entry(
         &mut self,
         key: soroban_env_host::xdr::LedgerKey,
         entry: soroban_env_host::xdr::LedgerEntry,
     ) -> Result<(), SimHostError> {
+        debug!("setting ledger entry");
         let key_bytes = key
             .to_xdr(Limits::none())
             .map_err(|e| SnapshotError::XdrEncoding(format!("Failed to encode key: {e}")))?;
@@ -146,10 +215,12 @@ impl SimHost {
         self.restore_from_snapshot(&snapshot)
     }
 
+    #[instrument(level = "debug", fields(snapshot_len = snapshot.len()), skip(budget))]
     fn storage_from_snapshot(
         snapshot: &LedgerSnapshot,
         budget: &Budget,
     ) -> Result<Storage, SimHostError> {
+        debug!("building storage from snapshot");
         let mut footprint_map = FootprintMap::new();
         let mut storage_map = StorageMap::new();
 
@@ -161,10 +232,11 @@ impl SimHost {
             storage_map = storage_map.insert(key, Some((Rc::new(entry.clone()), None)), budget)?;
         }
 
-        Ok(Storage::with_enforcing_footprint_and_map(
-            Footprint(footprint_map),
-            storage_map,
-        ))
+        let storage =
+            Storage::with_enforcing_footprint_and_map(Footprint(footprint_map), storage_map);
+
+        debug!("storage built from snapshot");
+        Ok(storage)
     }
 
     /// Set the contract ID for execution context.
@@ -198,6 +270,7 @@ impl SimHost {
     /// snapshot window.
     #[allow(dead_code)]
     pub fn push_event(&mut self, event: String) {
+        debug!(event = %event, "buffering pending simulator event");
         self.pending_events.push(event);
     }
 
@@ -207,8 +280,11 @@ impl SimHost {
     /// being constructed.  After this call the buffer is empty and ready for the
     /// next snapshot window.
     #[allow(dead_code)]
+    #[instrument(level = "debug", skip(self))]
     pub fn drain_events_for_snapshot(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.pending_events)
+        let drained = std::mem::take(&mut self.pending_events);
+        debug!(drained = drained.len(), "drained pending simulator events");
+        drained
     }
 }
 
@@ -247,6 +323,16 @@ mod tests {
         let host = SimHost::new(None, None, None);
         // Basic assertion that host is functional
         assert!(host.inner.budget_cloned().get_cpu_insns_consumed().is_ok());
+    }
+
+    #[test]
+    fn test_panic_recovery_wraps_host_execution() {
+        let host = SimHost::new(None, None, None);
+        let result = host.with_panic_recovery(|| panic!("memory violation"));
+
+        assert!(
+            matches!(result, Err(SimHostError::Panic(message)) if message.contains("memory violation"))
+        );
     }
 
     #[test]
