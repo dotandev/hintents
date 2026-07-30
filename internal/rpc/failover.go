@@ -75,10 +75,7 @@ func (c *Client) isHealthyLocked(url string) bool {
 	}
 	last := c.lastFailure[url]
 	// Circuit opens for configured timeout
-	if time.Since(last) > time.Duration(timeout)*time.Second {
-		return true
-	}
-	return false
+	return time.Since(last) > time.Duration(timeout)*time.Second
 }
 
 func (c *Client) markFailure(url string) {
