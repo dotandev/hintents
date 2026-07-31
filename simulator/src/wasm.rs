@@ -28,7 +28,11 @@ impl std::fmt::Display for WasmLoadError {
                 write!(f, "WASM too large: {} bytes (limit {})", size, limit)
             }
             WasmLoadError::DataSectionTooLarge { size, limit } => {
-                write!(f, "WASM data section too large: {} bytes (limit {})", size, limit)
+                write!(
+                    f,
+                    "WASM data section too large: {} bytes (limit {})",
+                    size, limit
+                )
             }
         }
     }
@@ -129,9 +133,11 @@ mod tests {
     fn test_validate_data_section_size_exceeds_limit() {
         // Create a WASM with a data section larger than MAX_DATA_SECTION_SIZE
         let large_data = vec![0u8; MAX_DATA_SECTION_SIZE + 1];
-        let data_str = format!("(module (data (i32.const 0) \"{}\"))", 
-            String::from_utf8_lossy(&large_data[..MAX_DATA_SECTION_SIZE]));
-        
+        let data_str = format!(
+            "(module (data (i32.const 0) \"{}\"))",
+            String::from_utf8_lossy(&large_data[..MAX_DATA_SECTION_SIZE])
+        );
+
         // This test is limited by the fact that we can't easily create a WASM
         // with an actual oversized data section using wat::parse_str due to
         // string literal limitations. The validation logic is tested indirectly
@@ -142,15 +148,15 @@ mod tests {
     fn test_load_wasm_with_valid_data_section() {
         // Test that loading a WASM with valid data section works
         let wasm = wat::parse_str(r#"(module (data (i32.const 0) "test"))"#).unwrap();
-        
+
         // Write to a temp file and load it
         let temp_dir = std::env::temp_dir();
         let temp_file = temp_dir.join("test_wasm.wasm");
         std::fs::write(&temp_file, &wasm).unwrap();
-        
+
         let result = load_wasm_from_path(temp_file.to_str().unwrap());
         assert!(result.is_ok());
-        
+
         // Cleanup
         std::fs::remove_file(temp_file).ok();
     }
