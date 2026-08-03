@@ -267,8 +267,7 @@ mod tests {
         // Write using same logic as emit_chunk_raw / flush_chunk
         write!(
             raw_buf,
-            r#"{{"type":"chunk","seq":{},"total":{},"data":""#,
-            seq, total
+            r#"{{"type":"chunk","seq":{seq},"total":{total},"data":""#
         )
         .unwrap();
         for &b in data {

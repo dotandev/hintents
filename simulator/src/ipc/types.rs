@@ -149,10 +149,11 @@ impl<W: Write> ResponseStreamer<W> {
 
     fn flush_chunk(&mut self) -> Result<(), IpcError> {
         let data_bytes = core::mem::take(&mut self.buffer);
+        let seq = self.seq;
+        let total = self.total_chunks;
         write!(
             self.writer,
-            r#"{{"type":"chunk","seq":{},"total":{},"data":""#,
-            self.seq, self.total_chunks
+            r#"{{"type":"chunk","seq":{seq},"total":{total},"data":""#
         )?;
         for &b in &data_bytes {
             match b {
@@ -191,27 +192,30 @@ pub fn emit_chunk_raw(seq: u32, total: u32, data: &[u8]) {
     let mut handle = stdout.lock();
     let res = write!(
         handle,
-        r#"{{"type":"chunk","seq":{},"total":{},"data":""#,
-        seq, total
-    )
-    .and_then(|_| {
+        r#"{{"type":"chunk","seq":{seq},"total":{total},"data":""#
+    );
+    if res.is_ok() {
         for &b in data {
-            match b {
-                b'"' => handle.write_all(b"\\\"")?,
-                b'\\' => handle.write_all(b"\\\\")?,
-                0x08 => handle.write_all(b"\\b")?,
-                0x0C => handle.write_all(b"\\f")?,
-                b'\n' => handle.write_all(b"\\n")?,
-                b'\r' => handle.write_all(b"\\r")?,
-                b'\t' => handle.write_all(b"\\t")?,
-                0x20..=0x7E => handle.write_all(&[b])?,
-                _ => write!(handle, "\\u{:04x}", b)?,
+            let r = match b {
+                b'"' => handle.write_all(b"\\\""),
+                b'\\' => handle.write_all(b"\\\\"),
+                0x08 => handle.write_all(b"\\b"),
+                0x0C => handle.write_all(b"\\f"),
+                b'\n' => handle.write_all(b"\\n"),
+                b'\r' => handle.write_all(b"\\r"),
+                b'\t' => handle.write_all(b"\\t"),
+                0x20..=0x7E => handle.write_all(&[b]),
+                _ => write!(handle, "\\u{:04x}", b),
+            };
+            if r.is_err() {
+                eprintln!("bridge: failed to emit chunk frame (seq={seq})");
+                return;
             }
         }
-        Ok(())
-    })
-    .and_then(|_| writeln!(handle, "\"}}"));
-    if res.is_err() {
+        if writeln!(handle, "\"}}").is_err() {
+            eprintln!("bridge: failed to emit chunk frame (seq={seq})");
+        }
+    } else {
         eprintln!("bridge: failed to emit chunk frame (seq={seq})");
     }
 }

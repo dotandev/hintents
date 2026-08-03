@@ -79,7 +79,7 @@ jobs:
             ${{ runner.os }}-cargo-fuzz-
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        run: cargo install cargo-fuzz --locked --force
 
       - name: Reclaim runner temp space before fuzz build
         run: bash ./scripts/ci-clean-build-space.sh

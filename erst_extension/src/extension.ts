@@ -7,6 +7,11 @@ import { TraceTreeDataProvider, TraceItem } from './traceTreeView';
 import { buildTraceTreeExport, renderStandaloneHtml } from './traceExport';
 import { SorobanCodeLensProvider } from './providers/codeLensProvider';
 import { TraceHoverProvider } from './providers/hoverProvider';
+import {
+    ERST_DEBUG_TYPE,
+    ERSTDebugAdapterFactory,
+    ERSTDebugConfigurationProvider,
+} from './dap/adapter';
 
 export function activate(context: vscode.ExtensionContext) {
     const client = new ERSTClient('127.0.0.1', 8080);
@@ -171,6 +176,26 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // =========================================
+    // DAP Debug Adapter Registration
+    // =========================================
+
+    // Register the inline debug adapter factory for the "erst" debug type.
+    // This enables VS Code's native step-through debugging of Soroban
+    // transaction traces via the Debug Adapter Protocol.
+    const debugAdapterFactory = new ERSTDebugAdapterFactory();
+    const debugAdapterDisposable = vscode.debug.registerDebugAdapterDescriptorFactory(
+        ERST_DEBUG_TYPE,
+        debugAdapterFactory
+    );
+
+    // Register the debug configuration provider for launch configs.
+    const debugConfigProvider = new ERSTDebugConfigurationProvider();
+    const debugConfigDisposable = vscode.debug.registerDebugConfigurationProvider(
+        ERST_DEBUG_TYPE,
+        debugConfigProvider
+    );
+
     context.subscriptions.push(
         triggerDebugDisposable,
         selectTraceStepDisposable,
@@ -182,6 +207,8 @@ export function activate(context: vscode.ExtensionContext) {
         hoverProviderDisposable,
         nextStepDisposable,
         prevStepDisposable,
+        debugAdapterDisposable,
+        debugConfigDisposable,
         codeLensDisposable,
         runSorobanFunctionDisposable,
         client

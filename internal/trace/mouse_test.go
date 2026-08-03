@@ -4,10 +4,36 @@
 package trace
 
 import (
+	"io"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+// captureStdout temporarily redirects os.Stdout to a pipe, runs fn, and
+// returns everything written to it during that call.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	fn()
+
+	_ = w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("failed to read captured stdout: %v", err)
+	}
+	_ = r.Close()
+	return string(out)
+}
 
 func TestMouseTracker_Enable(t *testing.T) {
 	mt := NewMouseTracker()
@@ -35,6 +61,45 @@ func TestMouseTracker_Disable(t *testing.T) {
 	// Should be idempotent
 	err = mt.Disable()
 	assert.NoError(t, err)
+	assert.False(t, mt.enabled)
+}
+
+func TestMouseTracker_Enable_NoRawEscapesWhenAnsiUnsupported(t *testing.T) {
+	// NO_COLOR forces ansiOutputSupported() to false regardless of
+	// platform or tty state (see ansi.go), giving a deterministic way to
+	// exercise the safe-fallback path that fixes #1719: without this
+	// guard, Enable() would print raw sequences like "^[[?1000h" on a
+	// terminal that can't interpret them (e.g. legacy Windows cmd.exe).
+	t.Setenv("NO_COLOR", "1")
+
+	mt := NewMouseTracker()
+	out := captureStdout(t, func() {
+		err := mt.Enable()
+		assert.NoError(t, err)
+	})
+
+	assert.NotContains(t, out, "\x1b[?1000h")
+	assert.NotContains(t, out, "\x1b[?1006h")
+	assert.NotContains(t, out, "\x1b[?1015h")
+	// The logical enabled/disabled state must still toggle correctly even
+	// when the raw escape sequences are suppressed.
+	assert.True(t, mt.enabled)
+}
+
+func TestMouseTracker_Disable_NoRawEscapesWhenAnsiUnsupported(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	mt := NewMouseTracker()
+	_ = mt.Enable()
+
+	out := captureStdout(t, func() {
+		err := mt.Disable()
+		assert.NoError(t, err)
+	})
+
+	assert.NotContains(t, out, "\x1b[?1000l")
+	assert.NotContains(t, out, "\x1b[?1006l")
+	assert.NotContains(t, out, "\x1b[?1015l")
 	assert.False(t, mt.enabled)
 }
 

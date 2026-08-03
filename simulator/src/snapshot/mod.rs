@@ -1,8 +1,6 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-#![allow(dead_code)]
-
 //! Ledger snapshot and storage loading utilities for Soroban simulation.
 //!
 //! This module provides reusable functionality for:
@@ -12,6 +10,10 @@
 //!
 //! These utilities can be shared across different Soroban tools that need
 //! to reconstruct ledger state for simulation or analysis purposes.
+
+#![allow(dead_code)]
+
+pub mod delta;
 
 use base64::Engine;
 use bincode::Options;
@@ -23,6 +25,8 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
+
+pub use delta::DeltaSnapshot;
 
 const SNAPSHOT_FORMAT_VERSION: u8 = 1;
 
@@ -442,6 +446,32 @@ impl LedgerSnapshot {
                 BaseStore::Mmap(m) => m.get(key),
             },
         }
+    }
+
+    /// Removes an entry from the snapshot by setting a tombstone in the delta layer.
+    ///
+    /// If the key does not exist in the base or delta, this is a no-op.
+    #[allow(dead_code)]
+    pub fn delete(&mut self, key: &[u8]) {
+        Arc::make_mut(&mut self.delta).insert(key.to_vec(), None);
+    }
+
+    /// Computes the delta from `self` (before) to `after`.
+    ///
+    /// The returned [`DeltaSnapshot`] contains only the entries that differ
+    /// between the two snapshots. Applying the delta via [`apply_delta`]
+    /// reproduces the `after` state from `self`.
+    #[allow(dead_code)]
+    pub fn compute_delta(&self, after: &LedgerSnapshot) -> DeltaSnapshot {
+        DeltaSnapshot::compute(self, after)
+    }
+
+    /// Applies a [`DeltaSnapshot`] to `self`, producing a new full snapshot.
+    ///
+    /// Equivalent to calling `delta.apply_to(self)`.
+    #[allow(dead_code)]
+    pub fn apply_delta(&self, delta: &DeltaSnapshot) -> LedgerSnapshot {
+        delta.apply_to(self)
     }
 
     /// Creates a forked snapshot optimized for sharing read-only state.
@@ -993,6 +1023,120 @@ mod tests {
         assert!(diff.deleted.is_empty());
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ------------------------------------------------------------------
+    // compute_delta / apply_delta integration tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_ledger_snapshot_compute_delta_no_changes() {
+        let mut snap = LedgerSnapshot::new();
+        snap.insert(vec![1], create_dummy_ledger_entry());
+        let delta = snap.compute_delta(&snap);
+        assert!(delta.is_empty());
+    }
+
+    #[test]
+    fn test_ledger_snapshot_compute_delta_inserted() {
+        let before = LedgerSnapshot::new();
+        let mut after = LedgerSnapshot::new();
+        after.insert(vec![1, 2], create_dummy_ledger_entry());
+
+        let delta = before.compute_delta(&after);
+        assert_eq!(delta.inserted.len(), 1);
+        assert!(delta.inserted.contains_key(&vec![1, 2]));
+    }
+
+    #[test]
+    fn test_ledger_snapshot_compute_delta_modified() {
+        let mut before = LedgerSnapshot::new();
+        before.insert(vec![1], create_dummy_ledger_entry());
+        let mut after = LedgerSnapshot::new();
+        // Insert a different entry under the same key
+        let mut different = create_dummy_ledger_entry();
+        use soroban_env_host::xdr::{LedgerEntryData, SequenceNumber};
+        if let LedgerEntryData::Account(ref mut acc) = different.data {
+            acc.balance = 9999;
+            acc.seq_num = SequenceNumber(99);
+        }
+        after.insert(vec![1], different);
+
+        let delta = before.compute_delta(&after);
+        assert!(delta.inserted.is_empty());
+        assert_eq!(delta.modified.len(), 1);
+        assert!(delta.modified.contains_key(&vec![1]));
+    }
+
+    #[test]
+    fn test_ledger_snapshot_compute_delta_deleted() {
+        let mut before = LedgerSnapshot::new();
+        before.insert(vec![1], create_dummy_ledger_entry());
+        let after = LedgerSnapshot::new();
+
+        let delta = before.compute_delta(&after);
+        assert_eq!(delta.deleted, vec![vec![1]]);
+    }
+
+    #[test]
+    fn test_ledger_snapshot_apply_delta_full_round_trip() {
+        let mut before = LedgerSnapshot::new();
+        before.insert(vec![1], create_dummy_ledger_entry());
+        before.insert(vec![2], create_dummy_ledger_entry());
+
+        let mut after = LedgerSnapshot::new();
+        after.insert(vec![2], create_dummy_ledger_entry()); // same as before
+        after.insert(vec![3], create_dummy_ledger_entry()); // inserted
+
+        let delta = before.compute_delta(&after);
+        let reconstructed = before.apply_delta(&delta);
+
+        assert_eq!(reconstructed.len(), 2);
+        assert!(reconstructed.get(&[1]).is_none()); // deleted
+        assert!(reconstructed.get(&[2]).is_some()); // preserved
+        assert!(reconstructed.get(&[3]).is_some()); // inserted
+    }
+
+    #[test]
+    fn test_ledger_snapshot_apply_delta_on_forked_snapshot() {
+        // Verify apply_delta works correctly on a forked (COW merged) snapshot.
+        let mut base = LedgerSnapshot::new();
+        base.insert(vec![1], create_dummy_ledger_entry());
+        base.insert(vec![2], create_dummy_ledger_entry());
+
+        // Fork and add changes on the fork.
+        let mut fork = base.fork();
+        fork.insert(vec![3], create_dummy_ledger_entry());
+
+        // Compute delta from base to fork.
+        let delta = base.compute_delta(&fork);
+        assert_eq!(delta.inserted.len(), 1);
+        assert!(delta.inserted.contains_key(&vec![3]));
+
+        // Apply delta to original base — should match fork.
+        let reconstructed = base.apply_delta(&delta);
+        assert_eq!(reconstructed.len(), fork.len());
+        assert!(reconstructed.get(&[1]).is_some());
+        assert!(reconstructed.get(&[2]).is_some());
+        assert!(reconstructed.get(&[3]).is_some());
+    }
+
+    #[test]
+    fn test_ledger_snapshot_delete_entry() {
+        let mut snapshot = LedgerSnapshot::new();
+        snapshot.insert(vec![1], create_dummy_ledger_entry());
+        assert_eq!(snapshot.len(), 1);
+
+        snapshot.delete(&[1]);
+        assert_eq!(snapshot.len(), 0);
+        assert!(snapshot.get(&[1]).is_none());
+    }
+
+    #[test]
+    fn test_ledger_snapshot_delete_non_existent_is_noop() {
+        let mut snapshot = LedgerSnapshot::new();
+        snapshot.delete(&[99]); // should not panic
+        assert!(snapshot.is_empty());
     }
 
     // Helper function to create a dummy ledger entry for testing

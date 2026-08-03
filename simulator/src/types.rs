@@ -57,6 +57,11 @@ pub struct SimulationRequest {
     pub include_linear_memory: bool,
     #[serde(default)]
     pub enable_asset_safety: bool,
+    /// Optional path to write a pprof-compatible CPU profile (protobuf format).
+    /// When set, the simulator profiles its own execution and writes the result
+    /// to this path as a `.pb` file viewable with `go tool pprof`.
+    #[serde(default)]
+    pub pprof_output_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -101,6 +106,9 @@ pub struct SimulationResponse {
     pub linear_memory_dump: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub asset_anomalies: Vec<AssetAnomaly>,
+    /// Base64-encoded pprof protobuf data when `pprof_output_path` is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pprof_profile: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

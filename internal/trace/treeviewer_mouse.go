@@ -209,8 +209,7 @@ func (tv *TreeViewerWithMouse) getTraceRoot() *TraceNode {
 
 // renderView clears and renders the current view
 func (tv *TreeViewerWithMouse) renderView() {
-	// Clear screen
-	_, _ = fmt.Print("\x1b[2J\x1b[H") //nolint:errcheck // Terminal output, write failure is non-critical
+	tv.clearScreen()
 
 	// Render header
 	_, _ = fmt.Printf("ERST Interactive Trace Tree Viewer (Mouse Support Enabled)\n")                  //nolint:errcheck // Terminal output, write failure is non-critical
@@ -224,6 +223,24 @@ func (tv *TreeViewerWithMouse) renderView() {
 	_, _ = fmt.Print("\n─────────────────────────────────────────────────────────\n")                                                   //nolint:errcheck // Terminal output, write failure is non-critical
 	_, _ = fmt.Print("Controls: n=next-step | ↑↓/kj=navigate | Space/Enter=expand | e=expand-all | c=collapse-all | h=help | q=quit\n") //nolint:errcheck // Terminal output, write failure is non-critical
 	_, _ = fmt.Print(tv.renderCurrentStateView())                                                                                       //nolint:errcheck // Terminal output, write failure is non-critical
+}
+
+// clearScreen clears the terminal before a redraw. On a VT-capable
+// terminal this uses the standard "clear + move cursor home" escape
+// sequence; on a terminal where that isn't safe (e.g. legacy Windows
+// cmd.exe without ENABLE_VIRTUAL_TERMINAL_PROCESSING) it instead scrolls
+// the previous frame off-screen with blank lines, which every terminal
+// handles correctly without printing raw escape-code text.
+func (tv *TreeViewerWithMouse) clearScreen() {
+	if !ansiOutputSupported() {
+		height := tv.screenHeight
+		if height <= 0 {
+			height = 24
+		}
+		_, _ = fmt.Print(strings.Repeat("\n", height)) //nolint:errcheck // Terminal output, write failure is non-critical
+		return
+	}
+	_, _ = fmt.Print("\x1b[2J\x1b[H") //nolint:errcheck // Terminal output, write failure is non-critical
 }
 
 // showHelp displays help information
@@ -324,13 +341,19 @@ func (tv *TreeViewerWithMouse) saveTerminalState() (string, error) {
 func (tv *TreeViewerWithMouse) restoreTerminalState(state string) error {
 	// Restore terminal settings
 	// In production, would use stty
-	_, _ = fmt.Print("\x1b[?25h") // Show cursor
+	if ansiOutputSupported() {
+		_, _ = fmt.Print("\x1b[?25h") // Show cursor
+	}
 	return nil
 }
 
 func (tv *TreeViewerWithMouse) enableRawMode() error {
 	// Enable raw mode using stty-like behavior
-	// Hide cursor
-	_, _ = fmt.Print("\x1b[?25l") //nolint:errcheck // Terminal output, write failure is non-critical
+	// Hide cursor -- only where the escape sequence will actually be
+	// interpreted; otherwise leaving the cursor visible is a harmless,
+	// safe fallback (see ansi.go).
+	if ansiOutputSupported() {
+		_, _ = fmt.Print("\x1b[?25l") //nolint:errcheck // Terminal output, write failure is non-critical
+	}
 	return nil
 }
