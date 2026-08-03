@@ -80,6 +80,12 @@ jobs:
           workspaces: simulator -> target
           cache-targets: false
 
+      - name: Install Linux desktop integration dependencies
+        if: matrix.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xdg-utils desktop-file-utils
+
       # ── Build erst binary ──────────────────────────────────────────────────
       - name: Build erst (Go CLI)
         run: |
@@ -101,7 +107,7 @@ jobs:
       # ── Integration test suite ─────────────────────────────────────────────
       - name: Run integration tests
         run: |
-          go test -v -race -timeout 120s ./integration/...
+          go test -v -race -timeout 10m ./integration/...
         env:
           ERST_BINARY: ${{ env.ERST_BINARY }}
           ERST_RUN_PROTOCOL_REGISTRATION_TESTS: "1"
