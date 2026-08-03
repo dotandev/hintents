@@ -21,23 +21,23 @@ import (
 
 // InteractiveViewer provides a terminal-based interactive trace navigation interface
 type InteractiveViewer struct {
-	trace       *ExecutionTrace
-	reader      *bufio.Reader
-	eventFilter string   // one of EventTypeTrap, EventTypeContractCall, EventTypeHostFunction, EventTypeAuth, or ""
-	filterCycle []string // order for cycling: off, trap, contract_call, host_function, auth
-	hideStdLib  bool
-	forked      bool
-	forkStep    int
-	forkParams  map[string]string
-	trap        *TrapInfo
-	dwarfParser *dwarf.Parser
-	navHistory  *NavigatorHistory // undo stack for Ctrl+Z navigation
-	stateMu     sync.RWMutex
-	stateCache  map[int]*ExecutionState
-	fetching    map[int]bool
-	fetchErr    map[int]string
-	fetchCh     chan fetchedState
-	fetchDelay  time.Duration
+	trace        *ExecutionTrace
+	reader       *bufio.Reader
+	eventFilter  string   // one of EventTypeTrap, EventTypeContractCall, EventTypeHostFunction, EventTypeAuth, or ""
+	filterCycle  []string // order for cycling: off, trap, contract_call, host_function, auth
+	hideStdLib   bool
+	forked       bool
+	forkStep     int
+	forkParams   map[string]string
+	trap         *TrapInfo
+	dwarfParser  *dwarf.Parser
+	navHistory   *NavigatorHistory // undo stack for Ctrl+Z navigation
+	stateMu      sync.RWMutex
+	stateCache   map[int]*ExecutionState
+	fetching     map[int]bool
+	fetchErr     map[int]string
+	fetchCh      chan fetchedState
+	fetchDelay   time.Duration
 	searchEngine *SearchEngine
 }
 
@@ -50,15 +50,15 @@ type fetchedState struct {
 // NewInteractiveViewer creates a new interactive trace viewer
 func NewInteractiveViewer(trace *ExecutionTrace) *InteractiveViewer {
 	viewer := &InteractiveViewer{
-		trace:       trace,
-		reader:      bufio.NewReader(os.Stdin),
-		eventFilter: "",
-		filterCycle: []string{"", EventTypeTrap, EventTypeContractCall, EventTypeHostFunction, EventTypeAuth},
-		navHistory:  NewNavigatorHistory(),
-		stateCache:  make(map[int]*ExecutionState),
-		fetching:    make(map[int]bool),
-		fetchErr:    make(map[int]string),
-		fetchCh:     make(chan fetchedState, 32),
+		trace:        trace,
+		reader:       bufio.NewReader(os.Stdin),
+		eventFilter:  "",
+		filterCycle:  []string{"", EventTypeTrap, EventTypeContractCall, EventTypeHostFunction, EventTypeAuth},
+		navHistory:   NewNavigatorHistory(),
+		stateCache:   make(map[int]*ExecutionState),
+		fetching:     make(map[int]bool),
+		fetchErr:     make(map[int]string),
+		fetchCh:      make(chan fetchedState, 32),
 		searchEngine: NewSearchEngine(),
 	}
 
@@ -72,15 +72,15 @@ func NewInteractiveViewer(trace *ExecutionTrace) *InteractiveViewer {
 // NewInteractiveViewerWithWASM creates a new interactive trace viewer with WASM data for local variable inspection
 func NewInteractiveViewerWithWASM(trace *ExecutionTrace, wasmData []byte) *InteractiveViewer {
 	viewer := &InteractiveViewer{
-		trace:       trace,
-		reader:      bufio.NewReader(os.Stdin),
-		eventFilter: "",
-		filterCycle: []string{"", EventTypeTrap, EventTypeContractCall, EventTypeHostFunction, EventTypeAuth},
-		navHistory:  NewNavigatorHistory(),
-		stateCache:  make(map[int]*ExecutionState),
-		fetching:    make(map[int]bool),
-		fetchErr:    make(map[int]string),
-		fetchCh:     make(chan fetchedState, 32),
+		trace:        trace,
+		reader:       bufio.NewReader(os.Stdin),
+		eventFilter:  "",
+		filterCycle:  []string{"", EventTypeTrap, EventTypeContractCall, EventTypeHostFunction, EventTypeAuth},
+		navHistory:   NewNavigatorHistory(),
+		stateCache:   make(map[int]*ExecutionState),
+		fetching:     make(map[int]bool),
+		fetchErr:     make(map[int]string),
+		fetchCh:      make(chan fetchedState, 32),
 		searchEngine: NewSearchEngine(),
 	}
 
