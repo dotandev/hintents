@@ -46,6 +46,20 @@ pub struct SnapshotPair {
     pub after: CapturedSnapshot,
 }
 
+impl SnapshotPair {
+    /// Creates a deep copy of this snapshot pair.
+    ///
+    /// Both the `before` and `after` states are fully materialized and share no
+    /// memory with the original pair. Useful for time-travel debugging where a
+    /// captured pair must survive the live simulation continuing to run.
+    pub fn deep_copy(&self) -> Self {
+        Self {
+            before: self.before.deep_copy(),
+            after: self.after.deep_copy(),
+        }
+    }
+}
+
 /// A single captured snapshot with metadata.
 #[derive(Debug, Clone)]
 pub struct CapturedSnapshot {
@@ -59,6 +73,25 @@ pub struct CapturedSnapshot {
     pub before_id: Option<SnapshotId>,
     /// Whether the host function trapped (only meaningful for After snapshots).
     pub trapped: bool,
+}
+
+impl CapturedSnapshot {
+    /// Creates a deep copy of this captured snapshot.
+    ///
+    /// The returned snapshot's `state` is a fully independent
+    /// [`LedgerSnapshot::deep_copy`] — it shares **no** memory with the
+    /// original and remains valid even as the live simulation mutates or drops
+    /// the captured snapshot. This is what time-travel debugging needs: a
+    /// perfect clone of the Host memory state at a given instruction pointer.
+    pub fn deep_copy(&self) -> Self {
+        Self {
+            id: self.id,
+            host_fn_name: self.host_fn_name.clone(),
+            state: self.state.deep_copy(),
+            before_id: self.before_id,
+            trapped: self.trapped,
+        }
+    }
 }
 
 /// Tracks allocator state across snapshot-and-rollback cycles.
@@ -297,13 +330,39 @@ impl HostSnapshotTracker {
     }
 
     /// Rewinds the tracker to a specific instruction pointer.
+    ///
+    /// Returns a **deep copy** of the state captured at the given instruction
+    /// pointer so time-travel debugging can freely mutate or hold onto the
+    /// result without affecting the tracker's own recorded snapshots (which
+    /// share their base via copy-on-write). Returns `None` if no snapshot was
+    /// captured at that instruction pointer.
     pub fn rewind_to(&mut self, instruction_pointer: u32) -> Option<LedgerSnapshot> {
         for pair in &self.pairs {
             if pair.before.id.as_u64() == instruction_pointer as u64 {
-                return Some(pair.before.state.clone());
+                return Some(pair.before.state.deep_copy());
             }
         }
         None
+    }
+
+    /// Rewinds the tracker to a specific instruction pointer, returning the
+    /// full captured snapshot metadata along with a deep copy of the state.
+    pub fn rewind_to_snapshot(&mut self, instruction_pointer: u32) -> Option<CapturedSnapshot> {
+        for pair in &self.pairs {
+            if pair.before.id.as_u64() == instruction_pointer as u64 {
+                return Some(pair.before.deep_copy());
+            }
+        }
+        None
+    }
+
+    /// Returns a deep copy of all captured snapshot pairs.
+    ///
+    /// Each pair's states are fully materialized and independent of the
+    /// tracker's internal snapshots, suitable for long-lived time-travel
+    /// debugging histories.
+    pub fn deep_copy_pairs(&self) -> Vec<SnapshotPair> {
+        self.pairs.iter().map(SnapshotPair::deep_copy).collect()
     }
 }
 
@@ -482,5 +541,116 @@ mod tests {
     fn test_snapshot_id_display() {
         let id = SnapshotId(42);
         assert_eq!(format!("{}", id), "snap-42");
+    }
+
+    #[test]
+    fn test_rewind_to_returns_deep_copy() {
+        let mut tracker = HostSnapshotTracker::new();
+        let mut state = LedgerSnapshot::new();
+        state.insert(vec![1], create_dummy_entry());
+
+        tracker.take_before_snapshot("storage_put", state, None);
+        let before_id = tracker.pending_before.as_ref().unwrap().id.as_u64() as u32;
+        tracker.take_after_snapshot(LedgerSnapshot::new(), false, None);
+
+        let rewound = tracker.rewind_to(before_id).expect("should rewind");
+        assert!(rewound.get(&[1]).is_some());
+
+        // Mutating the rewound copy must not affect the tracked snapshot.
+        let mut rewound_mut = rewound;
+        rewound_mut.insert(vec![2], create_dummy_entry());
+        assert_eq!(rewound_mut.len(), 2);
+        assert_eq!(tracker.pairs()[0].before.state.len(), 1);
+    }
+
+    #[test]
+    fn test_rewind_to_returns_none_for_unknown_pointer() {
+        let mut tracker = HostSnapshotTracker::new();
+        tracker.take_before_snapshot("fn", LedgerSnapshot::new(), None);
+        tracker.take_after_snapshot(LedgerSnapshot::new(), false, None);
+
+        assert!(tracker.rewind_to(9999).is_none());
+        assert!(tracker.rewind_to_snapshot(9999).is_none());
+    }
+
+    #[test]
+    fn test_rewind_to_snapshot_returns_metadata() {
+        let mut tracker = HostSnapshotTracker::new();
+        let mut state = LedgerSnapshot::new();
+        state.insert(vec![7], create_dummy_entry());
+
+        tracker.take_before_snapshot("storage_get", state, None);
+        let before_id = tracker.pending_before.as_ref().unwrap().id.as_u64() as u32;
+        tracker.take_after_snapshot(LedgerSnapshot::new(), false, None);
+
+        let captured = tracker
+            .rewind_to_snapshot(before_id)
+            .expect("should rewind");
+        assert_eq!(captured.host_fn_name, "storage_get");
+        assert_eq!(captured.before_id, None);
+        assert!(!captured.trapped);
+        assert!(captured.state.get(&[7]).is_some());
+    }
+
+    #[test]
+    fn test_deep_copy_pairs_is_independent() {
+        let mut tracker = HostSnapshotTracker::new();
+        tracker.take_before_snapshot("fn_a", LedgerSnapshot::new(), None);
+        tracker.take_after_snapshot(LedgerSnapshot::new(), false, None);
+
+        let copies = tracker.deep_copy_pairs();
+        assert_eq!(copies.len(), 1);
+        assert_eq!(copies[0].before.host_fn_name, "fn_a");
+        assert_eq!(copies[0].after.before_id, Some(copies[0].before.id));
+    }
+
+    #[test]
+    fn test_captured_snapshot_deep_copy_keeps_metadata() {
+        let mut state = LedgerSnapshot::new();
+        state.insert(vec![3], create_dummy_entry());
+        let captured = CapturedSnapshot {
+            id: SnapshotId(5),
+            host_fn_name: "storage_del".to_string(),
+            state,
+            before_id: Some(SnapshotId(4)),
+            trapped: true,
+        };
+
+        let copy = captured.deep_copy();
+        assert_eq!(copy.id, captured.id);
+        assert_eq!(copy.host_fn_name, captured.host_fn_name);
+        assert_eq!(copy.before_id, captured.before_id);
+        assert_eq!(copy.trapped, captured.trapped);
+        assert!(copy.state.get(&[3]).is_some());
+
+        // Independent state: mutating the copy leaves the original untouched.
+        let mut copy_mut = copy;
+        copy_mut.state.insert(vec![8], create_dummy_entry());
+        assert_eq!(copy_mut.state.len(), 2);
+        assert_eq!(captured.state.len(), 1);
+    }
+
+    /// Helper to build a small ledger entry for host.rs tests.
+    fn create_dummy_entry() -> soroban_env_host::xdr::LedgerEntry {
+        use soroban_env_host::xdr::{
+            AccountEntry, AccountId, LedgerEntry as LE, LedgerEntryData, PublicKey, SequenceNumber,
+            Thresholds, Uint256,
+        };
+        LE {
+            last_modified_ledger_seq: 1,
+            data: LedgerEntryData::Account(AccountEntry {
+                account_id: AccountId(PublicKey::PublicKeyTypeEd25519(Uint256([0u8; 32]))),
+                balance: 1000,
+                seq_num: SequenceNumber(1),
+                num_sub_entries: 0,
+                inflation_dest: None,
+                flags: 0,
+                home_domain: Default::default(),
+                thresholds: Thresholds([1, 0, 0, 0]),
+                signers: Default::default(),
+                ext: Default::default(),
+            }),
+            ext: Default::default(),
+        }
     }
 }

@@ -519,6 +519,46 @@ impl LedgerSnapshot {
             delta: Arc::new(HashMap::new()),
         }
     }
+
+    /// Creates a fully independent deep copy of this snapshot.
+    ///
+    /// Unlike [`clone()`](Self::clone) and [`fork()`](Self::fork) — which share
+    /// the immutable base layer via `Arc` (copy-on-write) — `deep_copy`
+    /// materializes every live entry into a brand-new in-memory base owned
+    /// exclusively by the returned snapshot. The result shares **no** memory
+    /// with `self`: mutating either snapshot afterwards can never affect the
+    /// other, and dropping one does not retain or release the other's entries.
+    ///
+    /// This is the primitive time-travel debugging needs: it produces a perfect,
+    /// standalone clone of the ledger/Host memory state captured at a given
+    /// instruction pointer, safe to hold onto and mutate independently while the
+    /// live simulation continues to evolve.
+    ///
+    /// # Cost
+    ///
+    /// `O(n)` in the number of live entries (base merged with delta), decoding
+    /// every entry eagerly. For read-only sharing, prefer [`clone()`](Self::clone)
+    /// or [`fork()`](Self::fork).
+    pub fn deep_copy(&self) -> Self {
+        let mut entries = match &self.base {
+            BaseStore::InMemory(m) => (**m).clone(),
+            BaseStore::Mmap(m) => m.decode_all(),
+        };
+        for (key, value) in self.delta.iter() {
+            match value {
+                Some(entry) => {
+                    entries.insert(key.clone(), entry.clone());
+                }
+                None => {
+                    entries.remove(key);
+                }
+            }
+        }
+        Self {
+            base: BaseStore::InMemory(Arc::new(entries)),
+            delta: Arc::new(HashMap::new()),
+        }
+    }
 }
 
 impl Default for LedgerSnapshot {
@@ -1137,6 +1177,101 @@ mod tests {
         let mut snapshot = LedgerSnapshot::new();
         snapshot.delete(&[99]); // should not panic
         assert!(snapshot.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // deep_copy tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_deep_copy_is_independent_after_insert() {
+        let mut original = LedgerSnapshot::new();
+        original.insert(vec![1], create_dummy_ledger_entry());
+
+        let copy = original.deep_copy();
+
+        // Mutating the copy must not affect the original...
+        let mut copy_mut = copy;
+        copy_mut.insert(vec![2], create_dummy_ledger_entry());
+        assert_eq!(copy_mut.len(), 2);
+        assert!(copy_mut.get(&[2]).is_some());
+
+        // ...and the original is untouched.
+        assert_eq!(original.len(), 1);
+        assert!(original.get(&[2]).is_none());
+    }
+
+    #[test]
+    fn test_deep_copy_merges_delta_and_tombstones() {
+        let mut original = LedgerSnapshot::new();
+        original.insert(vec![1], create_dummy_ledger_entry());
+        original.insert(vec![2], create_dummy_ledger_entry());
+
+        // Modify one entry and delete another so the copy has a non-empty delta.
+        let mut different = create_dummy_ledger_entry();
+        use soroban_env_host::xdr::{LedgerEntryData, SequenceNumber};
+        if let LedgerEntryData::Account(ref mut acc) = different.data {
+            acc.balance = 5555;
+        }
+        original.insert(vec![1], different);
+        original.delete(&[2]);
+
+        let copy = original.deep_copy();
+        // Copy has an empty delta: materialized base only.
+        assert_eq!(copy.len(), 1);
+        assert!(copy.get(&[1]).is_some());
+        assert!(copy.get(&[2]).is_none());
+
+        // The copy reflects the merged state at capture time.
+        let entry = copy.get(&[1]).expect("modified entry present");
+        use soroban_env_host::xdr::LedgerEntryData as LedData;
+        match entry.data {
+            LedData::Account(ref acc) => assert_eq!(acc.balance, 5555),
+            _ => panic!("unexpected entry type"),
+        }
+    }
+
+    #[test]
+    fn test_deep_copy_matches_iter_and_can_restore() {
+        let mut original = LedgerSnapshot::new();
+        original.insert(vec![1], create_dummy_ledger_entry());
+        original.insert(vec![2], create_dummy_ledger_entry());
+
+        let copy = original.deep_copy();
+
+        // Same number of live entries and identical content.
+        assert_eq!(copy.len(), original.len());
+        for (key, entry) in original.iter() {
+            let expected = entry.to_xdr(Limits::none()).unwrap();
+            let actual = copy.get(&key).unwrap().to_xdr(Limits::none()).unwrap();
+            assert_eq!(actual, expected, "entry mismatch for key {key:?}");
+        }
+    }
+
+    #[test]
+    fn test_deep_copy_of_mmap_snapshot_materializes() {
+        let mut snapshot = LedgerSnapshot::new();
+        for i in 0..3u8 {
+            snapshot.insert(vec![i], create_dummy_ledger_entry());
+        }
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("hintents-mmap-deepcopy-{}.bin", std::process::id()));
+        snapshot.to_mmap_file(&path).expect("write failed");
+        let mmap_snapshot = LedgerSnapshot::from_mmap_file(&path).expect("load failed");
+
+        let copy = mmap_snapshot.deep_copy();
+        assert_eq!(copy.len(), 3);
+        assert!(copy.get(&[0]).is_some());
+        assert!(copy.get(&[1]).is_some());
+        assert!(copy.get(&[2]).is_some());
+
+        // The copy is fully independent of the mmap-backed original.
+        let mut copy_mut = copy;
+        copy_mut.insert(vec![9], create_dummy_ledger_entry());
+        assert_eq!(copy_mut.len(), 4);
+        assert_eq!(mmap_snapshot.len(), 3);
+
+        let _ = std::fs::remove_file(&path);
     }
 
     // Helper function to create a dummy ledger entry for testing
