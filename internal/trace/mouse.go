@@ -44,11 +44,19 @@ func (mt *MouseTracker) Enable() error {
 		return nil
 	}
 
-	// Enable mouse tracking: report button presses and release
-	// SGR1006 mode for better compatibility
-	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1000h") // Enable basic mouse reporting
-	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1006h") // Enable SGR mode (extended coordinates)
-	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1015h") // Enable URXVT mode
+	// Mouse-reporting private modes have no meaning outside a VT-capable
+	// terminal; on e.g. legacy Windows cmd.exe they would otherwise print
+	// as raw text like "^[[?1000h". Skip emitting them there -- the
+	// viewer still works fully via the keyboard -- but still record the
+	// tracker as logically enabled/disabled so callers (and existing
+	// tests) that only check that state see the expected toggling.
+	if ansiOutputSupported() {
+		// Enable mouse tracking: report button presses and release
+		// SGR1006 mode for better compatibility
+		_, _ = fmt.Fprint(os.Stdout, "\x1b[?1000h") // Enable basic mouse reporting
+		_, _ = fmt.Fprint(os.Stdout, "\x1b[?1006h") // Enable SGR mode (extended coordinates)
+		_, _ = fmt.Fprint(os.Stdout, "\x1b[?1015h") // Enable URXVT mode
+	}
 
 	mt.enabled = true
 	return nil
@@ -60,10 +68,12 @@ func (mt *MouseTracker) Disable() error {
 		return nil
 	}
 
-	// Disable all mouse tracking modes
-	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1000l") // Disable basic mouse reporting
-	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1006l") // Disable SGR mode
-	_, _ = fmt.Fprint(os.Stdout, "\x1b[?1015l") // Disable URXVT mode
+	if ansiOutputSupported() {
+		// Disable all mouse tracking modes
+		_, _ = fmt.Fprint(os.Stdout, "\x1b[?1000l") // Disable basic mouse reporting
+		_, _ = fmt.Fprint(os.Stdout, "\x1b[?1006l") // Disable SGR mode
+		_, _ = fmt.Fprint(os.Stdout, "\x1b[?1015l") // Disable URXVT mode
+	}
 
 	mt.enabled = false
 	return nil

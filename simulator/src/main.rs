@@ -10,6 +10,8 @@ mod events;
 mod gas_optimizer;
 mod git_detector;
 mod ipc;
+mod memory;
+mod profiler;
 mod runner;
 mod snapshot;
 mod source_map_cache;
@@ -24,11 +26,9 @@ use crate::source_mapper::SourceMapper;
 use crate::stack_trace::WasmStackTrace;
 use crate::types::*;
 use base64::Engine as _;
+use soroban_env_host::xdr::{Operation, OperationBody};
 use soroban_env_host::xdr::{ReadXdr, WriteXdr};
-use soroban_env_host::{
-    xdr::{Operation, OperationBody},
-    Host, HostError,
-};
+use std::any::Any;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -77,6 +77,7 @@ fn send_error(msg: String) {
         wasm_offset: None,
         linear_memory_dump: None,
         asset_anomalies: vec![],
+        pprof_profile: None,
     };
     if let Ok(json) = serde_json::to_string(&res) {
         println!("{}", json);
@@ -85,6 +86,88 @@ fn send_error(msg: String) {
         println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
     }
     std::process::exit(1);
+}
+
+fn panic_info_to_string(panic_info: &(dyn Any + Send)) -> String {
+    if let Some(s) = panic_info.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = panic_info.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "Unknown panic".to_string()
+    }
+}
+
+fn catch_unwind_safe<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> T,
+{
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .map_err(|panic_info| panic_info_to_string(&panic_info))
+}
+
+fn emit_panic_response(
+    panic_msg: String,
+    source_mapper: Option<&SourceMapper>,
+    harness_logs: &[String],
+    lcov_report: &Option<String>,
+    lcov_report_path: &Option<String>,
+) {
+    let mut wasm_trace = WasmStackTrace::from_panic(&panic_msg);
+    if let Some(mapper) = source_mapper {
+        eprintln!("Attempting to resolve sources for Panic trace...");
+        wasm_trace.resolve_sources(mapper);
+        if wasm_trace
+            .frames
+            .iter()
+            .any(|f| f.source_location.is_some())
+        {
+            eprintln!("Source locations resolved for Panic trace.");
+        } else {
+            eprintln!("No source locations resolved for Panic trace.");
+        }
+    }
+
+    let memory_limit_exceeded = panic_msg.contains(ERR_MEMORY_LIMIT_EXCEEDED);
+
+    let response = SimulationResponse {
+        status: "error".to_string(),
+        error: Some(if memory_limit_exceeded {
+            panic_msg.clone()
+        } else {
+            format!("Simulator panicked: {panic_msg}")
+        }),
+        error_code: if memory_limit_exceeded {
+            Some(ERR_MEMORY_LIMIT_EXCEEDED.to_string())
+        } else {
+            None
+        },
+        lcov_report: lcov_report.clone(),
+        lcov_report_path: lcov_report_path.clone(),
+        events: vec![],
+        diagnostic_events: vec![],
+        categorized_events: vec![],
+        logs: {
+            let mut logs = vec![format!("PANIC: {panic_msg}")];
+            logs.extend_from_slice(harness_logs);
+            logs
+        },
+        flamegraph: None,
+        optimization_report: None,
+        budget_usage: None,
+        source_location: None,
+        stack_trace: Some(wasm_trace),
+        wasm_offset: None,
+        linear_memory_dump: None,
+        asset_anomalies: vec![],
+        pprof_profile: None,
+    };
+    if let Ok(json) = serde_json::to_string(&response) {
+        println!("{}", json);
+    } else {
+        eprintln!("Failed to serialize panic response");
+        println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+    }
 }
 
 #[derive(Default)]
@@ -141,19 +224,6 @@ fn generate_lcov_report(coverage: &CoverageTracker, source_file: &str) -> String
     report
 }
 
-fn check_memory_limit_or_panic(host: &Host, memory_limit: Option<u64>) {
-    if let Some(limit) = memory_limit {
-        if let Ok(mem_bytes) = host.budget_cloned().get_mem_bytes_consumed() {
-            if mem_bytes > limit {
-                panic!(
-                    "{}: consumed {} bytes, limit {} bytes",
-                    ERR_MEMORY_LIMIT_EXCEEDED, mem_bytes, limit
-                );
-            }
-        }
-    }
-}
-
 fn load_ledger_entries(
     sim_host: &mut runner::SimHost,
     entries: &HashMap<String, String>,
@@ -173,14 +243,13 @@ fn load_ledger_entries(
 }
 
 fn execute_operations(
-    host: &Host,
+    sim_host: &runner::SimHost,
     operations: &[Operation],
     request: &SimulationRequest,
-    memory_limit: Option<u64>,
     coverage: &mut CoverageTracker,
-) -> Result<Vec<String>, HostError> {
+) -> Result<Vec<String>, crate::runner::SimHostError> {
     let mut logs = Vec::new();
-    check_memory_limit_or_panic(host, memory_limit);
+    sim_host.check_memory_limit();
     for op in operations {
         coverage.record_operation(op);
         match &op.body {
@@ -193,23 +262,25 @@ fn execute_operations(
                 {
                     logs.push(format!("Mock signature verification: {:?}", mock_result));
                     if !mock_result {
-                        return Err(soroban_env_host::HostError::from((
-                            soroban_env_host::xdr::ScErrorType::Context,
-                            soroban_env_host::xdr::ScErrorCode::InvalidInput,
-                        )));
+                        return Err(crate::runner::SimHostError::Host(
+                            soroban_env_host::HostError::from((
+                                soroban_env_host::xdr::ScErrorType::Context,
+                                soroban_env_host::xdr::ScErrorCode::InvalidInput,
+                            )),
+                        ));
                     }
                 }
 
-                let val = host.invoke_function(invoke_op.host_function.clone())?;
+                let val = sim_host.invoke_function(invoke_op.host_function.clone())?;
                 logs.push(format!("Result: {val:?}"));
-                check_memory_limit_or_panic(host, memory_limit);
+                sim_host.check_memory_limit();
             }
             _ => {
                 logs.push(format!(
                     "Skipping non-Soroban operation: {:?}",
                     op.body.name()
                 ));
-                check_memory_limit_or_panic(host, memory_limit);
+                sim_host.check_memory_limit();
             }
         }
     }
@@ -361,8 +432,13 @@ fn main() {
 
     tracing::info!(event = "simulator_started", "Simulator initializing...");
 
+    let mut pprof_guard = profiler::PprofGuard::start(99);
+
     let mut buffer = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut buffer) {
+        let pprof_b64 = pprof_guard
+            .stop()
+            .map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes));
         let res = SimulationResponse {
             status: "error".to_string(),
             error: Some(format!("Failed to read stdin: {e}")),
@@ -381,6 +457,7 @@ fn main() {
             wasm_offset: None,
             linear_memory_dump: None,
             asset_anomalies: vec![],
+            pprof_profile: pprof_b64,
         };
         tracing::error!("Failed to read stdin: {}", e);
         if let Ok(json) = serde_json::to_string(&res) {
@@ -395,6 +472,9 @@ fn main() {
     let request: SimulationRequest = match serde_json::from_str(&buffer) {
         Ok(req) => req,
         Err(e) => {
+            let pprof_b64 = pprof_guard
+                .stop()
+                .map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes));
             let res = SimulationResponse {
                 status: "error".to_string(),
                 error: Some(format!("Invalid JSON: {e}")),
@@ -413,6 +493,7 @@ fn main() {
                 wasm_offset: None,
                 linear_memory_dump: None,
                 asset_anomalies: vec![],
+                pprof_profile: pprof_b64,
             };
             println!(
                 "{}",
@@ -566,18 +647,30 @@ fn main() {
     // Wrap the operation execution in panic protection
     let mut coverage = CoverageTracker::default();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        execute_operations(
-            host,
-            operations,
-            &request,
-            request.memory_limit,
-            &mut coverage,
-        )
+        execute_operations(&sim_host, operations, &request, &mut coverage)
     }));
 
-    let budget = host.budget_cloned();
-    let cpu_insns = budget.get_cpu_insns_consumed().unwrap_or(0);
-    let mem_bytes = budget.get_mem_bytes_consumed().unwrap_or(0);
+    let mut lcov_report = None;
+    let mut lcov_report_path = None;
+
+    let (budget, cpu_insns, mem_bytes) = match catch_unwind_safe(|| {
+        let budget = host.budget_cloned();
+        let cpu_insns = budget.get_cpu_insns_consumed().unwrap_or(0);
+        let mem_bytes = budget.get_mem_bytes_consumed().unwrap_or(0);
+        (budget, cpu_insns, mem_bytes)
+    }) {
+        Ok(values) => values,
+        Err(panic_msg) => {
+            emit_panic_response(
+                panic_msg,
+                source_mapper.as_ref(),
+                &harness_logs,
+                &lcov_report,
+                &lcov_report_path,
+            );
+            return;
+        }
+    };
 
     let cpu_usage_percent = (cpu_insns as f64 / CPU_LIMIT as f64) * 100.0;
     let memory_usage_percent = (mem_bytes as f64 / MEMORY_LIMIT as f64) * 100.0;
@@ -604,6 +697,18 @@ fn main() {
         None
     };
 
+    let mut pprof_profile_b64 = None;
+    if let Some(ref output_path) = request.pprof_output_path {
+        if let Some(bytes) = pprof_guard.stop() {
+            if let Err(e) = profiler::write_file(&bytes, output_path.as_ref()) {
+                eprintln!("Failed to write pprof file: {e}");
+            } else {
+                tracing::info!(event = "pprof_written", path = %output_path, "pprof profile written");
+                pprof_profile_b64 = Some(base64::engine::general_purpose::STANDARD.encode(&bytes));
+            }
+        }
+    }
+
     let mut flamegraph_svg = None;
     if request.profile.unwrap_or(false) {
         let folded_data = format!("Total;CPU {}\nTotal;Memory {}\n", cpu_insns, mem_bytes);
@@ -621,8 +726,6 @@ fn main() {
         }
     }
 
-    let mut lcov_report = None;
-    let mut lcov_report_path = None;
     if request.enable_coverage {
         let source_file = request
             .wasm_path
@@ -649,8 +752,8 @@ fn main() {
             let mut asset_tracker = asset_tracker::AssetTracker::new(request.enable_asset_safety);
 
             let (events, diagnostic_events): (Vec<String>, Vec<DiagnosticEvent>) =
-                match sim_host.inner.get_events() {
-                    Ok(evs) => {
+                match catch_unwind_safe(|| sim_host.events().map_err(|err| format!("{err:?}"))) {
+                    Ok(Ok(evs)) => {
                         let mut raw_events: Vec<String> = Vec::with_capacity(evs.0.len());
                         let diag_events: Vec<DiagnosticEvent> = (evs.0)
                             .iter()
@@ -717,16 +820,52 @@ fn main() {
                             .collect();
                         (raw_events, diag_events)
                     }
-                    Err(_) => (
-                        vec!["Failed to retrieve events".to_string()],
-                        Vec::<DiagnosticEvent>::new(),
-                    ),
+                    Ok(Err(err_msg)) => {
+                        emit_panic_response(
+                            format!("Host event retrieval failed: {err_msg}"),
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                    Err(panic_msg) => {
+                        emit_panic_response(
+                            panic_msg,
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
                 };
 
-            let categorized_events = match host.get_events() {
-                Ok(evs) => categorize_events(&evs, Some(cpu_insns), Some(mem_bytes)),
-                Err(_) => vec![],
-            };
+            let categorized_events =
+                match catch_unwind_safe(|| sim_host.events().map_err(|err| format!("{err:?}"))) {
+                    Ok(Ok(evs)) => categorize_events(&evs, Some(cpu_insns), Some(mem_bytes)),
+                    Ok(Err(err_msg)) => {
+                        emit_panic_response(
+                            format!("Host event retrieval failed: {err_msg}"),
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                    Err(panic_msg) => {
+                        emit_panic_response(
+                            panic_msg,
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                };
 
             let mut final_logs = vec![
                 format!("Host Initialized with Budget: {:?}", budget),
@@ -741,13 +880,33 @@ fn main() {
                     final_logs.push(format!("First linked SnapshotID: {snapshot_id}"));
                 }
             }
-            let contract_debug_logs: Vec<String> = match host.get_events() {
-                Ok(ref evs) => debug_host_fn::extract_debug_logs(evs)
-                    .into_iter()
-                    .map(|msg| format!("[debug] {}", msg))
-                    .collect(),
-                Err(_) => vec![],
-            };
+            let contract_debug_logs: Vec<String> =
+                match catch_unwind_safe(|| sim_host.events().map_err(|err| format!("{err:?}"))) {
+                    Ok(Ok(evs)) => debug_host_fn::extract_debug_logs(&evs)
+                        .into_iter()
+                        .map(|msg| format!("[debug] {}", msg))
+                        .collect(),
+                    Ok(Err(err_msg)) => {
+                        emit_panic_response(
+                            format!("Host event retrieval failed: {err_msg}"),
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                    Err(panic_msg) => {
+                        emit_panic_response(
+                            panic_msg,
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                };
             final_logs.extend(contract_debug_logs);
             final_logs.extend(exec_logs);
 
@@ -785,6 +944,7 @@ fn main() {
                         wasm_offset: None,
                         linear_memory_dump: None,
                         asset_anomalies: vec![],
+                        pprof_profile: pprof_profile_b64.clone(),
                     };
 
                     if let Ok(json) = serde_json::to_string(&response) {
@@ -819,6 +979,7 @@ fn main() {
                     .and_then(|m| m.map_wasm_offset_to_source(0)),
                 linear_memory_dump: None,
                 asset_anomalies: asset_tracker.finalize(),
+                pprof_profile: pprof_profile_b64.clone(),
             };
 
             if let Ok(json) = serde_json::to_string(&response) {
@@ -871,10 +1032,30 @@ fn main() {
                 format!("Memory Bytes Used: {}", mem_bytes),
             ];
 
-            let _categorized_events = match host.get_events() {
-                Ok(evs) => categorize_events(&evs, Some(cpu_insns), Some(mem_bytes)),
-                Err(_) => vec![],
-            };
+            let _categorized_events =
+                match catch_unwind_safe(|| sim_host.events().map_err(|err| format!("{err:?}"))) {
+                    Ok(Ok(evs)) => categorize_events(&evs, Some(cpu_insns), Some(mem_bytes)),
+                    Ok(Err(err_msg)) => {
+                        emit_panic_response(
+                            format!("Host event retrieval failed: {err_msg}"),
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                    Err(panic_msg) => {
+                        emit_panic_response(
+                            panic_msg,
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                };
 
             // Heuristic to ignore Rust stdlib panic wrappers and find the actual source point
             let mut user_panic_point = None;
@@ -968,6 +1149,7 @@ fn main() {
                 wasm_offset,
                 linear_memory_dump: None,
                 asset_anomalies: vec![],
+                pprof_profile: pprof_profile_b64.clone(),
             };
             if let Ok(json) = serde_json::to_string(&response) {
                 println!("{}", json);
@@ -1031,6 +1213,7 @@ fn main() {
                 wasm_offset: None,
                 linear_memory_dump: None,
                 asset_anomalies: vec![],
+                pprof_profile: pprof_profile_b64.clone(),
             };
             if let Ok(json) = serde_json::to_string(&response) {
                 println!("{}", json);

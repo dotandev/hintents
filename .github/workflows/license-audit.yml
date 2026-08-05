@@ -22,5 +22,21 @@ jobs:
       - name: Make script executable
         run: chmod +x ./fix_all_licenses.sh
 
+      - name: List JS/TS files missing license header
+        run: |
+          missing=0
+          # Adjust the header check pattern to match your project's header (SPDX, Copyright, or exact text)
+          pattern='SPDX-License-Identifier|Copyright'
+          git ls-files '*.js' '*.ts' '*.jsx' '*.tsx' | while read -r f; do
+            if ! head -n 8 "$f" | grep -qiE "$pattern"; then
+              echo "MISSING HEADER: $f"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "::error ::One or more JS/TS files are missing license headers"
+            exit 1
+          fi
+
       - name: Check license headers
         run: ./fix_all_licenses.sh --check
