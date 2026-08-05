@@ -8,14 +8,12 @@ The interactive trace viewer provides a powerful search and navigation interface
 
 ### Search Functionality
 
-- **Fuzzy search** (ctrl+p style) - matches characters in order, not necessarily contiguous
 - **Case-insensitive search** by default
 - **Highlights all matches** in yellow
 - **Current match highlighted** in green with arrow indicator
 - **Search across all fields**: contract IDs, function names, errors, events, and types
 - **Match counter**: Shows "Match X of Y" status
 - **Quick navigation**: Jump between matches with `n` and `N`
-- **Unicode support**: Works with Chinese, Cyrillic, French, Arabic, and other character sets
 
 ### Tree Navigation
 
