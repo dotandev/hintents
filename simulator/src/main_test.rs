@@ -50,6 +50,11 @@ mod restore_preamble_tests {
             envelope_xdr: "".to_string(),
             result_meta_xdr: "".to_string(),
             ledger_entries: None,
+            control_command: None,
+            rewind_step: None,
+            fork_params: None,
+            harness_reset: false,
+            ledger_entries_zstd: None,
             contract_wasm: None,
             wasm_path: None,
             no_cache: false,
@@ -66,6 +71,8 @@ mod restore_preamble_tests {
             memory_limit: None,
             restore_preamble: Some(restore_preamble),
             include_linear_memory: false,
+            enable_asset_safety: false,
+            pprof_output_path: None,
         };
         // Simulate main logic: inject restore_preamble into host storage
         let sim_host = crate::runner::SimHost::new(None, None, None);

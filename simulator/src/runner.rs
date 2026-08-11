@@ -11,6 +11,7 @@ use soroban_env_host::{
 };
 use std::rc::Rc;
 
+use crate::memory;
 use crate::snapshot::{LedgerSnapshot, SnapshotError};
 use tracing::{debug, instrument};
 
@@ -161,7 +162,36 @@ impl SimHost {
         })
     }
 
+    /// Checks whether the current memory consumption exceeds the configured limit.
+    ///
+    /// # Panics
+    ///
+    /// Panics with `ERR_MEMORY_LIMIT_EXCEEDED` when the Budget reports more
+    /// memory consumed than the configured `memory_limit`.
+    pub fn check_memory_limit(&self) {
+        if let Some(limit) = self.memory_limit {
+            if let Ok(consumed) = self.inner.budget_cloned().get_mem_bytes_consumed() {
+                memory::check_memory_limit(consumed, limit);
+            }
+        }
+    }
+
     /// Replaces the current host with a freshly initialized host loaded from the snapshot.
+    ///
+    /// # Allocator Safety
+    ///
+    /// This method drops the old [`SimHost`] (including the Soroban `Host` and its
+    /// `Budget`) and moves a newly constructed `SimHost` into place.  Rust's standard
+    /// drop semantics guarantee that:
+    ///
+    /// 1. All allocations owned by the old `Host` (Wasm linear memory, storage maps,
+    ///    event buffers, etc.) are freed before the move.
+    /// 2. The new `Host` starts with a fresh `Budget` whose limits match the original
+    ///    `SimHost`'s configuration, ensuring post-rollback memory accounting is
+    ///    consistent with the snapshot point.
+    /// 3. `Arc`-based sharing in [`LedgerSnapshot`](crate::snapshot::LedgerSnapshot)
+    ///    is properly reference-counted, so forked snapshots that are still alive
+    ///    elsewhere are not affected.
     #[instrument(level = "debug", fields(snapshot_len = snapshot.len()), skip(self))]
     pub fn restore_from_snapshot(&mut self, snapshot: &LedgerSnapshot) -> Result<(), SimHostError> {
         debug!("restoring current host from snapshot");
@@ -171,6 +201,10 @@ impl SimHost {
             self.memory_limit,
             snapshot,
         )?;
+        // `*self = restored` drops the old SimHost (including the old Soroban Host
+        // and its Budget) and moves the freshly-constructed SimHost into place.
+        // The old Host's Drop impl frees all its allocations — this is the key
+        // guarantee that prevents dangling pointers and double-frees after rollback.
         *self = restored;
         Ok(())
     }

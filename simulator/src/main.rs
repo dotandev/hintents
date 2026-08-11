@@ -10,6 +10,8 @@ mod events;
 mod gas_optimizer;
 mod git_detector;
 mod ipc;
+mod memory;
+mod profiler;
 mod runner;
 mod snapshot;
 mod source_map_cache;
@@ -24,11 +26,8 @@ use crate::source_mapper::SourceMapper;
 use crate::stack_trace::WasmStackTrace;
 use crate::types::*;
 use base64::Engine as _;
+use soroban_env_host::xdr::{Operation, OperationBody};
 use soroban_env_host::xdr::{ReadXdr, WriteXdr};
-use soroban_env_host::{
-    xdr::{Operation, OperationBody},
-    Host,
-};
 use std::any::Any;
 use std::collections::HashMap;
 use std::env;
@@ -78,6 +77,7 @@ fn send_error(msg: String) {
         wasm_offset: None,
         linear_memory_dump: None,
         asset_anomalies: vec![],
+        pprof_profile: None,
     };
     if let Ok(json) = serde_json::to_string(&res) {
         println!("{}", json);
@@ -160,6 +160,7 @@ fn emit_panic_response(
         wasm_offset: None,
         linear_memory_dump: None,
         asset_anomalies: vec![],
+        pprof_profile: None,
     };
     if let Ok(json) = serde_json::to_string(&response) {
         println!("{}", json);
@@ -223,19 +224,6 @@ fn generate_lcov_report(coverage: &CoverageTracker, source_file: &str) -> String
     report
 }
 
-fn check_memory_limit_or_panic(host: &Host, memory_limit: Option<u64>) {
-    if let Some(limit) = memory_limit {
-        if let Ok(mem_bytes) = host.budget_cloned().get_mem_bytes_consumed() {
-            if mem_bytes > limit {
-                panic!(
-                    "{}: consumed {} bytes, limit {} bytes",
-                    ERR_MEMORY_LIMIT_EXCEEDED, mem_bytes, limit
-                );
-            }
-        }
-    }
-}
-
 fn load_ledger_entries(
     sim_host: &mut runner::SimHost,
     entries: &HashMap<String, String>,
@@ -258,12 +246,10 @@ fn execute_operations(
     sim_host: &runner::SimHost,
     operations: &[Operation],
     request: &SimulationRequest,
-    memory_limit: Option<u64>,
     coverage: &mut CoverageTracker,
 ) -> Result<Vec<String>, crate::runner::SimHostError> {
     let mut logs = Vec::new();
-    let host = &sim_host.inner;
-    check_memory_limit_or_panic(host, memory_limit);
+    sim_host.check_memory_limit();
     for op in operations {
         coverage.record_operation(op);
         match &op.body {
@@ -287,14 +273,14 @@ fn execute_operations(
 
                 let val = sim_host.invoke_function(invoke_op.host_function.clone())?;
                 logs.push(format!("Result: {val:?}"));
-                check_memory_limit_or_panic(host, memory_limit);
+                sim_host.check_memory_limit();
             }
             _ => {
                 logs.push(format!(
                     "Skipping non-Soroban operation: {:?}",
                     op.body.name()
                 ));
-                check_memory_limit_or_panic(host, memory_limit);
+                sim_host.check_memory_limit();
             }
         }
     }
@@ -446,8 +432,13 @@ fn main() {
 
     tracing::info!(event = "simulator_started", "Simulator initializing...");
 
+    let mut pprof_guard = profiler::PprofGuard::start(99);
+
     let mut buffer = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut buffer) {
+        let pprof_b64 = pprof_guard
+            .stop()
+            .map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes));
         let res = SimulationResponse {
             status: "error".to_string(),
             error: Some(format!("Failed to read stdin: {e}")),
@@ -466,6 +457,7 @@ fn main() {
             wasm_offset: None,
             linear_memory_dump: None,
             asset_anomalies: vec![],
+            pprof_profile: pprof_b64,
         };
         tracing::error!("Failed to read stdin: {}", e);
         if let Ok(json) = serde_json::to_string(&res) {
@@ -480,6 +472,9 @@ fn main() {
     let request: SimulationRequest = match serde_json::from_str(&buffer) {
         Ok(req) => req,
         Err(e) => {
+            let pprof_b64 = pprof_guard
+                .stop()
+                .map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes));
             let res = SimulationResponse {
                 status: "error".to_string(),
                 error: Some(format!("Invalid JSON: {e}")),
@@ -498,6 +493,7 @@ fn main() {
                 wasm_offset: None,
                 linear_memory_dump: None,
                 asset_anomalies: vec![],
+                pprof_profile: pprof_b64,
             };
             println!(
                 "{}",
@@ -651,13 +647,7 @@ fn main() {
     // Wrap the operation execution in panic protection
     let mut coverage = CoverageTracker::default();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        execute_operations(
-            &sim_host,
-            operations,
-            &request,
-            request.memory_limit,
-            &mut coverage,
-        )
+        execute_operations(&sim_host, operations, &request, &mut coverage)
     }));
 
     let mut lcov_report = None;
@@ -706,6 +696,18 @@ fn main() {
     } else {
         None
     };
+
+    let mut pprof_profile_b64 = None;
+    if let Some(ref output_path) = request.pprof_output_path {
+        if let Some(bytes) = pprof_guard.stop() {
+            if let Err(e) = profiler::write_file(&bytes, output_path.as_ref()) {
+                eprintln!("Failed to write pprof file: {e}");
+            } else {
+                tracing::info!(event = "pprof_written", path = %output_path, "pprof profile written");
+                pprof_profile_b64 = Some(base64::engine::general_purpose::STANDARD.encode(&bytes));
+            }
+        }
+    }
 
     let mut flamegraph_svg = None;
     if request.profile.unwrap_or(false) {
@@ -942,6 +944,7 @@ fn main() {
                         wasm_offset: None,
                         linear_memory_dump: None,
                         asset_anomalies: vec![],
+                        pprof_profile: pprof_profile_b64.clone(),
                     };
 
                     if let Ok(json) = serde_json::to_string(&response) {
@@ -976,6 +979,7 @@ fn main() {
                     .and_then(|m| m.map_wasm_offset_to_source(0)),
                 linear_memory_dump: None,
                 asset_anomalies: asset_tracker.finalize(),
+                pprof_profile: pprof_profile_b64.clone(),
             };
 
             if let Ok(json) = serde_json::to_string(&response) {
@@ -1145,6 +1149,7 @@ fn main() {
                 wasm_offset,
                 linear_memory_dump: None,
                 asset_anomalies: vec![],
+                pprof_profile: pprof_profile_b64.clone(),
             };
             if let Ok(json) = serde_json::to_string(&response) {
                 println!("{}", json);
@@ -1208,6 +1213,7 @@ fn main() {
                 wasm_offset: None,
                 linear_memory_dump: None,
                 asset_anomalies: vec![],
+                pprof_profile: pprof_profile_b64.clone(),
             };
             if let Ok(json) = serde_json::to_string(&response) {
                 println!("{}", json);
