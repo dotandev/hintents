@@ -16,6 +16,7 @@ pub const DEFAULT_CHUNK_TARGET: usize = 64 * 1024;
 ///
 /// Log entries are newline-delimited JSON so consumers can parse them without
 /// depending on the human-readable formatting used by `tracing`.
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct LogEntry {
     pub level: LogLevel,
@@ -24,6 +25,7 @@ pub struct LogEntry {
     pub target: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
@@ -32,14 +34,17 @@ pub enum LogLevel {
 }
 
 impl LogEntry {
+    #[allow(dead_code)]
     pub fn trace(message: impl Into<String>) -> Self {
         Self::new(LogLevel::Trace, message)
     }
 
+    #[allow(dead_code)]
     pub fn debug(message: impl Into<String>) -> Self {
         Self::new(LogLevel::Debug, message)
     }
 
+    #[allow(dead_code)]
     pub fn new(level: LogLevel, message: impl Into<String>) -> Self {
         Self {
             level,
@@ -48,12 +53,14 @@ impl LogEntry {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_target(mut self, target: impl Into<String>) -> Self {
         self.target = Some(target.into());
         self
     }
 
     /// Serializes the entry as one NDJSON record on stderr.
+    #[allow(dead_code)]
     pub fn emit(&self) -> Result<(), IpcError> {
         use std::io::Write;
 
@@ -65,10 +72,12 @@ impl LogEntry {
     }
 }
 
+#[allow(dead_code)]
 pub fn emit_trace(message: impl Into<String>) -> Result<(), IpcError> {
     LogEntry::trace(message).emit()
 }
 
+#[allow(dead_code)]
 pub fn emit_debug(message: impl Into<String>) -> Result<(), IpcError> {
     LogEntry::debug(message).emit()
 }
@@ -112,7 +121,7 @@ mod tests {
         let entry = super::LogEntry::debug("snapshot emitted").with_target("ipc");
         assert_eq!(
             serde_json::to_string(&entry).unwrap(),
-            r#"{\"level\":\"debug\",\"message\":\"snapshot emitted\",\"target\":\"ipc\"}"#
+            r#"{"level":"debug","message":"snapshot emitted","target":"ipc"}"#
         );
     }
 
@@ -121,7 +130,7 @@ mod tests {
         let entry = super::LogEntry::trace("bridge ready");
         assert_eq!(
             serde_json::to_string(&entry).unwrap(),
-            r#"{\"level\":\"trace\",\"message\":\"bridge ready\"}"#
+            r#"{"level":"trace","message":"bridge ready"}"#
         );
     }
 
