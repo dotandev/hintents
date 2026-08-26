@@ -79,12 +79,7 @@ fn send_error(msg: String) {
         asset_anomalies: vec![],
         pprof_profile: None,
     };
-    if let Ok(json) = serde_json::to_string(&res) {
-        println!("{}", json);
-    } else {
-        eprintln!("Failed to serialize error response");
-        println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
-    }
+    ipc::response::emit_response(&res);
     std::process::exit(1);
 }
 
@@ -162,12 +157,7 @@ fn emit_panic_response(
         asset_anomalies: vec![],
         pprof_profile: None,
     };
-    if let Ok(json) = serde_json::to_string(&response) {
-        println!("{}", json);
-    } else {
-        eprintln!("Failed to serialize panic response");
-        println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
-    }
+    ipc::response::emit_response(&response);
 }
 
 #[derive(Default)]
@@ -460,12 +450,7 @@ fn main() {
             pprof_profile: pprof_b64,
         };
         tracing::error!("Failed to read stdin: {}", e);
-        if let Ok(json) = serde_json::to_string(&res) {
-            println!("{}", json);
-        } else {
-            eprintln!("Failed to serialize error response");
-            println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
-        }
+        ipc::response::emit_response(&res);
         return;
     }
 
@@ -495,10 +480,7 @@ fn main() {
                 asset_anomalies: vec![],
                 pprof_profile: pprof_b64,
             };
-            println!(
-                "{}",
-                serde_json::to_string(&res).expect("Failed to serialize error response")
-            );
+            ipc::response::emit_response(&res);
             return;
         }
     };
@@ -947,12 +929,7 @@ fn main() {
                         pprof_profile: pprof_profile_b64.clone(),
                     };
 
-                    if let Ok(json) = serde_json::to_string(&response) {
-                        println!("{}", json);
-                    } else {
-                        eprintln!("Failed to serialize simulation response");
-                        println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
-                    }
+                    ipc::response::emit_response(&response);
                     return;
                 }
             }
@@ -982,12 +959,7 @@ fn main() {
                 pprof_profile: pprof_profile_b64.clone(),
             };
 
-            if let Ok(json) = serde_json::to_string(&response) {
-                println!("{}", json);
-            } else {
-                eprintln!("Failed to serialize simulation response");
-                println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
-            }
+            ipc::response::emit_response(&response);
         }
         Ok(Err(host_error)) => {
             // Host error during execution (e.g., contract trap, validation failure)
@@ -1151,12 +1123,7 @@ fn main() {
                 asset_anomalies: vec![],
                 pprof_profile: pprof_profile_b64.clone(),
             };
-            if let Ok(json) = serde_json::to_string(&response) {
-                println!("{}", json);
-            } else {
-                eprintln!("Failed to serialize host error response");
-                println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
-            }
+            ipc::response::emit_response(&response);
         }
         Err(panic_info) => {
             let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
@@ -1215,12 +1182,7 @@ fn main() {
                 asset_anomalies: vec![],
                 pprof_profile: pprof_profile_b64.clone(),
             };
-            if let Ok(json) = serde_json::to_string(&response) {
-                println!("{}", json);
-            } else {
-                eprintln!("Failed to serialize panic response");
-                println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
-            }
+            ipc::response::emit_response(&response);
         }
     }
 }
