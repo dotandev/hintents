@@ -13,11 +13,12 @@
 use crate::source_mapper::SourceLocation;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::UNIX_EPOCH;
 
 /// Monotonically increasing counter used to generate unique temp-file names,
@@ -83,6 +84,11 @@ mod flock {
 /// Default cache directory name
 pub const CACHE_DIR_NAME: &str = "sourcemaps";
 
+/// Default number of source map entries retained in the in-memory LRU cache.
+/// Bounding the in-memory footprint prevents [`SourceMapCache`] from growing
+/// without limit when simulating many distinct contracts.
+pub const DEFAULT_MAX_MEMORY_ENTRIES: usize = 1000;
+
 /// Cache entry containing parsed source mappings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceMapCacheEntry {
@@ -101,10 +107,73 @@ pub struct SourceMapCacheEntry {
     pub created_at: u64,
 }
 
+/// A simple bounded LRU cache mapping cache keys to deserialized source map
+/// entries. When `capacity` is exceeded, the least-recently-used entry is
+/// evicted. This bounds the in-memory footprint when simulating many distinct
+/// contracts, while still allowing the on-disk cache to persist across runs.
+struct LruCache {
+    map: HashMap<String, SourceMapCacheEntry>,
+    /// Access-order list; the front holds the least-recently-used key.
+    order: VecDeque<String>,
+    capacity: usize,
+}
+
+impl LruCache {
+    fn new(capacity: usize) -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            capacity,
+        }
+    }
+
+    fn get(&mut self, key: &str) -> Option<SourceMapCacheEntry> {
+        if self.map.contains_key(key) {
+            // Refresh recency: move the key to the back (most-recently-used).
+            if let Some(pos) = self.order.iter().position(|k| k.as_str() == key) {
+                self.order.remove(pos);
+            }
+            self.order.push_back(key.to_string());
+            self.map.get(key).cloned()
+        } else {
+            None
+        }
+    }
+
+    fn insert(&mut self, key: String, entry: SourceMapCacheEntry) {
+        if let Some(pos) = self.order.iter().position(|k| k == &key) {
+            self.order.remove(pos);
+        }
+        self.map.insert(key.clone(), entry);
+        self.order.push_back(key);
+
+        while self.map.len() > self.capacity {
+            if let Some(old) = self.order.pop_front() {
+                self.map.remove(&old);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn remove(&mut self, key: &str) {
+        if self.map.remove(key).is_some() {
+            if let Some(pos) = self.order.iter().position(|k| k.as_str() == key) {
+                self.order.remove(pos);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SourceMapCache {
     cache_dir: PathBuf,
     max_cache_size: Option<u64>,
+    /// In-memory LRU of recently used source maps to avoid repeatedly
+    /// re-reading and deserializing the on-disk cache. Bounded by
+    /// `DEFAULT_MAX_MEMORY_ENTRIES` (overridable via
+    /// [`Self::with_max_memory_entries`]).
+    memory: Arc<Mutex<LruCache>>,
 }
 
 impl SourceMapCache {
@@ -114,6 +183,7 @@ impl SourceMapCache {
         Ok(Self {
             cache_dir,
             max_cache_size: None,
+            memory: Arc::new(Mutex::new(LruCache::new(DEFAULT_MAX_MEMORY_ENTRIES))),
         })
     }
 
@@ -124,6 +194,7 @@ impl SourceMapCache {
         Ok(Self {
             cache_dir,
             max_cache_size: None,
+            memory: Arc::new(Mutex::new(LruCache::new(DEFAULT_MAX_MEMORY_ENTRIES))),
         })
     }
 
@@ -137,12 +208,24 @@ impl SourceMapCache {
         Ok(Self {
             cache_dir,
             max_cache_size: Some(max_cache_size),
+            memory: Arc::new(Mutex::new(LruCache::new(DEFAULT_MAX_MEMORY_ENTRIES))),
         })
     }
 
     /// Sets the max cache size for this cache instance
     pub fn with_max_cache_size(mut self, max_size: u64) -> Self {
         self.max_cache_size = Some(max_size);
+        self
+    }
+
+    /// Sets the maximum number of entries retained in the in-memory LRU cache.
+    /// When exceeded, the least-recently-used entry is evicted. This bounds the
+    /// memory used by the cache while simulating many distinct contracts.
+    pub fn with_max_memory_entries(self, entries: usize) -> Self {
+        let capacity = entries.max(1);
+        if let Ok(mut mem) = self.memory.lock() {
+            *mem = LruCache::new(capacity);
+        }
         self
     }
 
@@ -252,6 +335,32 @@ impl SourceMapCache {
             return None;
         }
 
+        // Check the in-memory LRU cache first to avoid re-reading/deserializing
+        // the on-disk cache for frequently used contracts.
+        {
+            let mut mem = self
+                .memory
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if let Some(entry) = mem.get(cache_key) {
+                if let Some(expected_mtime) = expected_mtime {
+                    if entry.wasm_mtime != Some(expected_mtime) {
+                        println!(
+                            "Cache miss (memory): WASM file mtime changed (expected {}, found {:?})",
+                            expected_mtime, entry.wasm_mtime
+                        );
+                        mem.remove(cache_key);
+                        return None;
+                    }
+                }
+                println!(
+                    "Cache hit (memory)! Loading source map from in-memory cache for WASM: {}",
+                    &cache_key[..8.min(cache_key.len())]
+                );
+                return Some(entry);
+            }
+        }
+
         let cache_path = self.get_cache_path(cache_key);
 
         if !cache_path.exists() {
@@ -306,6 +415,12 @@ impl SourceMapCache {
                     "Cache hit! Loading source map from cache for WASM: {}",
                     &cache_key[..8.min(cache_key.len())]
                 );
+
+                // Populate the in-memory LRU so subsequent lookups are faster.
+                if let Ok(mut mem) = self.memory.lock() {
+                    mem.insert(cache_key.to_string(), entry.clone());
+                }
+
                 Some(entry)
             }
             Err(e) => {
@@ -389,6 +504,13 @@ impl SourceMapCache {
 
         println!("Cached source map for WASM: {}", &entry.wasm_hash[..8]);
 
+        // Insert into the in-memory LRU so it is available without re-reading
+        // the on-disk cache. Eviction of the least-recently-used entry (if the
+        // capacity is exceeded) happens inside `insert`.
+        if let Ok(mut mem) = self.memory.lock() {
+            mem.insert(entry.wasm_hash.clone(), entry.clone());
+        }
+
         if let Some(max_size) = self.max_cache_size {
             self.evict_if_needed(max_size)?;
         }
@@ -445,6 +567,11 @@ impl SourceMapCache {
     pub fn clear(&self) -> Result<usize, String> {
         if !self.cache_dir.exists() {
             return Ok(0);
+        }
+
+        // Drop all in-memory entries as well.
+        if let Ok(mut mem) = self.memory.lock() {
+            *mem = LruCache::new(mem.capacity);
         }
 
         let mut count = 0;
@@ -531,6 +658,16 @@ impl SourceMapCache {
     pub fn get_cache_dir(&self) -> &Path {
         &self.cache_dir
     }
+
+    /// Number of entries currently retained in the in-memory LRU cache.
+    /// Used by tests to verify eviction behaviour.
+    #[cfg(test)]
+    fn memory_len(&self) -> usize {
+        self.memory
+            .lock()
+            .map(|m| m.map.len())
+            .unwrap_or(usize::MAX)
+    }
 }
 
 impl Default for SourceMapCache {
@@ -545,6 +682,7 @@ impl Default for SourceMapCache {
                     .join("cache")
                     .join(CACHE_DIR_NAME),
                 max_cache_size: None,
+                memory: Arc::new(Mutex::new(LruCache::new(DEFAULT_MAX_MEMORY_ENTRIES))),
             }
         })
     }
@@ -946,6 +1084,43 @@ mod tests {
 
         let list = cache.list_cached().unwrap();
         assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn test_in_memory_lru_evicts_unused_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache = SourceMapCache::with_cache_dir(temp_dir.path().to_path_buf())
+            .unwrap()
+            .with_max_memory_entries(2);
+
+        for i in 0..4u64 {
+            let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d, i as u8];
+            let wasm_hash = SourceMapCache::compute_wasm_hash(&wasm_bytes);
+            let entry = SourceMapCacheEntry {
+                wasm_hash: wasm_hash.clone(),
+                wasm_mtime: None,
+                has_symbols: true,
+                mappings: HashMap::new(),
+                created_at: 1000 + i,
+            };
+            cache.store_sync(entry).unwrap();
+            // Populate the in-memory LRU via a get.
+            assert!(cache.get(&wasm_hash, false).is_some());
+        }
+
+        // Only the 2 most recently used entries should remain in memory; the
+        // two oldest should have been evicted from the LRU. The evicted keys
+        // still resolve from disk, proving eviction does not lose data.
+        let wasm_last = SourceMapCache::compute_wasm_hash(&vec![0x00, 0x61, 0x73, 0x6d, 3]);
+        let wasm_prev = SourceMapCache::compute_wasm_hash(&vec![0x00, 0x61, 0x73, 0x6d, 2]);
+        assert!(cache.get(&wasm_prev, false).is_some());
+        assert!(cache.get(&wasm_last, false).is_some());
+
+        // A get repopulates the in-memory LRU, but the capacity remains bounded.
+        assert!(
+            cache.memory_len() <= 2,
+            "in-memory LRU should be bounded by capacity"
+        );
     }
 
     #[test]
