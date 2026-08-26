@@ -6,7 +6,11 @@ pub mod types;
 pub mod validate;
 
 #[allow(unused_imports)]
-pub use types::{emit_chunk_frame, emit_chunk_raw, stream_to_stdout, IpcError, ResponseStreamer};
+pub use types::{
+    emit_chunk_frame, emit_chunk_raw, emit_debug_log, emit_error_log, emit_info_log,
+    emit_trace_log, emit_warn_log, stream_to_stdout, IpcError, LogEntry, LogLevel, ResponseStreamer,
+    SpanContext,
+};
 
 /// Default chunk target size (64 KiB) for streaming large simulation responses.
 #[allow(dead_code)]
@@ -292,5 +296,241 @@ mod tests {
         assert_eq!(parsed.total, Some(2));
         // Data should be the original raw bytes, decoded from JSON string
         assert_eq!(parsed.data.as_str().unwrap(), r#"{"key":"value"}"#);
+    }
+
+    // ── LogEntry tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_log_entry_creation() {
+        let entry = LogEntry::new(LogLevel::Debug, "simulator::test", "Test message");
+        assert_eq!(entry.level, LogLevel::Debug);
+        assert_eq!(entry.target, "simulator::test");
+        assert_eq!(entry.message, "Test message");
+        assert!(entry.fields.is_none());
+        assert!(entry.span.is_none());
+        // Timestamp should be in RFC3339 format with nanoseconds
+        assert!(entry.timestamp.contains('T'));
+        assert!(entry.timestamp.contains('Z'));
+    }
+
+    #[test]
+    fn test_log_entry_with_fields() {
+        let entry = LogEntry::new(LogLevel::Info, "simulator::runner", "Contract invoked")
+            .with_fields(serde_json::json!({
+                "contract_id": "CAAAAAAA",
+                "function": "increment",
+                "ledger": 1234
+            }));
+        assert!(entry.fields.is_some());
+        let fields = entry.fields.unwrap();
+        assert_eq!(fields["contract_id"], "CAAAAAAA");
+        assert_eq!(fields["function"], "increment");
+        assert_eq!(fields["ledger"], 1234);
+    }
+
+    #[test]
+    fn test_log_entry_with_span() {
+        let span = SpanContext {
+            name: "invoke_contract".to_string(),
+            id: 42,
+            parent_id: Some(1),
+        };
+        let entry =
+            LogEntry::new(LogLevel::Trace, "simulator::vm", "Entering span").with_span(span);
+        assert!(entry.span.is_some());
+        let span_ctx = entry.span.unwrap();
+        assert_eq!(span_ctx.name, "invoke_contract");
+        assert_eq!(span_ctx.id, 42);
+        assert_eq!(span_ctx.parent_id, Some(1));
+    }
+
+    #[test]
+    fn test_log_entry_serialization() {
+        let entry = LogEntry::new(LogLevel::Warn, "simulator::storage", "Cache miss")
+            .with_fields(serde_json::json!({"key": "counter", "ttl": 3600}));
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains(r#""level":"warn""#));
+        assert!(json.contains(r#""target":"simulator::storage""#));
+        assert!(json.contains(r#""message":"Cache miss""#));
+        assert!(json.contains(r#""key":"counter""#));
+        assert!(json.contains(r#""ttl":3600"#));
+    }
+
+    #[test]
+    fn test_log_entry_deserialization() {
+        let json = r#"{
+            "timestamp": "2026-08-26T15:30:45.123456789Z",
+            "level": "error",
+            "target": "simulator::host",
+            "message": "Contract execution failed",
+            "fields": {"error_code": 1, "reason": "insufficient balance"}
+        }"#;
+        let entry: LogEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.level, LogLevel::Error);
+        assert_eq!(entry.target, "simulator::host");
+        assert_eq!(entry.message, "Contract execution failed");
+        assert_eq!(
+            entry.timestamp,
+            "2026-08-26T15:30:45.123456789Z"
+        );
+        let fields = entry.fields.unwrap();
+        assert_eq!(fields["error_code"], 1);
+        assert_eq!(fields["reason"], "insufficient balance");
+    }
+
+    #[test]
+    fn test_log_level_serialization() {
+        assert_eq!(
+            serde_json::to_string(&LogLevel::Trace).unwrap(),
+            r#""trace""#
+        );
+        assert_eq!(
+            serde_json::to_string(&LogLevel::Debug).unwrap(),
+            r#""debug""#
+        );
+        assert_eq!(
+            serde_json::to_string(&LogLevel::Info).unwrap(),
+            r#""info""#
+        );
+        assert_eq!(
+            serde_json::to_string(&LogLevel::Warn).unwrap(),
+            r#""warn""#
+        );
+        assert_eq!(
+            serde_json::to_string(&LogLevel::Error).unwrap(),
+            r#""error""#
+        );
+    }
+
+    #[test]
+    fn test_log_frame_type_serialization() {
+        assert_eq!(
+            serde_json::to_string(&FrameType::Log).unwrap(),
+            r#""log""#
+        );
+    }
+
+    #[test]
+    fn test_span_context_serialization() {
+        let span = SpanContext {
+            name: "storage_read".to_string(),
+            id: 123,
+            parent_id: None,
+        };
+        let json = serde_json::to_string(&span).unwrap();
+        assert!(json.contains(r#""name":"storage_read""#));
+        assert!(json.contains(r#""id":123"#));
+        // parent_id should be omitted when None
+        assert!(!json.contains("parent_id"));
+    }
+
+    #[test]
+    fn test_span_context_with_parent() {
+        let span = SpanContext {
+            name: "nested_call".to_string(),
+            id: 456,
+            parent_id: Some(123),
+        };
+        let json = serde_json::to_string(&span).unwrap();
+        assert!(json.contains(r#""parent_id":123"#));
+    }
+
+    #[test]
+    fn test_log_entry_emit_does_not_panic() {
+        // Test that emit works without panicking (output goes to stdout)
+        let entry = LogEntry::new(LogLevel::Debug, "simulator::test", "Test emit");
+        entry.emit(); // Should not panic
+    }
+
+    #[test]
+    fn test_emit_trace_log_convenience_function() {
+        emit_trace_log("simulator::test", "Trace message", None);
+        // Should not panic
+    }
+
+    #[test]
+    fn test_emit_debug_log_convenience_function() {
+        emit_debug_log(
+            "simulator::test",
+            "Debug message",
+            Some(serde_json::json!({"key": "value"})),
+        );
+        // Should not panic
+    }
+
+    #[test]
+    fn test_emit_info_log_convenience_function() {
+        emit_info_log("simulator::test", "Info message", None);
+        // Should not panic
+    }
+
+    #[test]
+    fn test_emit_warn_log_convenience_function() {
+        emit_warn_log(
+            "simulator::test",
+            "Warning message",
+            Some(serde_json::json!({"severity": "medium"})),
+        );
+        // Should not panic
+    }
+
+    #[test]
+    fn test_emit_error_log_convenience_function() {
+        emit_error_log(
+            "simulator::test",
+            "Error occurred",
+            Some(serde_json::json!({"code": 500})),
+        );
+        // Should not panic
+    }
+
+    #[test]
+    fn test_log_entry_schema_compliance() {
+        // Verify the LogEntry serialization produces the expected JSON schema
+        let entry = LogEntry::new(LogLevel::Debug, "simulator::runner", "Starting contract")
+            .with_fields(serde_json::json!({
+                "contract_id": "CTEST",
+                "ledger": 5000
+            }))
+            .with_span(SpanContext {
+                name: "invoke_contract".to_string(),
+                id: 99,
+                parent_id: Some(10),
+            });
+
+        let json = serde_json::to_value(&entry).unwrap();
+
+        // Verify all required fields are present
+        assert!(json.get("timestamp").is_some());
+        assert!(json.get("level").is_some());
+        assert!(json.get("target").is_some());
+        assert!(json.get("message").is_some());
+
+        // Verify optional fields are present when set
+        assert!(json.get("fields").is_some());
+        assert!(json.get("span").is_some());
+
+        // Verify span structure
+        let span = &json["span"];
+        assert!(span.get("name").is_some());
+        assert!(span.get("id").is_some());
+        assert!(span.get("parent_id").is_some());
+    }
+
+    #[test]
+    fn test_log_entry_minimal_schema() {
+        // Verify minimal LogEntry without optional fields
+        let entry = LogEntry::new(LogLevel::Info, "simulator::minimal", "Minimal log");
+        let json = serde_json::to_value(&entry).unwrap();
+
+        // Required fields should be present
+        assert!(json.get("timestamp").is_some());
+        assert!(json.get("level").is_some());
+        assert!(json.get("target").is_some());
+        assert!(json.get("message").is_some());
+
+        // Optional fields should be absent
+        assert!(json.get("fields").is_none());
+        assert!(json.get("span").is_none());
     }
 }
