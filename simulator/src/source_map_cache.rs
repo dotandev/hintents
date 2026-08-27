@@ -338,10 +338,7 @@ impl SourceMapCache {
         // Check the in-memory LRU cache first to avoid re-reading/deserializing
         // the on-disk cache for frequently used contracts.
         {
-            let mut mem = self
-                .memory
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut mem = self.memory.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(entry) = mem.get(cache_key) {
                 if let Some(expected_mtime) = expected_mtime {
                     if entry.wasm_mtime != Some(expected_mtime) {
