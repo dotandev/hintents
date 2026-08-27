@@ -226,6 +226,14 @@ impl SimHost {
         Ok(self.inner.get_events()?)
     }
 
+    /// Returns the execution metrics (CPU/Memory distribution).
+    #[instrument(level = "debug", skip(self))]
+    pub fn execution_metrics(&self) -> Result<crate::metrics::ExecutionMetrics, SimHostError> {
+        debug!("fetching execution metrics");
+        crate::metrics::extract_metrics(&self.inner.budget_cloned())
+            .map_err(SimHostError::Host)
+    }
+
     /// Returns the host events as a cloned vector for external history tracking.
     #[instrument(level = "debug", skip(self))]
     pub fn event_log(&self) -> Result<Vec<HostEvent>, SimHostError> {
