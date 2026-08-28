@@ -1108,8 +1108,8 @@ mod tests {
         // Only the 2 most recently used entries should remain in memory; the
         // two oldest should have been evicted from the LRU. The evicted keys
         // still resolve from disk, proving eviction does not lose data.
-        let wasm_last = SourceMapCache::compute_wasm_hash(&vec![0x00, 0x61, 0x73, 0x6d, 3]);
-        let wasm_prev = SourceMapCache::compute_wasm_hash(&vec![0x00, 0x61, 0x73, 0x6d, 2]);
+        let wasm_last = SourceMapCache::compute_wasm_hash(&[0x00, 0x61, 0x73, 0x6d, 3]);
+        let wasm_prev = SourceMapCache::compute_wasm_hash(&[0x00, 0x61, 0x73, 0x6d, 2]);
         assert!(cache.get(&wasm_prev, false).is_some());
         assert!(cache.get(&wasm_last, false).is_some());
 
