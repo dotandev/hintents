@@ -11,6 +11,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 # Must track the range in ../Cargo.toml so both crates resolve one host version.
 soroban-env-host = { version = ">=21.0, <26", features = ["testutils"] }
+wasmparser = "0.245.1"
 
 [dependencies.erst-sim]
 path = ".."
@@ -25,6 +26,13 @@ debug = 1
 [[bin]]
 name = "simulate"
 path = "fuzz_targets/simulate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_wasm"
+path = "fuzz_targets/decode_wasm.rs"
 test = false
 doc = false
 bench = false
