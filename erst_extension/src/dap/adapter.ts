@@ -98,8 +98,8 @@ const MAIN_THREAD_ID = 1;
  * simulator IPC layer. Each instance corresponds to one "launch" request.
  */
 export class ERSTDebugSession implements vscode.DebugAdapter {
-    private _onDidSendMessage = new vscode.EventEmitter<DebugProtocol.Message>();
-    readonly onDidSendMessage: vscode.Event<DebugProtocol.Message> = this._onDidSendMessage.event;
+    private _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
+    readonly onDidSendMessage: vscode.Event<vscode.DebugProtocolMessage> = this._onDidSendMessage.event;
 
     private client: ERSTClient;
     private trace: Trace | null = null;
@@ -118,7 +118,7 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
     // DAP Request Handler
     // ------------------------------------------------------------------
 
-    handleMessage(message: DebugProtocol.ProtocolMessage): void {
+    handleMessage(message: any): void {
         if (message.type !== 'request') return;
 
         const request = message as DebugProtocol.Request;
@@ -126,64 +126,67 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
         try {
             switch (request.command) {
                 case 'initialize':
-                    this.handleInitialize(request);
+                    this.handleInitialize(request as DebugProtocol.InitializeRequest);
                     break;
                 case 'launch':
-                    this.handleLaunch(request);
+                    this.handleLaunch(request as DebugProtocol.LaunchRequest);
                     break;
                 case 'attach':
-                    this.handleAttach(request);
+                    this.handleAttach(request as DebugProtocol.AttachRequest);
                     break;
                 case 'disconnect':
-                    this.handleDisconnect(request);
+                    this.handleDisconnect(request as DebugProtocol.DisconnectRequest);
                     break;
                 case 'terminate':
-                    this.handleTerminate(request);
+                    this.handleTerminate(request as DebugProtocol.TerminateRequest);
                     break;
                 case 'configurationDone':
-                    this.handleConfigurationDone(request);
+                    this.handleConfigurationDone(request as DebugProtocol.ConfigurationDoneRequest);
                     break;
                 case 'setBreakpoints':
-                    this.handleSetBreakpoints(request);
+                    this.handleSetBreakpoints(request as DebugProtocol.SetBreakpointsRequest);
                     break;
                 case 'setExceptionBreakpoints':
-                    this.handleSetExceptionBreakpoints(request);
+                    this.handleSetExceptionBreakpoints(request as DebugProtocol.SetExceptionBreakpointsRequest);
                     break;
                 case 'continue':
-                    this.handleContinue(request);
+                    this.handleContinue(request as DebugProtocol.ContinueRequest);
                     break;
                 case 'next':
-                    this.handleNext(request);
+                    this.handleNext(request as DebugProtocol.NextRequest);
                     break;
                 case 'stepIn':
-                    this.handleStepIn(request);
+                    this.handleStepIn(request as DebugProtocol.StepInRequest);
                     break;
                 case 'stepOut':
-                    this.handleStepOut(request);
+                    this.handleStepOut(request as DebugProtocol.StepOutRequest);
+                    break;
+                case 'stepBack':
+                    this.handleStepBack(request);
                     break;
                 case 'pause':
-                    this.handlePause(request);
+                    this.handlePause(request as DebugProtocol.PauseRequest);
                     break;
                 case 'stackTrace':
-                    this.handleStackTrace(request);
+                    this.handleStackTrace(request as DebugProtocol.StackTraceRequest);
                     break;
                 case 'scopes':
-                    this.handleScopes(request);
+                    this.handleScopes(request as DebugProtocol.ScopesRequest);
                     break;
                 case 'variables':
-                    this.handleVariables(request);
+                    this.handleVariables(request as DebugProtocol.VariablesRequest);
                     break;
                 case 'source':
-                    this.handleSource(request);
+                    this.handleSource(request as DebugProtocol.SourceRequest);
                     break;
                 case 'threads':
-                    this.handleThreads(request);
+                    this.handleThreads(request as DebugProtocol.ThreadsRequest);
                     break;
                 case 'evaluate':
-                    this.handleEvaluate(request);
+                    this.handleEvaluate(request as DebugProtocol.EvaluateRequest);
                     break;
                 case 'exceptionInfo':
-                    this.handleExceptionInfo(request);
+                    this.handleExceptionInfo(request as DebugProtocol.ExceptionInfoRequest);
                     break;
                 default:
                     this.sendErrorResponse(request, {
@@ -211,7 +214,7 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
      * Handles the 'initialize' request. Advertises the adapter's capabilities.
      */
     private handleInitialize(request: DebugProtocol.InitializeRequest): void {
-        const response: DebugProtocol.InitializeResponse = {
+        const response = {
             type: 'response',
             request_seq: request.seq,
             success: true,
@@ -231,7 +234,7 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
                 supportsDelayedStackTraceLoading: true,
                 supportsLogPoints: false,
                 supportsTerminateRequest: true,
-                supportsTerminateDebuggee: true,
+                supportTerminateDebuggee: true,
                 supportsRestartRequest: false,
                 supportsValueFormattingOptions: false,
                 supportsClipboardContext: false,
@@ -594,6 +597,36 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
         this.sendStoppedEvent('step');
     }
 
+    private handleStepBack(request: DebugProtocol.StepBackRequest): void {
+        if (!this.trace || this.currentStepIndex <= 0) {
+            this.sendMessage({
+                type: 'response',
+                request_seq: request.seq,
+                success: true,
+                command: 'stepBack',
+            } as DebugProtocol.StepBackResponse);
+            return;
+        }
+
+        this.currentStepIndex--;
+        const step = this.trace.states[this.currentStepIndex];
+
+        // Log step info
+        this.sendEventMessage(
+            'stdout',
+            `ERST: Stepped back to ${this.currentStepIndex + 1}/${this.trace.states.length}: ${step.operation}${step.function ? ` (${step.function})` : ''}\n`
+        );
+
+        this.sendMessage({
+            type: 'response',
+            request_seq: request.seq,
+            success: true,
+            command: 'stepBack',
+        } as DebugProtocol.StepBackResponse);
+
+        this.sendStoppedEvent('step');
+    }
+
     private handlePause(request: DebugProtocol.PauseRequest): void {
         this.sendMessage({
             type: 'response',
@@ -618,7 +651,7 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
                 success: true,
                 command: 'stackTrace',
                 body: { stackFrames: [], totalFrames: 0 },
-            } as DebugProtocol.StackTraceResponse);
+            });
             return;
         }
 
@@ -634,7 +667,7 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
                 success: true,
                 command: 'stackTrace',
                 body: { stackFrames: [], totalFrames: 0 },
-            } as DebugProtocol.StackTraceResponse);
+            });
             return;
         }
 
@@ -699,7 +732,7 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
                 success: true,
                 command: 'scopes',
                 body: { scopes: [] },
-            } as DebugProtocol.ScopesResponse);
+            });
         }
 
         const frameId = request.arguments.frameId;
@@ -893,7 +926,7 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
                     type: 'object',
                     presentationHint: 'normal',
                 },
-            } as DebugProtocol.EvaluateResponse);
+            });
         } else {
             this.sendMessage({
                 type: 'response',
@@ -1073,11 +1106,18 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
         }
     }
 
+    /**
+     * Disposes the debug session, required by `vscode.DebugAdapter`.
+     */
+    dispose(): void {
+        this.cleanup();
+    }
+
     // ------------------------------------------------------------------
     // Message Sending Helpers
     // ------------------------------------------------------------------
 
-    private sendMessage(msg: DebugProtocol.Message): void {
+    private sendMessage(msg: any): void {
         this._onDidSendMessage.fire(msg);
     }
 
@@ -1186,7 +1226,7 @@ export class ERSTDebugAdapterFactory
     createDebugAdapterDescriptor(
         _session: vscode.DebugSession
     ): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-        return new vscode.DebugInlineAdapter(new ERSTDebugSession());
+        return new vscode.DebugAdapterInlineImplementation(new ERSTDebugSession());
     }
 }
 

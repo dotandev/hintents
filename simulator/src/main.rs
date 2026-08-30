@@ -22,6 +22,7 @@ mod vm;
 mod wasm;
 
 use crate::gas_optimizer::{BudgetMetrics, GasOptimizationAdvisor, CPU_LIMIT, MEMORY_LIMIT};
+use crate::runner::HostConfig;
 use crate::source_mapper::SourceMapper;
 use crate::stack_trace::WasmStackTrace;
 use crate::types::*;
@@ -588,11 +589,10 @@ fn main() {
     };
 
     // Initialize Host
-    let mut sim_host = runner::SimHost::new(
-        None,
-        request.resource_calibration.clone(),
-        request.memory_limit,
-    );
+    let host_config = HostConfig::default()
+        .with_calibration(request.resource_calibration.clone())
+        .with_memory_limit(request.memory_limit);
+    let mut sim_host = runner::SimHost::new(host_config);
 
     // --- START: Local WASM Loading Integration (Issue #70) ---
     if let Some(path) = &request.wasm_path {
@@ -1662,7 +1662,7 @@ mod tests {
             STANDARD.encode(entry.to_xdr(soroban_env_host::xdr::Limits::none()).unwrap()),
         );
 
-        let mut sim_host = runner::SimHost::new(None, None, None);
+        let mut sim_host = runner::SimHost::new(HostConfig::default());
         let count = load_ledger_entries(&mut sim_host, &entries).expect("failed to load entries");
         assert_eq!(count, 1);
     }

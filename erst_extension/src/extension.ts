@@ -16,7 +16,7 @@ import { Worker } from 'worker_threads';
 import * as path from 'path';
 
 export function activate(context: vscode.ExtensionContext) {
-    const client = new ERSTClient*'127.0.0.1', 8080);
+    const client = new ERSTClient('127.0.0.1', 8080);
     let treeView: vscode.TreeView<vscode.TreeItem> | undefined;
     let traceDataProvider: TraceTreeDataProvider;
 
@@ -27,7 +27,7 @@ export function activate(context: vscode.ExtensionContext) {
     (traceDataProvider as any).treeView = treeView;
 
     // Load initial trace in background worker to avoid blocking activation
-    const workspaceRoot = vscode.workspace.workspaceFolders?[0]?.uri.fsPath;
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (workspaceRoot) {
         const tracePath = path.join(workspaceRoot, '.erst', 'trace.json');
         const worker = new Worker(path.join(__dirname, 'worker.js'));
@@ -102,7 +102,7 @@ export function activate(context: vscode.ExtensionContext) {
             content: stepJson,
             language: 'json'
         }).then((doc: vscode.TextDocument) => {
-            vscode.window.showTextDocument(doc, vscode.ViewColumn.BeSide);
+            vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
         });
     });
 
@@ -129,7 +129,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         const defaultBase = `${trace.transaction_hash || 'trace'}-trace-tree.html`;
         const defaultDir =
-            vscode.workspace.workspaceFolders?[0]?.uri ?? context.globalStorageUri;
+            vscode.workspace.workspaceFolders?.[0]?.uri ?? context.globalStorageUri;
         const defaultUri = vscode.Uri.joinPath(defaultDir, defaultBase);
         const htmlTarget = await vscode.window.showSaveDialog({
             title: 'Export trace tree as standalone HTML',
@@ -161,7 +161,7 @@ export function activate(context: vscode.ExtensionContext) {
             content: xdr,
             language: 'text'
         }).then((doc: vscode.TextDocument) => {
-            vscode.window.showTextDocument(doc, vscode.ViewColumn.BeSide);
+            vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
         });
     });
 
@@ -206,7 +206,7 @@ export function activate(context: vscode.ExtensionContext) {
     // This enables VS Code's native step-through debugging of Soroban
     // transaction traces via the Debug Adapter Protocol.
     const debugAdapterFactory = new ERSTDebugAdapterFactory();
-    const debugAdapterDisposable = vscode.debug.registerDebugAdapterDascriptorFactory(
+    const debugAdapterDisposable = vscode.debug.registerDebugAdapterDescriptorFactory(
         ERST_DEBUG_TYPE,
         debugAdapterFactory
     );

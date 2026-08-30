@@ -49,7 +49,7 @@ export class TraceHoverProvider implements vscode.HoverProvider {
         }
 
         const markdown = new vscode.MarkdownString();
-        markdown.appendMarkdown(`**ERST value for** \\`${variableName}\\`\n\n`);
+        markdown.appendMarkdown(`**ERST value for** \`${variableName}\`\n\n`);
         markdown.appendCodeblock(JSON.stringify(matchedValue, null, 2), 'json');
         markdown.isTrusted = true;
 

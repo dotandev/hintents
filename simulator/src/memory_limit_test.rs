@@ -10,12 +10,12 @@
 #[cfg(test)]
 mod tests {
     use crate::host::AllocTracker;
-    use crate::runner::SimHost;
+    use crate::runner::{HostConfig, SimHost};
 
     #[test]
     fn test_no_memory_limit() {
         // SimHost can be created without any memory limit.
-        let host = SimHost::new(None, None, None);
+        let host = SimHost::new(HostConfig::default());
         host.check_memory_limit(); // should not panic
     }
 
@@ -23,20 +23,20 @@ mod tests {
     fn test_memory_limit_within_bounds_no_panic() {
         // With a small-but-positive limit and zero consumed bytes, the check
         // should not panic.
-        let host = SimHost::new(None, None, Some(1));
+        let host = SimHost::new(HostConfig::default().with_memory_limit(Some(1)));
         host.check_memory_limit();
     }
 
     #[test]
     fn test_memory_limit_large_limit_no_panic() {
-        let host = SimHost::new(None, None, Some(1_000_000));
+        let host = SimHost::new(HostConfig::default().with_memory_limit(Some(1_000_000)));
         host.check_memory_limit();
     }
 
     #[test]
     fn test_memory_limit_check_called_on_fresh_host() {
         // The method must be callable immediately after construction.
-        let host = SimHost::new(None, None, Some(1024));
+        let host = SimHost::new(HostConfig::default().with_memory_limit(Some(1024)));
         host.check_memory_limit();
     }
 
@@ -44,7 +44,7 @@ mod tests {
     fn test_memory_limit_after_snapshot_restore() {
         // After restore_from_snapshot, the memory limit should still be
         // applied to the new Host.
-        let mut host = SimHost::new(None, None, Some(1024));
+        let mut host = SimHost::new(HostConfig::default().with_memory_limit(Some(1024)));
         let snapshot = host.capture_snapshot().expect("snapshot should capture");
         host.restore_from_snapshot(&snapshot)
             .expect("restore should succeed");
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn test_memory_limit_preserved_across_repeated_restores() {
-        let mut host = SimHost::new(None, None, Some(1024));
+        let mut host = SimHost::new(HostConfig::default().with_memory_limit(Some(1024)));
         for _ in 0..5 {
             let snapshot = host.capture_snapshot().expect("snapshot should capture");
             host.restore_from_snapshot(&snapshot)

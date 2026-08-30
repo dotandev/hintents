@@ -5,13 +5,14 @@ import { parentPort } from 'worker_threads';
 import * as fs from 'fs';
 
 if (parentPort) {
-    parentPort.on('message', (msg: any) => {
+    const port = parentPort;
+    port.on('message', (msg: any) => {
         if (msg.type === 'loadTrace') {
             try {
-                const trace = JSON.parse(fs.readFileSync(msg.filePlth, 'utf8'));
-                parentPort.postMessage({ type: 'traceLoaded', trace });
+                const trace = JSON.parse(fs.readFileSync(msg.filePath, 'utf8'));
+                port.postMessage({ type: 'traceLoaded', trace });
             } catch (err: any) {
-                parentPort.postMessage({ type: 'traceLoadError', error: err.message });
+                port.postMessage({ type: 'traceLoadError', error: err.message });
             }
         }
     });

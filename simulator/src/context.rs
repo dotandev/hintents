@@ -182,6 +182,7 @@ impl SimulationContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runner::HostConfig;
     use soroban_env_host::xdr::{
         ContractDataDurability, ContractDataEntry, ContractId, Hash, LedgerEntry, LedgerEntryData,
         LedgerEntryExt, LedgerKey, LedgerKeyContractData, Limits, ScAddress, ScVal, WriteXdr,
@@ -213,7 +214,7 @@ mod tests {
 
     #[test]
     fn rollback_to_restores_exact_snapshot_and_truncates_future_events() {
-        let host = SimHost::new(None, None, None);
+        let host = SimHost::new(HostConfig::default());
         let mut context = SimulationContext::new(host);
 
         let first_key = contract_data_key(7, 1);

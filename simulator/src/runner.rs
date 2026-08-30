@@ -25,12 +25,42 @@ pub enum SimHostError {
     Panic(String),
 }
 
-pub struct SimHost {
-    pub inner: Host,
-    ledger_snapshot: LedgerSnapshot,
+#[derive(Debug, Clone, Default)]
+pub struct HostConfig {
     budget_limits: Option<(u64, u64)>,
     calibration: Option<crate::types::ResourceCalibration>,
     memory_limit: Option<u64>,
+}
+
+impl HostConfig {
+    // The budget-specific builder is also used by the standalone fuzz target.
+    #[allow(dead_code)]
+    #[must_use]
+    pub fn with_budget_limits(mut self, budget_limits: Option<(u64, u64)>) -> Self {
+        self.budget_limits = budget_limits;
+        self
+    }
+
+    #[must_use]
+    pub fn with_calibration(
+        mut self,
+        calibration: Option<crate::types::ResourceCalibration>,
+    ) -> Self {
+        self.calibration = calibration;
+        self
+    }
+
+    #[must_use]
+    pub fn with_memory_limit(mut self, memory_limit: Option<u64>) -> Self {
+        self.memory_limit = memory_limit;
+        self
+    }
+}
+
+pub struct SimHost {
+    pub inner: Host,
+    ledger_snapshot: LedgerSnapshot,
+    config: HostConfig,
     pending_events: Vec<String>,
 }
 
@@ -68,23 +98,15 @@ impl SimHost {
     /// Initialize a new Host with optional budget settings and resource calibration.
     #[instrument(
         level = "debug",
-        fields(
-            budget_limits = ?budget_limits,
-            calibration = ?calibration,
-            memory_limit = ?memory_limit
-        )
+        fields(config = ?config)
     )]
-    pub fn new(
-        budget_limits: Option<(u64, u64)>,
-        calibration: Option<crate::types::ResourceCalibration>,
-        memory_limit: Option<u64>,
-    ) -> Self {
+    pub fn new(config: HostConfig) -> Self {
         debug!("initializing simulator host");
         let budget = Budget::default();
 
-        if let Some((cpu, mem)) = budget_limits {
+        if let Some((cpu, mem)) = config.budget_limits {
             let _ = budget.reset_limits(cpu, mem);
-        } else if let Some(mem) = memory_limit {
+        } else if let Some(mem) = config.memory_limit {
             // soroban sdk uses u32::MAX for no limit but casted to u64, or u64::MAX.
             let _ = budget.reset_unlimited();
             let _ = budget.reset_limits(
@@ -107,9 +129,7 @@ impl SimHost {
         Self {
             inner: host,
             ledger_snapshot: LedgerSnapshot::new(),
-            budget_limits,
-            calibration,
-            memory_limit,
+            config,
             pending_events: Vec::new(),
         }
     }
@@ -117,25 +137,18 @@ impl SimHost {
     /// Creates a new host initialized with the provided snapshot contents.
     #[instrument(
         level = "debug",
-        fields(
-            budget_limits = ?budget_limits,
-            calibration = ?calibration,
-            memory_limit = ?memory_limit,
-            snapshot_len = snapshot.len()
-        )
+        fields(config = ?config, snapshot_len = snapshot.len())
     )]
     pub fn from_snapshot(
-        budget_limits: Option<(u64, u64)>,
-        calibration: Option<crate::types::ResourceCalibration>,
-        memory_limit: Option<u64>,
+        config: HostConfig,
         snapshot: &LedgerSnapshot,
     ) -> Result<Self, SimHostError> {
         debug!("restoring simulator host from snapshot");
         let budget = Budget::default();
 
-        if let Some((cpu, mem)) = budget_limits {
+        if let Some((cpu, mem)) = config.budget_limits {
             let _ = budget.reset_limits(cpu, mem);
-        } else if let Some(mem) = memory_limit {
+        } else if let Some(mem) = config.memory_limit {
             let _ = budget.reset_unlimited();
             let _ = budget.reset_limits(
                 budget
@@ -155,9 +168,7 @@ impl SimHost {
         Ok(Self {
             inner: host,
             ledger_snapshot: snapshot.fork(),
-            budget_limits,
-            calibration,
-            memory_limit,
+            config,
             pending_events: Vec::new(),
         })
     }
@@ -169,7 +180,7 @@ impl SimHost {
     /// Panics with `ERR_MEMORY_LIMIT_EXCEEDED` when the Budget reports more
     /// memory consumed than the configured `memory_limit`.
     pub fn check_memory_limit(&self) {
-        if let Some(limit) = self.memory_limit {
+        if let Some(limit) = self.config.memory_limit {
             if let Ok(consumed) = self.inner.budget_cloned().get_mem_bytes_consumed() {
                 memory::check_memory_limit(consumed, limit);
             }
@@ -195,12 +206,7 @@ impl SimHost {
     #[instrument(level = "debug", fields(snapshot_len = snapshot.len()), skip(self))]
     pub fn restore_from_snapshot(&mut self, snapshot: &LedgerSnapshot) -> Result<(), SimHostError> {
         debug!("restoring current host from snapshot");
-        let restored = Self::from_snapshot(
-            self.budget_limits,
-            self.calibration.clone(),
-            self.memory_limit,
-            snapshot,
-        )?;
+        let restored = Self::from_snapshot(self.config.clone(), snapshot)?;
         // `*self = restored` drops the old SimHost (including the old Soroban Host
         // and its Budget) and moves the freshly-constructed SimHost into place.
         // The old Host's Drop impl frees all its allocations — this is the key
@@ -338,8 +344,8 @@ impl Drop for SimHost {
         // We use std::mem::take to clear it without causing a double borrow
         let _ = std::mem::take(&mut self.ledger_snapshot);
 
-        // Note: budget_limits, calibration, and memory_limit are simple types
-        // that don't require explicit cleanup
+        // HostConfig contains only configuration values and does not require
+        // explicit cleanup.
     }
 }
 
@@ -354,14 +360,14 @@ mod tests {
 
     #[test]
     fn test_host_initialization() {
-        let host = SimHost::new(None, None, None);
+        let host = SimHost::new(HostConfig::default());
         // Basic assertion that host is functional
         assert!(host.inner.budget_cloned().get_cpu_insns_consumed().is_ok());
     }
 
     #[test]
     fn test_panic_recovery_wraps_host_execution() {
-        let host = SimHost::new(None, None, None);
+        let host = SimHost::new(HostConfig::default());
         let result = host.with_panic_recovery(|| panic!("memory violation"));
 
         assert!(
@@ -371,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_configuration() {
-        let mut host = SimHost::new(None, None, None);
+        let mut host = SimHost::new(HostConfig::default());
         // Test setting contract ID (dummy hash)
         let hash = Hash([0u8; 32]);
         host.set_contract_id(hash);
@@ -382,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_simple_value_handling() {
-        let host = SimHost::new(None, None, None);
+        let host = SimHost::new(HostConfig::default());
 
         let val_a = host.val_from_u32(10);
         let val_b = host.val_from_u32(20);
@@ -395,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_restore_from_snapshot_replaces_mutated_storage_and_clears_host_events() {
-        let mut host = SimHost::new(None, None, None);
+        let mut host = SimHost::new(HostConfig::default());
         let first_key = Rc::new(LedgerKey::ContractData(LedgerKeyContractData {
             contract: ScAddress::Contract(ContractId(Hash([1u8; 32]))),
             key: ScVal::U32(1),

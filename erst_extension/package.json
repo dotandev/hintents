@@ -83,7 +83,6 @@
           "name": "Traces"
         }
       ]
-    }
     },
     "debuggers": [
       {
@@ -176,7 +175,7 @@
     "vscode-jsonrpc": "^8.2.1"
   },
   "devDependencies": {
-    "@vscode/debugprotocol": "^1.73.0",
+    "@vscode/debugprotocol": "^1.68.0",
     "@types/vscode": "^1.90.0",
     "@types/node": "^20.0.0",
     "@types/mocha": "^10.0.0",
