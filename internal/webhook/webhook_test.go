@@ -6,6 +6,7 @@ package webhook
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -148,14 +149,21 @@ func TestWebhookSend(t *testing.T) {
 			t.Errorf("Expected POST method, got %s", r.Method)
 		}
 
-		payload := make([]byte, r.ContentLength)
-		if _, err := r.Body.Read(payload); err != nil {
-			t.Logf("Error reading request body: %v", err)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("Error reading request body: %v", err)
 		}
-		receivedPayloads = append(receivedPayloads, payload)
+		_ = r.Body.Close()
+
+		var js map[string]interface{}
+		if err := json.Unmarshal(body, &js); err != nil {
+			t.Fatalf("Invalid JSON body: %v; body=%q", err, string(body))
+		}
+
+		receivedPayloads = append(receivedPayloads, body)
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
 
@@ -193,11 +201,11 @@ func TestWebhookRetry(t *testing.T) {
 		attempt++
 		if attempt < 2 {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("Service unavailable"))
+			_, _ = w.Write([]byte("Service unavailable"))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
 
@@ -210,6 +218,7 @@ func TestWebhookRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
+	client.sleep = func(time.Duration) {}
 
 	report := ReportData{
 		TraceID:   "test-retry",
@@ -233,7 +242,7 @@ func TestWebhookRetry(t *testing.T) {
 func TestSimulatorNotifier(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
 
@@ -267,7 +276,7 @@ func TestSimulatorNotifier(t *testing.T) {
 func TestSimulatorNotifierErrorOnly(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
 

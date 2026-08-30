@@ -3,7 +3,7 @@
 
 //! Tests for signature verification mocking functionality
 
-use simulator::types::SimulationRequest;
+use erst_sim::types::SimulationRequest;
 
 #[test]
 fn test_signature_verification_mock_true() {
@@ -11,6 +11,11 @@ fn test_signature_verification_mock_true() {
         envelope_xdr: String::new(),
         result_meta_xdr: String::new(),
         ledger_entries: None,
+        control_command: None,
+        rewind_step: None,
+        fork_params: None,
+        harness_reset: false,
+        ledger_entries_zstd: None,
         contract_wasm: None,
         wasm_path: None,
         no_cache: false,
@@ -27,10 +32,11 @@ fn test_signature_verification_mock_true() {
         memory_limit: None,
         restore_preamble: None,
         include_linear_memory: false,
+        enable_asset_safety: false,
+        pprof_output_path: None,
     };
 
-    assert!(request.mock_signature_verification.is_some());
-    assert!(request.mock_signature_verification.unwrap());
+    assert_eq!(request.mock_signature_verification, Some(true));
 }
 
 #[test]
@@ -39,6 +45,11 @@ fn test_signature_verification_mock_false() {
         envelope_xdr: String::new(),
         result_meta_xdr: String::new(),
         ledger_entries: None,
+        control_command: None,
+        rewind_step: None,
+        fork_params: None,
+        harness_reset: false,
+        ledger_entries_zstd: None,
         contract_wasm: None,
         wasm_path: None,
         no_cache: false,
@@ -55,10 +66,11 @@ fn test_signature_verification_mock_false() {
         memory_limit: None,
         restore_preamble: None,
         include_linear_memory: false,
+        enable_asset_safety: false,
+        pprof_output_path: None,
     };
 
-    assert!(request.mock_signature_verification.is_some());
-    assert!(!request.mock_signature_verification.unwrap());
+    assert_eq!(request.mock_signature_verification, Some(false));
 }
 
 #[test]
@@ -67,6 +79,11 @@ fn test_signature_verification_mock_disabled() {
         envelope_xdr: String::new(),
         result_meta_xdr: String::new(),
         ledger_entries: None,
+        control_command: None,
+        rewind_step: None,
+        fork_params: None,
+        harness_reset: false,
+        ledger_entries_zstd: None,
         contract_wasm: None,
         wasm_path: None,
         no_cache: false,
@@ -83,7 +100,9 @@ fn test_signature_verification_mock_disabled() {
         memory_limit: None,
         restore_preamble: None,
         include_linear_memory: false,
+        enable_asset_safety: false,
+        pprof_output_path: None,
     };
 
-    assert!(request.mock_signature_verification.is_none());
+    assert_eq!(request.mock_signature_verification, None);
 }

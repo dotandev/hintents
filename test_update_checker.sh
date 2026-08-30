@@ -19,7 +19,7 @@ echo ""
 
 # Build with old version
 echo "2. Building with old version (v0.0.1)..."
-go build -ldflags "-X main.Version=v0.0.1" -o erst_test ./cmd/erst
+go build -ldflags "-X main.buildVersion=v0.0.1" -o erst_test ./cmd/erst
 echo "   [OK] Built"
 echo ""
 
@@ -57,7 +57,7 @@ echo ""
 
 # Test with current version
 echo "6. Building with future version (v999.0.0)..."
-go build -ldflags "-X main.Version=v999.0.0" -o erst_test ./cmd/erst
+go build -ldflags "-X main.buildVersion=v999.0.0" -o erst_test ./cmd/erst
 ./erst_test version > output.txt 2>&1
 
 if grep -q "new version" output.txt; then

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dotandev/hintents/internal/abi"
+	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
@@ -150,13 +151,13 @@ func (g *Generator) generateStructType(b *strings.Builder, s xdr.ScSpecUdtStruct
 	structName := string(s.Name)
 
 	if s.Doc != "" {
-		b.WriteString(fmt.Sprintf("/** %s */\n", s.Doc))
+		fmt.Fprintf(b, "/** %s */\n", s.Doc)
 	}
 
-	b.WriteString(fmt.Sprintf("export interface %s {\n", structName))
+	fmt.Fprintf(b, "export interface %s {\n", structName)
 	for _, field := range s.Fields {
 		tsType := g.mapTypeDefToTS(field.Type)
-		b.WriteString(fmt.Sprintf("  %s: %s;\n", field.Name, tsType))
+		fmt.Fprintf(b, "  %s: %s;\n", field.Name, tsType)
 	}
 	b.WriteString("}\n\n")
 }
@@ -165,12 +166,12 @@ func (g *Generator) generateEnumType(b *strings.Builder, e xdr.ScSpecUdtEnumV0) 
 	enumName := string(e.Name)
 
 	if e.Doc != "" {
-		b.WriteString(fmt.Sprintf("/** %s */\n", e.Doc))
+		fmt.Fprintf(b, "/** %s */\n", e.Doc)
 	}
 
-	b.WriteString(fmt.Sprintf("export enum %s {\n", enumName))
+	fmt.Fprintf(b, "export enum %s {\n", enumName)
 	for _, c := range e.Cases {
-		b.WriteString(fmt.Sprintf("  %s = %d,\n", c.Name, c.Value))
+		fmt.Fprintf(b, "  %s = %d,\n", c.Name, c.Value)
 	}
 	b.WriteString("}\n\n")
 }
@@ -179,23 +180,23 @@ func (g *Generator) generateUnionType(b *strings.Builder, u xdr.ScSpecUdtUnionV0
 	unionName := string(u.Name)
 
 	if u.Doc != "" {
-		b.WriteString(fmt.Sprintf("/** %s */\n", u.Doc))
+		fmt.Fprintf(b, "/** %s */\n", u.Doc)
 	}
 
 	// Generate discriminated union
-	b.WriteString(fmt.Sprintf("export type %s = \n", unionName))
+	fmt.Fprintf(b, "export type %s = \n", unionName)
 
 	for i, c := range u.Cases {
 		switch c.Kind {
 		case xdr.ScSpecUdtUnionCaseV0KindScSpecUdtUnionCaseVoidV0:
-			b.WriteString(fmt.Sprintf("  | { tag: '%s' }", c.VoidCase.Name))
+			fmt.Fprintf(b, "  | { tag: '%s' }", c.VoidCase.Name)
 		case xdr.ScSpecUdtUnionCaseV0KindScSpecUdtUnionCaseTupleV0:
 			types := make([]string, len(c.TupleCase.Type))
 			for j, t := range c.TupleCase.Type {
 				types[j] = g.mapTypeDefToTS(t)
 			}
-			b.WriteString(fmt.Sprintf("  | { tag: '%s'; values: [%s] }",
-				c.TupleCase.Name, strings.Join(types, ", ")))
+			fmt.Fprintf(b, "  | { tag: '%s'; values: [%s] }",
+				c.TupleCase.Name, strings.Join(types, ", "))
 		}
 
 		if i < len(u.Cases)-1 {
@@ -209,18 +210,18 @@ func (g *Generator) generateErrorEnumType(b *strings.Builder, e xdr.ScSpecUdtErr
 	enumName := string(e.Name)
 
 	if e.Doc != "" {
-		b.WriteString(fmt.Sprintf("/** %s */\n", e.Doc))
+		fmt.Fprintf(b, "/** %s */\n", e.Doc)
 	}
 
-	b.WriteString(fmt.Sprintf("export enum %s {\n", enumName))
+	fmt.Fprintf(b, "export enum %s {\n", enumName)
 	for _, c := range e.Cases {
-		b.WriteString(fmt.Sprintf("  %s = %d,\n", c.Name, c.Value))
+		fmt.Fprintf(b, "  %s = %d,\n", c.Name, c.Value)
 	}
 	b.WriteString("}\n\n")
 
 	// Generate error class
-	b.WriteString(fmt.Sprintf("export class %sError extends Error {\n", enumName))
-	b.WriteString(fmt.Sprintf("  constructor(public code: %s, message?: string) {\n", enumName))
+	fmt.Fprintf(b, "export class %sError extends Error {\n", enumName)
+	fmt.Fprintf(b, "  constructor(public code: %s, message?: string) {\n", enumName)
 	b.WriteString("    super(message || `Contract error: ${code}`);\n")
 	b.WriteString("    this.name = '" + enumName + "Error';\n")
 	b.WriteString("  }\n")
@@ -231,17 +232,17 @@ func (g *Generator) generateEventType(b *strings.Builder, ev xdr.ScSpecEventV0) 
 	eventName := string(ev.Name)
 
 	if ev.Doc != "" {
-		b.WriteString(fmt.Sprintf("/** %s */\n", ev.Doc))
+		fmt.Fprintf(b, "/** %s */\n", ev.Doc)
 	}
 
-	b.WriteString(fmt.Sprintf("export interface %sEvent {\n", eventName))
+	fmt.Fprintf(b, "export interface %sEvent {\n", eventName)
 	for _, param := range ev.Params {
 		tsType := g.mapTypeDefToTS(param.Type)
 		location := "data"
 		if param.Location == xdr.ScSpecEventParamLocationV0ScSpecEventParamLocationTopicList {
 			location = "topic"
 		}
-		b.WriteString(fmt.Sprintf("  %s: %s; // %s\n", param.Name, tsType, location))
+		fmt.Fprintf(b, "  %s: %s; // %s\n", param.Name, tsType, location)
 	}
 	b.WriteString("}\n\n")
 }
@@ -365,7 +366,7 @@ func (g *Generator) generateClient() string {
 
 	// Generate main client class
 	className := toPascalCase(g.config.PackageName) + "Client"
-	b.WriteString(fmt.Sprintf("export class %s {\n", className))
+	fmt.Fprintf(&b, "export class %s {\n", className)
 	b.WriteString("  private config: ClientConfig;\n")
 	b.WriteString("  private server: StellarSdk.SorobanRpc.Server;\n")
 	b.WriteString("  private simulator?: ErstSimulator;\n\n")
@@ -391,11 +392,11 @@ func (g *Generator) generateClient() string {
 	b.WriteString("  private getDefaultRpcUrl(network: string): string {\n")
 	b.WriteString("    switch (network) {\n")
 	b.WriteString("      case 'testnet':\n")
-	b.WriteString("        return 'https://soroban-testnet.stellar.org';\n")
+	fmt.Fprintf(&b, "        return '%s';\n", endpoints.SorobanTestnet)
 	b.WriteString("      case 'mainnet':\n")
-	b.WriteString("        return 'https://soroban-mainnet.stellar.org';\n")
+	fmt.Fprintf(&b, "        return '%s';\n", endpoints.SorobanMainnet)
 	b.WriteString("      case 'futurenet':\n")
-	b.WriteString("        return 'https://rpc-futurenet.stellar.org';\n")
+	fmt.Fprintf(&b, "        return '%s';\n", endpoints.SorobanFuturenet)
 	b.WriteString("      default:\n")
 	b.WriteString("        throw new Error(`Unknown network: ${network}`);\n")
 	b.WriteString("    }\n")
@@ -422,7 +423,7 @@ func (g *Generator) generateClientMethod(b *strings.Builder, fn xdr.ScSpecFuncti
 
 	// Generate JSDoc comment
 	if fn.Doc != "" {
-		b.WriteString(fmt.Sprintf("  /** %s */\n", fn.Doc))
+		fmt.Fprintf(b, "  /** %s */\n", fn.Doc)
 	}
 
 	// Generate method signature
@@ -441,8 +442,8 @@ func (g *Generator) generateClientMethod(b *strings.Builder, fn xdr.ScSpecFuncti
 		returnType = g.mapTypeDefToTS(fn.Outputs[0])
 	}
 
-	b.WriteString(fmt.Sprintf("  async %s(%s): Promise<CallResult<%s>> {\n",
-		methodName, strings.Join(params, ", "), returnType))
+	fmt.Fprintf(b, "  async %s(%s): Promise<CallResult<%s>> {\n",
+		methodName, strings.Join(params, ", "), returnType)
 
 	// Method body
 	b.WriteString("    const opts = options || {};\n\n")
@@ -450,11 +451,11 @@ func (g *Generator) generateClientMethod(b *strings.Builder, fn xdr.ScSpecFuncti
 	// Build transaction
 	b.WriteString("    // Build contract call transaction\n")
 	b.WriteString("    const contract = new StellarSdk.Contract(this.config.contractId);\n")
-	b.WriteString(fmt.Sprintf("    const operation = contract.call('%s'", methodName))
+	fmt.Fprintf(b, "    const operation = contract.call('%s'", methodName)
 
 	if len(fn.Inputs) > 0 {
 		for _, inp := range fn.Inputs {
-			b.WriteString(fmt.Sprintf(", %s", inp.Name))
+			fmt.Fprintf(b, ", %s", inp.Name)
 		}
 	}
 
@@ -705,7 +706,7 @@ func (g *Generator) generateReadme() string {
 
 	className := toPascalCase(g.config.PackageName) + "Client"
 
-	b.WriteString(fmt.Sprintf("# %s\n\n", g.config.PackageName))
+	fmt.Fprintf(&b, "# %s\n\n", g.config.PackageName)
 	b.WriteString("TypeScript bindings for Soroban smart contract, generated by `erst generate-bindings`.\n\n")
 
 	b.WriteString("## Installation\n\n")
@@ -715,26 +716,26 @@ func (g *Generator) generateReadme() string {
 
 	b.WriteString("## Usage\n\n")
 	b.WriteString("```typescript\n")
-	b.WriteString(fmt.Sprintf("import { %s } from './%s';\n\n", className, g.config.PackageName))
+	fmt.Fprintf(&b, "import { %s } from './%s';\n\n", className, g.config.PackageName)
 
 	b.WriteString("// Initialize client\n")
-	b.WriteString(fmt.Sprintf("const client = new %s({\n", className))
+	fmt.Fprintf(&b, "const client = new %s({\n", className)
 	if g.config.ContractID != "" {
-		b.WriteString(fmt.Sprintf("  contractId: '%s',\n", g.config.ContractID))
+		fmt.Fprintf(&b, "  contractId: '%s',\n", g.config.ContractID)
 	} else {
 		b.WriteString("  contractId: 'YOUR_CONTRACT_ID',\n")
 	}
-	b.WriteString(fmt.Sprintf("  network: '%s',\n", g.config.Network))
+	fmt.Fprintf(&b, "  network: '%s',\n", g.config.Network)
 	b.WriteString("  enableSimulation: true, // Enable erst simulation\n")
 	b.WriteString("});\n\n")
 
 	b.WriteString("// Call contract methods\n")
 	if len(g.spec.Functions) > 0 {
 		fn := g.spec.Functions[0]
-		b.WriteString(fmt.Sprintf("const result = await client.%s(\n", string(fn.Name)))
+		fmt.Fprintf(&b, "const result = await client.%s(\n", string(fn.Name))
 		b.WriteString("  sourceKeypair,\n")
 		for _, inp := range fn.Inputs {
-			b.WriteString(fmt.Sprintf("  %s, // %s\n", inp.Name, g.mapTypeDefToTS(inp.Type)))
+			fmt.Fprintf(&b, "  %s, // %s\n", inp.Name, g.mapTypeDefToTS(inp.Type))
 		}
 		b.WriteString("  { simulate: true } // Options\n")
 		b.WriteString(");\n\n")
@@ -750,21 +751,21 @@ func (g *Generator) generateReadme() string {
 
 	b.WriteString("## Contract Methods\n\n")
 	for _, fn := range g.spec.Functions {
-		b.WriteString(fmt.Sprintf("### `%s`\n\n", string(fn.Name)))
+		fmt.Fprintf(&b, "### `%s`\n\n", string(fn.Name))
 		if fn.Doc != "" {
-			b.WriteString(fmt.Sprintf("%s\n\n", fn.Doc))
+			fmt.Fprintf(&b, "%s\n\n", fn.Doc)
 		}
 
 		if len(fn.Inputs) > 0 {
 			b.WriteString("**Parameters:**\n\n")
 			for _, inp := range fn.Inputs {
-				b.WriteString(fmt.Sprintf("- `%s`: `%s`\n", inp.Name, g.mapTypeDefToTS(inp.Type)))
+				fmt.Fprintf(&b, "- `%s`: `%s`\n", inp.Name, g.mapTypeDefToTS(inp.Type))
 			}
 			b.WriteString("\n")
 		}
 
 		if len(fn.Outputs) > 0 {
-			b.WriteString(fmt.Sprintf("**Returns:** `%s`\n\n", g.mapTypeDefToTS(fn.Outputs[0])))
+			fmt.Fprintf(&b, "**Returns:** `%s`\n\n", g.mapTypeDefToTS(fn.Outputs[0]))
 		}
 	}
 

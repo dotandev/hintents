@@ -18,17 +18,17 @@ var (
 	sessionIDFlag string
 )
 
-// currentSessionData holds the active session context from debug command
-var currentSessionData *session.SessionData
+// currentData holds the active session context from debug command
+var currentData *session.Data
 
 // SetCurrentSession stores the active session for later saving
-func SetCurrentSession(data *session.SessionData) {
-	currentSessionData = data
+func SetCurrentSession(data *session.Data) {
+	currentData = data
 }
 
 // GetCurrentSession returns the active session if any
-func GetCurrentSession() *session.SessionData {
-	return currentSessionData
+func GetCurrentSession() *session.Data {
+	return currentData
 }
 
 var sessionCmd = &cobra.Command{

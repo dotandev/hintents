@@ -55,7 +55,7 @@ func (m *Manager) DecodeEventWithPlugin(pluginName string, eventType string, dat
 }
 
 // GetPlugins returns available plugins
-func (m *Manager) GetPlugins() []PluginMetadata {
+func (m *Manager) GetPlugins() []Metadata {
 	return m.registry.ListPlugins()
 }
 

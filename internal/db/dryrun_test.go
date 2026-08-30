@@ -58,7 +58,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	`)
 	require.NoError(t, err)
 
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 

@@ -173,7 +173,7 @@ func isHashSuffix(seg string) bool {
 		return false
 	}
 	for _, c := range seg[1:] {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}

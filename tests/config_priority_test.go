@@ -33,14 +33,10 @@ func TestConfigPriority(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	os.Setenv("USERPROFILE", tmpDir)
 
-	// Create a dummy config file
-	configDir := filepath.Join(tmpDir, ".erst")
-	err := os.MkdirAll(configDir, 0700)
-	require.NoError(t, err)
-
-	configFile := filepath.Join(configDir, "config.json")
-	configData := []byte(`{"rpc_token": "CONFIG_TOKEN"}`)
-	err = os.WriteFile(configFile, configData, 0600)
+	// Create a dummy TOML config file
+	configFile := filepath.Join(tmpDir, ".erst.toml")
+	configData := []byte(`rpc_token = "CONFIG_TOKEN"`)
+	err := os.WriteFile(configFile, configData, 0600)
 	require.NoError(t, err)
 
 	// Helper to resolve token with same logic as debug.go
@@ -50,7 +46,7 @@ func TestConfigPriority(t *testing.T) {
 			token = os.Getenv("ERST_RPC_TOKEN")
 		}
 		if token == "" {
-			cfg, err := config.LoadConfig()
+			cfg, err := config.Load()
 			if err == nil && cfg.RPCToken != "" {
 				token = cfg.RPCToken
 			}

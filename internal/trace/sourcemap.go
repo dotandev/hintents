@@ -83,7 +83,7 @@ func MergeDebugSymbols(expectedContractID string) error {
 	return nil
 }
 
-func parseAndMergeDwarf(wasmPath string) error {
+func parseAndMergeDwarf(_ string) error {
 	// Stub for the actual DWARF extraction logic using debug/dwarf or passing to the Rust IPC.
 	return nil
 }

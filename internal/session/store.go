@@ -28,8 +28,8 @@ const (
 	DefaultMaxSessions = 1000
 )
 
-// SessionData represents the complete state of a debug session
-type SessionData struct {
+// Data represents the complete state of a debug session
+type Data struct {
 	ID            string    `json:"id"`
 	CreatedAt     time.Time `json:"created_at"`
 	LastAccessAt  time.Time `json:"last_access_at"`
@@ -79,7 +79,7 @@ func NewStore() (*Store, error) {
 
 	// Initialize schema
 	if err = store.initSchema(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
@@ -123,7 +123,7 @@ func (s *Store) initSchema() error {
 }
 
 // Save persists a session to the database
-func (s *Store) Save(ctx context.Context, data *SessionData) error {
+func (s *Store) Save(ctx context.Context, data *Data) error {
 	if data.ID == "" {
 		return fmt.Errorf("session ID is required")
 	}
@@ -173,7 +173,7 @@ func (s *Store) Save(ctx context.Context, data *SessionData) error {
 }
 
 // Load retrieves a session by ID
-func (s *Store) Load(ctx context.Context, sessionID string) (*SessionData, error) {
+func (s *Store) Load(ctx context.Context, sessionID string) (*Data, error) {
 	query := `
 	SELECT id, created_at, last_access_at, status, network, horizon_url, tx_hash,
 	       envelope_xdr, result_xdr, result_meta_xdr,
@@ -182,7 +182,7 @@ func (s *Store) Load(ctx context.Context, sessionID string) (*SessionData, error
 	WHERE id = ?
 	`
 
-	var data SessionData
+	var data Data
 	var createdAt, lastAccessAt string
 
 	err := s.db.QueryRowContext(ctx, query, sessionID).Scan(
@@ -219,7 +219,7 @@ func (s *Store) Load(ctx context.Context, sessionID string) (*SessionData, error
 }
 
 // List returns recent sessions, ordered by last_access_at descending
-func (s *Store) List(ctx context.Context, limit int) ([]*SessionData, error) {
+func (s *Store) List(ctx context.Context, limit int) ([]*Data, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -237,11 +237,11 @@ func (s *Store) List(ctx context.Context, limit int) ([]*SessionData, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
-	var sessions []*SessionData
+	var sessions []*Data
 	for rows.Next() {
-		var data SessionData
+		var data Data
 		var createdAt, lastAccessAt string
 
 		scanErr := rows.Scan(
@@ -364,7 +364,7 @@ func GenerateID(txHash string) string {
 }
 
 // ToSimulationRequest converts stored JSON back to SimulationRequest
-func (s *SessionData) ToSimulationRequest() (*simulator.SimulationRequest, error) {
+func (s *Data) ToSimulationRequest() (*simulator.SimulationRequest, error) {
 	if s.SimRequestJSON == "" {
 		return nil, fmt.Errorf("no simulation request data stored")
 	}
@@ -378,7 +378,7 @@ func (s *SessionData) ToSimulationRequest() (*simulator.SimulationRequest, error
 }
 
 // ToSimulationResponse converts stored JSON back to SimulationResponse
-func (s *SessionData) ToSimulationResponse() (*simulator.SimulationResponse, error) {
+func (s *Data) ToSimulationResponse() (*simulator.SimulationResponse, error) {
 	if s.SimResponseJSON == "" {
 		return nil, fmt.Errorf("no simulation response data stored")
 	}

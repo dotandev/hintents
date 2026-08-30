@@ -27,7 +27,7 @@ func FuzzyMatch(pattern, text string, caseSensitive bool) (score int, positions 
 	for textIdx := 0; textIdx < len(searchText) && patternIdx < len(searchPattern); textIdx++ {
 		if searchText[textIdx] == searchPattern[patternIdx] {
 			positions = append(positions, textIdx)
-			score += 1
+			score++
 
 			// Bonus for consecutive matches
 			if len(positions) > 1 && positions[len(positions)-1] == positions[len(positions)-2]+1 {

@@ -17,7 +17,7 @@ func newTestUIStore(t *testing.T) *UIStateStore {
 	t.Helper()
 	s, err := newUIStateStoreAt(filepath.Join(t.TempDir(), "ui_state.db"))
 	require.NoError(t, err)
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 

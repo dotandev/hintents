@@ -36,7 +36,7 @@ func TestDefaultRetryConfig(t *testing.T) {
 func TestRetryerSuccessFirstAttempt(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	}))
 	defer server.Close()
 
@@ -52,7 +52,7 @@ func TestRetryerSuccessFirstAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected StatusOK, got %d", resp.StatusCode)
@@ -94,11 +94,11 @@ func TestRetryerOn429ThenSuccess(t *testing.T) {
 		attempts++
 		if attempts == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte("rate limited"))
+			_, _ = w.Write([]byte("rate limited"))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	}))
 	defer server.Close()
 
@@ -116,7 +116,7 @@ func TestRetryerOn429ThenSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected StatusOK, got %d", resp.StatusCode)
@@ -129,7 +129,7 @@ func TestRetryerOn429ThenSuccess(t *testing.T) {
 func TestRetryerMaxRetriesExceeded(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte("rate limited"))
+		_, _ = w.Write([]byte("rate limited"))
 	}))
 	defer server.Close()
 
@@ -147,13 +147,13 @@ func TestRetryerMaxRetriesExceeded(t *testing.T) {
 	if err == nil {
 		t.Errorf("expected error, got nil")
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		return
 	}
 	if resp != nil {
 		t.Errorf("expected nil response on error, got response")
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 }
 
@@ -182,11 +182,11 @@ func TestRetryerContextCancellation(t *testing.T) {
 	resp, err := retrier.Do(ctx, req)
 	if err == nil {
 		t.Errorf("expected error from context cancellation, got nil")
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return
 	}
 	if resp != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 }
 
@@ -213,13 +213,13 @@ func TestRetryAfterHeader(t *testing.T) {
 	if err == nil {
 		t.Errorf("expected error (max retries), got nil")
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		return
 	}
 	if resp != nil {
 		t.Errorf("expected nil response on error, got response")
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 
 	// Should have waited at least as long as Retry-After value
@@ -253,7 +253,7 @@ func TestRetryerExponentialBackoff(t *testing.T) {
 func TestRetryTransportSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	}))
 	defer server.Close()
 
@@ -270,7 +270,7 @@ func TestRetryTransportSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected StatusOK, got %d", resp.StatusCode)
@@ -283,11 +283,11 @@ func TestRetryTransportRetry503(t *testing.T) {
 		attempts++
 		if attempts == 1 {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("unavailable"))
+			_, _ = w.Write([]byte("unavailable"))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	}))
 	defer server.Close()
 
@@ -305,7 +305,7 @@ func TestRetryTransportRetry503(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected StatusOK, got %d", resp.StatusCode)
@@ -419,7 +419,7 @@ func TestRetryerRequestBodyNotReplayed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if attempts != 2 {
 		t.Errorf("expected 2 attempts, got %d", attempts)
@@ -448,7 +448,7 @@ func TestRetryerClonedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 }
 
 func TestRetryerNilClient(t *testing.T) {
@@ -465,7 +465,7 @@ func TestRetryerResponseTooLarge(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
-		w.Write([]byte("response too large"))
+		_, _ = w.Write([]byte("response too large"))
 	}))
 	defer server.Close()
 
@@ -484,7 +484,7 @@ func TestRetryerResponseTooLarge(t *testing.T) {
 		t.Fatal("expected error for 413 response, got nil")
 	}
 	if resp != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 
 	if attempts != 1 {
@@ -501,7 +501,7 @@ func TestRetryTransportResponseTooLarge(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
-		w.Write([]byte("response too large"))
+		_, _ = w.Write([]byte("response too large"))
 	}))
 	defer server.Close()
 
@@ -521,7 +521,7 @@ func TestRetryTransportResponseTooLarge(t *testing.T) {
 		t.Fatal("expected error for 413 response, got nil")
 	}
 	if resp != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 
 	if attempts != 1 {
@@ -558,7 +558,7 @@ func searchString(s, sub string) bool {
 func BenchmarkRetryerSuccess(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	}))
 	defer server.Close()
 
@@ -570,7 +570,7 @@ func BenchmarkRetryerSuccess(b *testing.B) {
 		req, _ := http.NewRequest("GET", server.URL, nil)
 		resp, _ := retrier.Do(context.Background(), req)
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 	}
 }
@@ -578,7 +578,7 @@ func BenchmarkRetryerSuccess(b *testing.B) {
 func BenchmarkRetryTransport(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	}))
 	defer server.Close()
 
@@ -591,7 +591,7 @@ func BenchmarkRetryTransport(b *testing.B) {
 		req, _ := http.NewRequest("GET", server.URL, nil)
 		resp, _ := client.Do(req)
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 	}
 }

@@ -4,10 +4,12 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,11 +17,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dotandev/hintents/internal/analyzer"
 	"github.com/dotandev/hintents/internal/config"
+	"github.com/dotandev/hintents/internal/debug"
 	"github.com/dotandev/hintents/internal/decenstorage"
 	"github.com/dotandev/hintents/internal/decoder"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
+	"github.com/dotandev/hintents/internal/lto"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/security"
 	"github.com/dotandev/hintents/internal/session"
@@ -27,6 +32,8 @@ import (
 	"github.com/dotandev/hintents/internal/snapshot"
 	"github.com/dotandev/hintents/internal/telemetry"
 	"github.com/dotandev/hintents/internal/tokenflow"
+	simtypes "github.com/dotandev/hintents/internal/types"
+	"github.com/dotandev/hintents/internal/version"
 	"github.com/dotandev/hintents/internal/visualizer"
 	"github.com/dotandev/hintents/internal/wat"
 	"github.com/dotandev/hintents/internal/watch"
@@ -37,36 +44,44 @@ import (
 )
 
 var (
-	networkFlag         string
-	rpcURLFlag          string
-	rpcTokenFlag        string
-	tracingEnabled      bool
-	otlpExporterURL     string
-	generateTrace       bool
-	traceOutputFile     string
-	snapshotFlag        string
-	compareNetworkFlag  string
-	verbose             bool
-	wasmPath            string
-	wasmOptimizeFlag    bool
-	args                []string
-	themeFlag           string
-	noCacheFlag         bool
-	demoMode            bool
-	watchFlag           bool
-	watchTimeoutFlag    int
-	protocolVersionFlag uint32
-	auditKeyFlag        string
-	publishIPFSFlag     bool
-	publishArweaveFlag  bool
-	ipfsNodeFlag        string
-	arweaveGatewayFlag  string
-	arweaveWalletFlag   string
-	mockTimeFlag        int64
-	mockBaseFeeFlag     uint32
-	mockGasPriceFlag    uint64
-	asyncFlag           bool
-	asyncTimeoutFlag    int
+	networkFlag          string
+	rpcURLFlag           string
+	rpcTokenFlag         string
+	tracingEnabled       bool
+	otlpExporterURL      string
+	generateTrace        bool
+	traceOutputFile      string
+	snapshotFlag         string
+	compareNetworkFlag   string
+	verbose              bool
+	wasmPath             string
+	args                 []string
+	mockLedgerEntryFlags []string
+	mockLedgerManifest   string
+	themeFlag            string
+	noCacheFlag          bool
+	demoMode             bool
+	watchFlag            bool
+	watchTimeoutFlag     int
+	hotReloadFlag        bool
+	hotReloadInterval    time.Duration
+	snapshotsFlag        bool
+	protocolVersionFlag  uint32
+	auditKeyFlag         string
+	publishIPFSFlag      bool
+	publishArweaveFlag   bool
+	ipfsNodeFlag         string
+	arweaveGatewayFlag   string
+	arweaveWalletFlag    string
+	mockTimeFlag         int64
+	mockBaseFeeFlag      uint32
+	mockGasPriceFlag     uint64
+	exportSVGFlag        string
+	loadSnapshotsFlag    string
+	saveSnapshotsFlag    string
+	wasmBase64           string
+	assetSafetyFlag      bool
+	stepBackFlag         int
 )
 
 // DebugCommand holds dependencies for the debug command
@@ -106,19 +121,20 @@ Example:
 	cmd.Flags().StringVarP(&networkFlag, "network", "n", string(rpc.Mainnet), "Stellar network to use (testnet, mainnet, futurenet)")
 	cmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom Horizon RPC URL to use")
 	cmd.Flags().StringVar(&rpcTokenFlag, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
+	cmd.Flags().BoolVar(&snapshotsFlag, "snapshots", false, "Enable simulator snapshot capture (default: disabled)")
 
 	return cmd
 }
 
-func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
-	txHash := args[0]
+func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
+	txHash := cmdArgs[0]
 
 	token := rpcTokenFlag
 	if token == "" {
 		token = os.Getenv("ERST_RPC_TOKEN")
 	}
 	if token == "" {
-		cfg, err := config.LoadConfig()
+		cfg, err := config.Load()
 		if err == nil && cfg.RPCToken != "" {
 			token = cfg.RPCToken
 		}
@@ -151,12 +167,14 @@ func (d *DebugCommand) runDebug(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(resp.EnvelopeXdr))
 
-	// TODO: Use d.Runner for simulation when ready
-	// simReq := &simulator.SimulationRequest{
-	//     EnvelopeXdr: resp.EnvelopeXdr,
-	//     ResultMetaXdr: resp.ResultMetaXdr,
-	// }
-	// simResp, err := d.Runner.Run(simReq)
+	simReq := &simulator.SimulationRequest{
+		EnvelopeXdr:   resp.EnvelopeXdr,
+		ResultMetaXdr: resp.ResultMetaXdr,
+	}
+	_, err = d.Runner.Run(cmd.Context(), simReq)
+	if err != nil {
+		return errors.WrapSimulationFailed(err, txHash)
+	}
 
 	return nil
 }
@@ -199,8 +217,13 @@ Local WASM Replay Mode:
   erst debug --demo`,
 	Args: cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		// Demo mode or local WASM replay don't need transaction hash
-		if demoMode || wasmPath != "" {
+		if hotReloadFlag && wasmPath == "" {
+			return errors.WrapValidationError("--hot-reload requires --wasm")
+		}
+
+		// Demo mode, local WASM replay, and offline registry load don't need a
+		// transaction hash or network connectivity.
+		if demoMode || wasmPath != "" || loadSnapshotsFlag != "" {
 			return nil
 		}
 
@@ -261,6 +284,11 @@ Local WASM Replay Mode:
 		// Demo mode: print sample output for testing color detection (no network)
 		if demoMode {
 			return runDemoMode(cmdArgs)
+		}
+
+		// Offline replay from a saved snapshot registry
+		if loadSnapshotsFlag != "" {
+			return runFromRegistry(cmd.Context(), loadSnapshotsFlag)
 		}
 
 		// Local WASM replay mode
@@ -337,6 +365,12 @@ Local WASM Replay Mode:
 					opts = append(opts, rpc.WithHorizonURL(cfg.RpcUrl))
 					horizonURL = cfg.RpcUrl
 				}
+				if cfg.FailureThreshold > 0 {
+					opts = append(opts, rpc.WithCircuitBreakerThreshold(cfg.FailureThreshold))
+				}
+				if cfg.RetryTimeout > 0 {
+					opts = append(opts, rpc.WithCircuitBreakerTimeout(cfg.RetryTimeout))
+				}
 			}
 		}
 
@@ -355,6 +389,8 @@ Local WASM Replay Mode:
 			fmt.Println("🚫 Cache disabled by --no-cache flag")
 		}
 
+		_ = client.CheckStaleness(ctx, networkFlag)
+
 		fmt.Printf("Debugging transaction: %s\n", txHash)
 		fmt.Printf("Primary Network: %s\n", networkFlag)
 		if compareNetworkFlag != "" {
@@ -364,33 +400,36 @@ Local WASM Replay Mode:
 		// Fetch transaction details
 		if watchFlag {
 			spinner := watch.NewSpinner()
-			poller := watch.NewPoller(watch.PollerConfig{
-				InitialInterval: 1 * time.Second,
-				MaxInterval:     10 * time.Second,
-				TimeoutDuration: time.Duration(watchTimeoutFlag) * time.Second,
-			})
-
 			spinner.Start("Waiting for transaction to appear on-chain...")
+			watchCtx, cancelWatch := context.WithTimeout(ctx, time.Duration(watchTimeoutFlag)*time.Second)
+			defer cancelWatch()
 
-			result, err := poller.Poll(ctx, func(pollCtx context.Context) (interface{}, error) {
-				_, pollErr := client.GetTransaction(pollCtx, txHash)
-				if pollErr != nil {
-					return nil, pollErr
-				}
-				return true, nil
-			}, nil)
-
+			statusCh, err := client.WatchTransaction(watchCtx, txHash)
 			if err != nil {
-				spinner.StopWithError("Failed to poll for transaction")
+				spinner.StopWithError("Failed to start transaction watch")
 				return errors.WrapSimulationLogicError(fmt.Sprintf("watch mode error: %v", err))
 			}
 
-			if !result.Found {
+			var finalStatus *rpc.TxStatus
+			for status := range statusCh {
+				if status.IsFinal() {
+					statusCopy := status
+					finalStatus = &statusCopy
+					break
+				}
+			}
+
+			if err := watchCtx.Err(); err != nil {
 				spinner.StopWithError("Transaction not found within timeout")
 				return errors.WrapTransactionNotFound(fmt.Errorf("not found after %d seconds", watchTimeoutFlag))
 			}
 
-			spinner.StopWithMessage("Transaction found! Starting debug...")
+			if finalStatus == nil {
+				spinner.StopWithError("Transaction watch ended unexpectedly")
+				return errors.WrapSimulationLogicError("watch mode ended before a final transaction status was received")
+			}
+
+			spinner.StopWithMessage(fmt.Sprintf("Transaction reached %s. Starting debug...", strings.ToLower(finalStatus.Status)))
 		}
 
 		fmt.Printf("Fetching transaction: %s\n", txHash)
@@ -405,6 +444,13 @@ Local WASM Replay Mode:
 		keys, err := extractLedgerKeys(resp.ResultMetaXdr)
 		if err != nil {
 			return errors.WrapUnmarshalFailed(err, "result meta")
+		}
+
+		// Load config to get MaxTraceDepth for decoder calls
+		cfg, _ := config.Load()
+		maxDepth := 50
+		if cfg != nil {
+			maxDepth = cfg.MaxTraceDepth
 		}
 
 		// Initialize Simulator Runner
@@ -423,7 +469,19 @@ Local WASM Replay Mode:
 			}
 		}
 
+		overrideEntries, err := loadMockLedgerOverrides()
+		if err != nil {
+			return err
+		}
+
 		var lastSimResp *simulator.SimulationResponse
+
+		// Collected per-timestamp states written to disk when --save-snapshots is set.
+		type snapshotEntry struct {
+			ts      int64
+			entries map[string]string
+		}
+		var collectedEntries []snapshotEntry
 
 		for _, ts := range timestamps {
 			if len(timestamps) > 1 {
@@ -456,13 +514,24 @@ Local WASM Replay Mode:
 					}
 				}
 
+				if len(overrideEntries) > 0 {
+					ledgerEntries = simulator.MergeLedgerOverrides(ledgerEntries, overrideEntries)
+					fmt.Printf("Applied %d mock ledger override entries\n", len(overrideEntries))
+				}
+
+				if saveSnapshotsFlag != "" {
+					collectedEntries = append(collectedEntries, snapshotEntry{ts: ts, entries: ledgerEntries})
+				}
+
 				fmt.Printf("Running simulation on %s...\n", networkFlag)
 				simReq := &simulator.SimulationRequest{
-					EnvelopeXdr:     resp.EnvelopeXdr,
-					ResultMetaXdr:   resp.ResultMetaXdr,
-					LedgerEntries:   ledgerEntries,
-					Timestamp:       ts,
-					ProtocolVersion: nil,
+					EnvelopeXdr:       resp.EnvelopeXdr,
+					ResultMetaXdr:     resp.ResultMetaXdr,
+					LedgerEntries:     ledgerEntries,
+					Timestamp:         ts,
+					ProtocolVersion:   nil,
+					EnableSnapshots:   snapshotsFlag,
+					EnableAssetSafety: assetSafetyFlag,
 				}
 
 				// Apply protocol version override if specified
@@ -480,6 +549,16 @@ Local WASM Replay Mode:
 					return errors.WrapSimulationFailed(err, "")
 				}
 				printSimulationResult(networkFlag, simResp)
+				if assetSafetyFlag {
+					analyzer.PrintAssetAnomalies(simResp.AssetAnomalies)
+				}
+				// Budget usage is already rendered inside printSimulationResult; skip duplicate block.
+
+				// Render colored before/after ledger state diff.
+				if postState, diffErr := rpc.ExtractPostStateLedgerEntries(resp.ResultMetaXdr); diffErr == nil {
+					visualizer.RenderLedgerStateDiff(ledgerEntries, postState, false)
+				}
+
 				// Fetch contract bytecode on demand for any contract calls in the trace; cache via RPC client
 				if client != nil && simResp != nil && len(simResp.DiagnosticEvents) > 0 {
 					contractIDs := collectContractIDsFromDiagnosticEvents(simResp.DiagnosticEvents)
@@ -506,11 +585,16 @@ Local WASM Replay Mode:
 							return
 						}
 					}
+					if len(overrideEntries) > 0 {
+						entries = simulator.MergeLedgerOverrides(entries, overrideEntries)
+						fmt.Printf("Applied %d mock ledger override entries to primary comparison\n", len(overrideEntries))
+					}
 					primaryReq := &simulator.SimulationRequest{
-						EnvelopeXdr:   resp.EnvelopeXdr,
-						ResultMetaXdr: resp.ResultMetaXdr,
-						LedgerEntries: entries,
-						Timestamp:     ts,
+						EnvelopeXdr:     resp.EnvelopeXdr,
+						ResultMetaXdr:   resp.ResultMetaXdr,
+						LedgerEntries:   entries,
+						Timestamp:       ts,
+						EnableSnapshots: snapshotsFlag,
 					}
 					applySimulationFeeMocks(primaryReq)
 					primaryResult, primaryErr = runner.Run(ctx, primaryReq)
@@ -546,11 +630,17 @@ Local WASM Replay Mode:
 						}
 					}
 
+					if len(overrideEntries) > 0 {
+						entries = simulator.MergeLedgerOverrides(entries, overrideEntries)
+						fmt.Printf("Applied %d mock ledger override entries to compare comparison\n", len(overrideEntries))
+					}
+
 					compareReq := &simulator.SimulationRequest{
-						EnvelopeXdr:   resp.EnvelopeXdr,
-						ResultMetaXdr: compareResp.ResultMetaXdr,
-						LedgerEntries: entries,
-						Timestamp:     ts,
+						EnvelopeXdr:     compareResp.EnvelopeXdr,
+						ResultMetaXdr:   compareResp.ResultMetaXdr,
+						LedgerEntries:   entries,
+						Timestamp:       ts,
+						EnableSnapshots: snapshotsFlag,
 					}
 					applySimulationFeeMocks(compareReq)
 					compareResult, compareErr = runner.Run(ctx, compareReq)
@@ -577,10 +667,67 @@ Local WASM Replay Mode:
 				diffResults(primaryResult, compareResult, networkFlag, compareNetworkFlag)
 			}
 			lastSimResp = simResp
+
+			if exportSVGFlag != "" && simResp != nil && len(simResp.DiagnosticEvents) > 0 {
+				callTree, err := decoder.DecodeDiagnosticEvents(simResp.DiagnosticEvents, maxDepth)
+				if err != nil {
+					fmt.Printf("%s Error building call tree for SVG: %v\n", visualizer.Symbol("error"), err)
+				} else {
+					svg := visualizer.GenerateCallGraphSVG(callTree, maxDepth)
+					err := os.WriteFile(exportSVGFlag, []byte(svg), 0644)
+					if err != nil {
+						fmt.Printf("%s Error saving SVG: %v\n", visualizer.Symbol("error"), err)
+					} else {
+						fmt.Printf("%s Call graph exported to: %s\n", visualizer.Symbol("success"), exportSVGFlag)
+					}
+				}
+			}
 		}
 
 		if lastSimResp == nil {
 			return errors.WrapSimulationLogicError("no simulation results generated")
+		}
+
+		// Time-travel: Step back N steps from the end of execution trace
+		if stepBackFlag > 0 {
+			originalEventCount := len(lastSimResp.Events)
+			originalLogCount := len(lastSimResp.Logs)
+
+			if stepBackFlag >= originalEventCount {
+				fmt.Printf("%s Cannot step back %d steps: only %d events in trace\n", visualizer.Error(), stepBackFlag, originalEventCount)
+				return errors.WrapSimulationLogicError("step-back value exceeds trace length")
+			}
+
+			// Truncate events and logs to step back from the end
+			newEventCount := originalEventCount - stepBackFlag
+			lastSimResp.Events = lastSimResp.Events[:newEventCount]
+
+			// Also truncate logs proportionally
+			if originalLogCount > 0 {
+				newLogCount := originalLogCount - stepBackFlag
+				if newLogCount < 0 {
+					newLogCount = 0
+				}
+				lastSimResp.Logs = lastSimResp.Logs[:newLogCount]
+			}
+
+			fmt.Printf("%s Time-travel: Stepped back %d steps from end of trace\n", visualizer.Symbol("clock"), stepBackFlag)
+			fmt.Printf("  Events: %d → %d\n", originalEventCount, len(lastSimResp.Events))
+			fmt.Printf("  Logs: %d → %d\n", originalLogCount, len(lastSimResp.Logs))
+		}
+
+		// Persist snapshot registry to disk when --save-snapshots is set.
+		if saveSnapshotsFlag != "" && len(collectedEntries) > 0 {
+			reg := debug.New(version.Version, txHash, networkFlag, resp.EnvelopeXdr, resp.ResultMetaXdr)
+			for _, ce := range collectedEntries {
+				reg.Add(ce.ts, snapshot.FromMap(ce.entries))
+			}
+			if err := reg.SaveToFile(saveSnapshotsFlag); err != nil {
+				fmt.Printf("Warning: failed to save snapshot registry: %v\n", err)
+			} else {
+				fmt.Printf("Snapshot registry saved: %s (%d entr%s)\n",
+					saveSnapshotsFlag, len(reg.Entries), pluralIes(len(reg.Entries)))
+			}
 		}
 
 		// Analysis: Error Suggestions (Heuristic-based)
@@ -588,7 +735,7 @@ Local WASM Replay Mode:
 			suggestionEngine := decoder.NewSuggestionEngine()
 
 			// Decode events for analysis
-			callTree, err := decoder.DecodeEvents(lastSimResp.Events)
+			callTree, err := decoder.DecodeEvents(lastSimResp.Events, maxDepth)
 			if err == nil && callTree != nil {
 				suggestions := suggestionEngine.AnalyzeCallTree(callTree)
 				if len(suggestions) > 0 {
@@ -655,8 +802,9 @@ Local WASM Replay Mode:
 
 		// Session Management
 		simReq := &simulator.SimulationRequest{
-			EnvelopeXdr:   resp.EnvelopeXdr,
-			ResultMetaXdr: resp.ResultMetaXdr,
+			EnvelopeXdr:     resp.EnvelopeXdr,
+			ResultMetaXdr:   resp.ResultMetaXdr,
+			EnableSnapshots: snapshotsFlag,
 		}
 		applySimulationFeeMocks(simReq)
 		simReqJSON, err := json.Marshal(simReq)
@@ -668,7 +816,7 @@ Local WASM Replay Mode:
 			fmt.Printf("Warning: failed to serialize simulation results: %v\n", err)
 		}
 
-		sessionData := &session.SessionData{
+		sessionData := &session.Data{
 			ID:              session.GenerateID(txHash),
 			CreatedAt:       time.Now(),
 			LastAccessAt:    time.Now(),
@@ -681,7 +829,7 @@ Local WASM Replay Mode:
 			ResultMetaXdr:   resp.ResultMetaXdr,
 			SimRequestJSON:  string(simReqJSON),
 			SimResponseJSON: string(simRespJSON),
-			ErstVersion:     Version,
+			ErstVersion:     version.Version,
 			SchemaVersion:   session.SchemaVersion,
 		}
 		SetCurrentSession(sessionData)
@@ -772,34 +920,85 @@ func runLocalWasmReplay() error {
 	fmt.Println()
 
 	// Verify WASM file exists
-	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
-		return errors.WrapValidationError(fmt.Sprintf("WASM file not found: %s", wasmPath))
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("WASM file not found or unreadable: %s", wasmPath))
 	}
+	wasmBase64 = base64.StdEncoding.EncodeToString(wasmBytes)
 
 	fmt.Printf("%s Local WASM Replay Mode\n", visualizer.Symbol("wrench"))
 	fmt.Printf("WASM File: %s\n", wasmPath)
 	fmt.Printf("Arguments: %v\n", args)
 	fmt.Println()
 
+	// Check for LTO in the project that produced the WASM
+	checkLTOWarning(wasmPath)
+
 	// Create simulator runner
 	runner, err := simulator.NewRunner("", tracingEnabled)
 	if err != nil {
 		return errors.WrapSimulatorNotFound(err.Error())
 	}
+	defer runner.Close()
 
-	// Create simulation request with local WASM
+	ctx := context.Background()
+	if hotReloadFlag {
+		return runLocalWasmReplaySession(ctx, runner, os.Stdin, os.Stdout)
+	}
+	return runLocalWasmReplayOnce(ctx, runner, false)
+}
+
+func newLocalWasmSimulationRequest(forceNoCache bool) *simulator.SimulationRequest {
 	req := &simulator.SimulationRequest{
-		EnvelopeXdr:   "",  // Empty for local replay
-		ResultMetaXdr: "",  // Empty for local replay
-		LedgerEntries: nil, // Mock state will be generated
-		WasmPath:      &wasmPath,
-		MockArgs:      &args,
+		EnvelopeXdr:     "",  // Empty for local replay
+		ResultMetaXdr:   "",  // Empty for local replay
+		LedgerEntries:   nil, // Mock state will be generated
+		WasmPath:        &wasmPath,
+		NoCache:         noCacheFlag || forceNoCache,
+		MockArgs:        &args,
+		ContractWasm:    &wasmBase64, // Pass the WASM binary for source mapping
+		EnableSnapshots: snapshotsFlag,
 	}
 	applySimulationFeeMocks(req)
+	return req
+}
+
+func loadMockLedgerOverrides() (map[string]string, error) {
+	var overrides map[string]string
+	if mockLedgerManifest != "" {
+		manifestOverrides, err := simulator.LoadLedgerOverrideManifest(mockLedgerManifest)
+		if err != nil {
+			return nil, errors.WrapValidationError(fmt.Sprintf("failed to load mock ledger manifest: %v", err))
+		}
+		overrides = simulator.MergeLedgerOverrides(overrides, manifestOverrides)
+	}
+
+	if len(mockLedgerEntryFlags) > 0 {
+		flagOverrides, err := simulator.ParseLedgerOverrideFlags(mockLedgerEntryFlags)
+		if err != nil {
+			return nil, errors.WrapValidationError(fmt.Sprintf("failed to parse mock ledger entries: %v", err))
+		}
+		overrides = simulator.MergeLedgerOverrides(overrides, flagOverrides)
+	}
+
+	return overrides, nil
+}
+
+func runLocalWasmReplayOnce(ctx context.Context, runner simulator.RunnerInterface, forceNoCache bool) error {
+	req := newLocalWasmSimulationRequest(forceNoCache)
+
+	overrideEntries, err := loadMockLedgerOverrides()
+	if err != nil {
+		return err
+	}
+	if len(overrideEntries) > 0 {
+		req.LedgerEntries = simulator.MergeLedgerOverrides(req.LedgerEntries, overrideEntries)
+		fmt.Printf("Applied %d mock ledger override entries for local replay\n", len(overrideEntries))
+	}
 
 	// Run simulation
 	fmt.Printf("%s Executing contract locally...\n", visualizer.Symbol("play"))
-	resp, err := runner.Run(context.Background(), req)
+	resp, err := runner.Run(ctx, req)
 	if err != nil {
 		fmt.Printf("%s Technical failure: %v\n", visualizer.Error(), err)
 		return err
@@ -813,8 +1012,17 @@ func runLocalWasmReplay() error {
 			fmt.Printf("Error: %s\n", resp.Error)
 		}
 
+		if resp.StackTrace != nil {
+			printWasmBacktrace(resp.StackTrace)
+		}
+
+		if resp.SourceLocation != nil {
+			fmt.Printf("%s Top-level Location: %s:%d\n", visualizer.Symbol("location"), resp.SourceLocation.File, resp.SourceLocation.Line)
+			displaySourceLocation(resp.SourceLocation)
+		}
+
 		// Fallback to WAT disassembly if source mapping is unavailable but we have an offset
-		if resp.SourceLocation == "" && resp.WasmOffset != nil {
+		if resp.SourceLocation == nil && resp.WasmOffset != nil {
 			fmt.Println()
 			wasmBytes, err := os.ReadFile(wasmPath)
 			if err == nil {
@@ -854,6 +1062,117 @@ func runLocalWasmReplay() error {
 	}
 
 	return nil
+}
+
+func runLocalWasmReplaySession(ctx context.Context, runner simulator.RunnerInterface, in io.Reader, out io.Writer) error {
+	fmt.Println("[watcher] Hot reload enabled")
+	if err := runLocalWasmReplayOnce(ctx, runner, false); err != nil {
+		return err
+	}
+
+	initialFP, err := watch.ComputeWasmFingerprint(wasmPath, 5, 50*time.Millisecond)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("failed to fingerprint initial wasm: %v", err))
+	}
+	lastAppliedHash := initialFP.Hash
+
+	cfg := watch.DefaultWasmReloaderConfig(wasmPath, hotReloadInterval)
+	reloadEvents, reloadErrors, err := watch.StartWasmReloader(ctx, cfg)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("failed to start wasm watcher: %v", err))
+	}
+	fmt.Println("[watcher] Watching for WASM changes")
+
+	reader := bufio.NewReader(in)
+	var pending *watch.ReloadEvent
+
+	for {
+		if pending != nil {
+			choice, promptErr := promptHotReloadChoice(reader, out)
+			if promptErr != nil {
+				return promptErr
+			}
+
+			switch choice {
+			case 'r':
+				fmt.Println("[watcher] Re-running simulation with updated WASM")
+				if err := runLocalWasmReplayOnce(ctx, runner, true); err != nil {
+					fmt.Printf("[watcher] Re-run failed: %v\n", err)
+				} else {
+					lastAppliedHash = pending.Hash
+				}
+			case 's':
+				fmt.Println("[watcher] Reload skipped")
+			case 'q':
+				fmt.Println("[watcher] Exiting hot reload session")
+				return nil
+			}
+			pending = drainLatestReloadEvent(reloadEvents, lastAppliedHash)
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case watchErr, ok := <-reloadErrors:
+			if !ok {
+				reloadErrors = nil
+				continue
+			}
+			fmt.Printf("[watcher] Warning: %v\n", watchErr)
+		case event, ok := <-reloadEvents:
+			if !ok {
+				return nil
+			}
+			if event.Hash == lastAppliedHash {
+				continue
+			}
+			fmt.Println("[watcher] WASM updated (hash changed)")
+			fmt.Println("[watcher] Reload available")
+			pending = &event
+		}
+	}
+}
+
+func promptHotReloadChoice(reader *bufio.Reader, out io.Writer) (byte, error) {
+	for {
+		fmt.Fprint(out, "Re-run simulation? (r = reload, s = skip, q = quit): ")
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF && strings.TrimSpace(line) != "" {
+				// Accept final line without trailing newline.
+			} else {
+				return 0, err
+			}
+		}
+
+		choice := strings.ToLower(strings.TrimSpace(line))
+		switch choice {
+		case "r", "s", "q":
+			return choice[0], nil
+		default:
+			fmt.Fprintln(out, "Invalid choice. Please enter r, s, or q.")
+		}
+	}
+}
+
+func drainLatestReloadEvent(events <-chan watch.ReloadEvent, lastAppliedHash string) *watch.ReloadEvent {
+	var latest *watch.ReloadEvent
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				return latest
+			}
+			if event.Hash == lastAppliedHash {
+				continue
+			}
+			ev := event
+			latest = &ev
+		default:
+			return latest
+		}
+	}
 }
 
 func extractLedgerKeys(metaXdr string) ([]string, error) {
@@ -958,145 +1277,312 @@ func collectContractIDsFromDiagnosticEvents(events []simulator.DiagnosticEvent) 
 }
 
 func printSimulationResult(network string, res *simulator.SimulationResponse) {
-	fmt.Printf("\n--- Result for %s ---\n", network)
-	fmt.Printf("Status: %s\n", res.Status)
+	// Section header
+	sep := strings.Repeat("─", 60)
+	fmt.Printf("\n%s\n", visualizer.Colorize("  "+sep, "dim"))
+	fmt.Printf("  %s  %s\n",
+		visualizer.Colorize("Result for", "bold"),
+		visualizer.Colorize(network, "cyan"),
+	)
+	fmt.Printf("  %s\n\n", visualizer.Colorize(sep, "dim"))
+
+	// Status line — green for success, red for failure
+	statusColor := "green"
+	statusIcon := visualizer.Success()
+	if res.Status != "success" {
+		statusColor = "red"
+		statusIcon = visualizer.Error()
+	}
+	fmt.Printf("  %s  Status: %s\n", statusIcon, visualizer.Colorize(res.Status, statusColor))
+
+	// Determine and display snapshot status
+	hasOOM := res.BudgetUsage != nil && res.BudgetUsage.MemoryUsagePercent >= 99.0
+	snapshotStatus := simtypes.DetermineSnapshotStatus(
+		len(res.Events)+len(res.DiagnosticEvents),
+		len(res.DiagnosticEvents),
+		hasOOM,
+	)
+	snapshotColor := "green"
+	if !snapshotStatus.IsHealthy() {
+		snapshotColor = "yellow"
+	}
+	fmt.Printf("  %s  Snapshot: %s\n", visualizer.Info(), visualizer.Colorize(string(snapshotStatus), snapshotColor))
+	if !snapshotStatus.IsHealthy() {
+		fmt.Printf("       %s\n", visualizer.Colorize(snapshotStatus.StatusMessage(), "yellow"))
+	}
+
+	// Error message — always red
 	if res.Error != "" {
-		fmt.Printf("Error: %s\n", res.Error)
+		fmt.Printf("\n  %s  %s\n", visualizer.Error(), visualizer.Colorize(res.Error, "red"))
 	}
 
-	// Display budget usage if available
+	// Stack trace with resolved source locations
+	if res.StackTrace != nil && len(res.StackTrace.Frames) > 0 {
+		printWasmBacktrace(res.StackTrace)
+	}
+
+	// Top-level source location
+	if res.SourceLocation != nil {
+		fmt.Printf("  %s Location: %s:%d\n",
+			visualizer.Symbol("location"),
+			visualizer.Colorize(res.SourceLocation.File, "cyan"),
+			res.SourceLocation.Line,
+		)
+		displaySourceLocation(res.SourceLocation)
+	}
+
+	// Budget / resource usage
 	if res.BudgetUsage != nil {
-		fmt.Printf("\nResource Usage:\n")
+		fmt.Printf("\n  %s  Resource Usage:\n", visualizer.Colorize("──", "bold"))
 
-		// CPU usage with percentage and warning indicator
-		cpuIndicator := ""
-		if res.BudgetUsage.CPUUsagePercent >= 95.0 {
-			cpuIndicator = " [!]  CRITICAL"
-		} else if res.BudgetUsage.CPUUsagePercent >= 80.0 {
-			cpuIndicator = " [!]  WARNING"
-		}
-		fmt.Printf("  CPU Instructions: %d / %d (%.2f%%)%s\n",
-			res.BudgetUsage.CPUInstructions,
+		cpuColor, cpuSuffix := budgetIndicator(res.BudgetUsage.CPUUsagePercent)
+		fmt.Printf("    CPU Instructions: %s / %d  %s%s\n",
+			visualizer.Colorize(fmt.Sprintf("%d", res.BudgetUsage.CPUInstructions), cpuColor),
 			res.BudgetUsage.CPULimit,
-			res.BudgetUsage.CPUUsagePercent,
-			cpuIndicator)
+			visualizer.Colorize(fmt.Sprintf("(%.2f%%)", res.BudgetUsage.CPUUsagePercent), cpuColor),
+			cpuSuffix,
+		)
 
-		// Memory usage with percentage and warning indicator
-		memIndicator := ""
-		if res.BudgetUsage.MemoryUsagePercent >= 95.0 {
-			memIndicator = " [!]  CRITICAL"
-		} else if res.BudgetUsage.MemoryUsagePercent >= 80.0 {
-			memIndicator = " [!]  WARNING"
-		}
-		fmt.Printf("  Memory Bytes: %d / %d (%.2f%%)%s\n",
-			res.BudgetUsage.MemoryBytes,
+		memColor, memSuffix := budgetIndicator(res.BudgetUsage.MemoryUsagePercent)
+		fmt.Printf("    Memory Bytes:     %s / %d  %s%s\n",
+			visualizer.Colorize(fmt.Sprintf("%d", res.BudgetUsage.MemoryBytes), memColor),
 			res.BudgetUsage.MemoryLimit,
-			res.BudgetUsage.MemoryUsagePercent,
-			memIndicator)
+			visualizer.Colorize(fmt.Sprintf("(%.2f%%)", res.BudgetUsage.MemoryUsagePercent), memColor),
+			memSuffix,
+		)
 
-		fmt.Printf("  Operations: %d\n", res.BudgetUsage.OperationsCount)
+		fmt.Printf("    Operations:       %d\n", res.BudgetUsage.OperationsCount)
 	}
 
-	// Display diagnostic events with details
+	// Diagnostic events
 	if len(res.DiagnosticEvents) > 0 {
-		fmt.Printf("\nDiagnostic Events: %d\n", len(res.DiagnosticEvents))
+		fmt.Printf("\n  %s  Diagnostic Events: %s\n",
+			visualizer.Colorize("──", "bold"),
+			visualizer.Colorize(fmt.Sprintf("%d", len(res.DiagnosticEvents)), "cyan"),
+		)
 		for i, event := range res.DiagnosticEvents {
-			if i < 10 { // Show first 10 events
-				fmt.Printf("  [%d] Type: %s", i+1, event.EventType)
-				if event.ContractID != nil {
-					fmt.Printf(", Contract: %s", *event.ContractID)
-				}
-				if deprecatedFn, ok := deprecatedHostFunctionInDiagnosticEvent(event); ok {
-					fmt.Printf(" %s %s", visualizer.Warning(), visualizer.Colorize("deprecated host fn: "+deprecatedFn, "yellow"))
-				}
-				fmt.Printf("\n")
-				if len(event.Topics) > 0 {
-					fmt.Printf("      Topics: %v\n", event.Topics)
-				}
-				if event.Data != "" && len(event.Data) < 100 {
-					fmt.Printf("      Data: %s\n", event.Data)
-				}
+			if i >= 10 {
+				fmt.Printf("    %s\n",
+					visualizer.Colorize(fmt.Sprintf("… and %d more events", len(res.DiagnosticEvents)-10), "dim"),
+				)
+				break
 			}
-		}
-		if len(res.DiagnosticEvents) > 10 {
-			fmt.Printf("  ... and %d more events\n", len(res.DiagnosticEvents)-10)
+			eventTypeColor := "cyan"
+			if strings.Contains(strings.ToLower(event.EventType), "error") ||
+				strings.Contains(strings.ToLower(event.EventType), "fail") {
+				eventTypeColor = "red"
+			}
+			fmt.Printf("    [%d] %s", i+1, visualizer.Colorize(event.EventType, eventTypeColor))
+			if event.ContractID != nil {
+				fmt.Printf("  %s", visualizer.Colorize(*event.ContractID, "dim"))
+			}
+			if deprecatedFn, ok := deprecatedHostFunctionInDiagnosticEvent(event); ok {
+				fmt.Printf("  %s %s",
+					visualizer.Warning(),
+					visualizer.Colorize("deprecated host fn: "+deprecatedFn, "yellow"),
+				)
+			}
+			fmt.Println()
+			if len(event.Topics) > 0 {
+				fmt.Printf("         Topics: %s\n", visualizer.Colorize(fmt.Sprintf("%v", event.Topics), "dim"))
+			}
+			if event.Data != "" && len(event.Data) < 100 {
+				fmt.Printf("         Data:   %s\n", visualizer.Colorize(event.Data, "dim"))
+			}
 		}
 	} else {
-		fmt.Printf("\nEvents: %d\n", len(res.Events))
+		fmt.Printf("\n  Events: %s\n",
+			visualizer.Colorize(fmt.Sprintf("%d", len(res.Events)), "cyan"),
+		)
 	}
 
-	// Display logs
+	// Logs
 	if len(res.Logs) > 0 {
-		fmt.Printf("\nLogs: %d\n", len(res.Logs))
-		for i, log := range res.Logs {
-			if i < 5 { // Show first 5 logs
-				fmt.Printf("  - %s\n", log)
+		fmt.Printf("\n  %s  Logs: %s\n",
+			visualizer.Colorize("──", "bold"),
+			visualizer.Colorize(fmt.Sprintf("%d", len(res.Logs)), "cyan"),
+		)
+		for i, logLine := range res.Logs {
+			if i >= 5 {
+				fmt.Printf("    %s\n",
+					visualizer.Colorize(fmt.Sprintf("… and %d more logs", len(res.Logs)-5), "dim"),
+				)
+				break
 			}
-		}
-		if len(res.Logs) > 5 {
-			fmt.Printf("  ... and %d more logs\n", len(res.Logs)-5)
+			fmt.Printf("    %s %s\n", visualizer.Colorize("·", "dim"), logLine)
 		}
 	}
-	fmt.Printf("Events: %d, Logs: %d\n", len(res.Events), len(res.Logs))
+
+	fmt.Printf("\n  %s\n",
+		visualizer.Colorize(
+			fmt.Sprintf("Events: %d  Logs: %d", len(res.Events), len(res.Logs)),
+			"dim",
+		),
+	)
+}
+
+// budgetIndicator returns a color name and warning suffix for a budget usage percentage.
+func budgetIndicator(pct float64) (color, suffix string) {
+	switch {
+	case pct >= 95.0:
+		return "red", "  " + visualizer.Error() + "  " + visualizer.Colorize("CRITICAL", "red")
+	case pct >= 80.0:
+		return "yellow", "  " + visualizer.Warning() + "  " + visualizer.Colorize("WARNING", "yellow")
+	default:
+		return "green", ""
+	}
 }
 
 func diffResults(res1, res2 *simulator.SimulationResponse, net1, net2 string) {
-	fmt.Printf("\n=== Comparison: %s vs %s ===\n", net1, net2)
+	sep := strings.Repeat("═", 64)
+	fmt.Println()
+	fmt.Println(visualizer.Colorize("╔"+sep+"╗", "cyan"))
+	title := fmt.Sprintf("  COMPARISON: %s  vs  %s  ", net1, net2)
+	pad := len(sep) - len(title)
+	if pad < 0 {
+		pad = 0
+	}
+	fmt.Printf(visualizer.Colorize("║", "cyan")+"%s"+strings.Repeat(" ", pad)+visualizer.Colorize("║", "cyan")+"\n", title)
+	fmt.Println(visualizer.Colorize("╚"+sep+"╝", "cyan"))
+	fmt.Println()
 
+	// ── Status ────────────────────────────────────────────────────────────────
+	fmt.Println(visualizer.Colorize("── Execution Status "+strings.Repeat("─", 44), "bold"))
 	if res1.Status != res2.Status {
-		fmt.Printf("Status Mismatch: %s (%s) vs %s (%s)\n", res1.Status, net1, res2.Status, net2)
+		fmt.Printf("  %s  Status mismatch:\n", visualizer.Error())
+		fmt.Printf("    %-12s %s\n", visualizer.Colorize(net1+":", "dim"), visualizer.Colorize(res1.Status, "red"))
+		fmt.Printf("    %-12s %s\n", visualizer.Colorize(net2+":", "dim"), visualizer.Colorize(res2.Status, "red"))
 	} else {
-		fmt.Printf("Status Match: %s\n", res1.Status)
+		statusColor := "green"
+		if res1.Status != "success" {
+			statusColor = "red"
+		}
+		fmt.Printf("  %s  Status match: %s\n",
+			visualizer.Success(),
+			visualizer.Colorize(res1.Status, statusColor),
+		)
 	}
 
-	// Compare diagnostic events if available
-	if len(res1.DiagnosticEvents) > 0 && len(res2.DiagnosticEvents) > 0 {
+	// ── Diagnostic / Raw Events ───────────────────────────────────────────────
+	fmt.Println()
+	fmt.Println(visualizer.Colorize("── Event Counts "+strings.Repeat("─", 47), "bold"))
+	if len(res1.DiagnosticEvents) > 0 || len(res2.DiagnosticEvents) > 0 {
 		if len(res1.DiagnosticEvents) != len(res2.DiagnosticEvents) {
-			fmt.Printf("[DIFF] Diagnostic events count mismatch: %d vs %d\n",
-				len(res1.DiagnosticEvents), len(res2.DiagnosticEvents))
+			fmt.Printf("  %s  Diagnostic events: %s (%s)  vs  %s (%s)\n",
+				visualizer.Warning(),
+				visualizer.Colorize(fmt.Sprintf("%d", len(res1.DiagnosticEvents)), "yellow"), net1,
+				visualizer.Colorize(fmt.Sprintf("%d", len(res2.DiagnosticEvents)), "yellow"), net2,
+			)
+		} else {
+			fmt.Printf("  %s  Diagnostic events: %s (both networks)\n",
+				visualizer.Success(),
+				visualizer.Colorize(fmt.Sprintf("%d", len(res1.DiagnosticEvents)), "green"),
+			)
 		}
 	} else if len(res1.Events) != len(res2.Events) {
-		fmt.Printf("[DIFF] Events count mismatch: %d vs %d\n", len(res1.Events), len(res2.Events))
+		fmt.Printf("  %s  Events: %s (%s)  vs  %s (%s)\n",
+			visualizer.Warning(),
+			visualizer.Colorize(fmt.Sprintf("%d", len(res1.Events)), "yellow"), net1,
+			visualizer.Colorize(fmt.Sprintf("%d", len(res2.Events)), "yellow"), net2,
+		)
+	} else {
+		fmt.Printf("  %s  Events: %s (both networks)\n",
+			visualizer.Success(),
+			visualizer.Colorize(fmt.Sprintf("%d", len(res1.Events)), "green"),
+		)
 	}
 
-	// Compare budget usage if available
+	// ── Budget ────────────────────────────────────────────────────────────────
 	if res1.BudgetUsage != nil && res2.BudgetUsage != nil {
-		if res1.BudgetUsage.CPUInstructions != res2.BudgetUsage.CPUInstructions {
-			fmt.Printf("[DIFF] CPU instructions: %d vs %d\n",
-				res1.BudgetUsage.CPUInstructions, res2.BudgetUsage.CPUInstructions)
-		}
-		if res1.BudgetUsage.MemoryBytes != res2.BudgetUsage.MemoryBytes {
-			fmt.Printf("[DIFF] Memory bytes: %d vs %d\n",
-				res1.BudgetUsage.MemoryBytes, res2.BudgetUsage.MemoryBytes)
-		}
+		fmt.Println()
+		fmt.Println(visualizer.Colorize("── Resource Usage "+strings.Repeat("─", 45), "bold"))
+
+		printBudgetComparison("CPU Instructions",
+			int64(res1.BudgetUsage.CPUInstructions), int64(res2.BudgetUsage.CPUInstructions),
+			net1, net2)
+		printBudgetComparison("Memory Bytes",
+			int64(res1.BudgetUsage.MemoryBytes), int64(res2.BudgetUsage.MemoryBytes),
+			net1, net2)
+		printBudgetComparison("Operations",
+			int64(res1.BudgetUsage.OperationsCount), int64(res2.BudgetUsage.OperationsCount),
+			net1, net2)
 	}
 
-	// Compare Events
-	fmt.Println("\nEvent Diff:")
+	// ── Event-by-event diff ───────────────────────────────────────────────────
 	maxEvents := len(res1.Events)
 	if len(res2.Events) > maxEvents {
 		maxEvents = len(res2.Events)
 	}
+	if maxEvents > 0 {
+		fmt.Println()
+		fmt.Println(visualizer.Colorize("── Event Diff "+strings.Repeat("─", 49), "bold"))
+		hasMismatch := false
+		for i := 0; i < maxEvents; i++ {
+			inRes1 := i < len(res1.Events)
+			inRes2 := i < len(res2.Events)
 
-	for i := 0; i < maxEvents; i++ {
-		var ev1, ev2 string
-		if i < len(res1.Events) {
-			ev1 = res1.Events[i]
-		} else {
-			ev1 = "<missing>"
-		}
+			var ev1Raw, ev2Raw string         // raw event strings for comparison
+			var ev1Display, ev2Display string // display strings (may be colored)
 
-		if i < len(res2.Events) {
-			ev2 = res2.Events[i]
-		} else {
-			ev2 = "<missing>"
-		}
+			if inRes1 {
+				ev1Raw = res1.Events[i]
+				ev1Display = visualizer.Colorize(ev1Raw, "red")
+			} else {
+				ev1Raw = ""
+				ev1Display = visualizer.Colorize("<missing>", "red")
+			}
+			if inRes2 {
+				ev2Raw = res2.Events[i]
+				ev2Display = visualizer.Colorize(ev2Raw, "green")
+			} else {
+				ev2Raw = ""
+				ev2Display = visualizer.Colorize("<missing>", "red")
+			}
 
-		if ev1 != ev2 {
-			fmt.Printf("  [%d] MISMATCH:\n", i)
-			fmt.Printf("    %s: %s\n", net1, ev1)
-			fmt.Printf("    %s: %s\n", net2, ev2)
+			if !inRes1 || !inRes2 || ev1Raw != ev2Raw {
+				hasMismatch = true
+				fmt.Printf("  %s  [%d] %s\n",
+					visualizer.Error(),
+					i,
+					visualizer.Colorize("MISMATCH", "red"),
+				)
+				fmt.Printf("    %-12s %s\n", visualizer.Colorize(net1+":", "dim"), ev1Display)
+				fmt.Printf("    %-12s %s\n", visualizer.Colorize(net2+":", "dim"), ev2Display)
+			}
 		}
+		if !hasMismatch {
+			fmt.Printf("  %s  All %s events match\n",
+				visualizer.Success(),
+				visualizer.Colorize(fmt.Sprintf("%d", maxEvents), "green"),
+			)
+		}
+	}
+	fmt.Println()
+}
+
+// printBudgetComparison prints a single budget metric comparison row with color.
+func printBudgetComparison(label string, v1, v2 int64, net1, net2 string) {
+	if v1 != v2 {
+		delta := v2 - v1
+		sign := "+"
+		deltaColor := "yellow"
+		if delta < 0 {
+			sign = ""
+			deltaColor = "green"
+		}
+		fmt.Printf("  %s  %-20s %s (%s)  vs  %s (%s)  delta: %s\n",
+			visualizer.Warning(),
+			label+":",
+			visualizer.Colorize(fmt.Sprintf("%d", v1), "dim"), net1,
+			visualizer.Colorize(fmt.Sprintf("%d", v2), "dim"), net2,
+			visualizer.Colorize(fmt.Sprintf("%s%d", sign, delta), deltaColor),
+		)
+	} else {
+		fmt.Printf("  %s  %-20s %s\n",
+			visualizer.Success(),
+			label+":",
+			visualizer.Colorize(fmt.Sprintf("%d (match)", v1), "green"),
+		)
 	}
 }
 
@@ -1122,6 +1608,106 @@ func collectVisibleSections(resp *simulator.SimulationResponse, findings []secur
 	return sections
 }
 
+func applySimulationFeeMocks(req *simulator.SimulationRequest) {
+	if req == nil {
+		return
+	}
+
+	if mockBaseFeeFlag > 0 {
+		baseFee := mockBaseFeeFlag
+		req.MockBaseFee = &baseFee
+	}
+	if mockGasPriceFlag > 0 {
+		gasPrice := mockGasPriceFlag
+		req.MockGasPrice = &gasPrice
+	}
+}
+
+var deprecatedSorobanHostFunctions = []string{
+	"bytes_copy_from_linear_memory",
+	"bytes_copy_to_linear_memory",
+	"bytes_new_from_linear_memory",
+	"map_new_from_linear_memory",
+	"map_unpack_to_linear_memory",
+	"symbol_new_from_linear_memory",
+	"string_new_from_linear_memory",
+	"vec_new_from_linear_memory",
+	"vec_unpack_to_linear_memory",
+}
+
+func deprecatedHostFunctionInDiagnosticEvent(event simulator.DiagnosticEvent) (string, bool) {
+	if name, ok := findDeprecatedHostFunction(strings.Join(event.Topics, " ")); ok {
+		return name, true
+	}
+	return findDeprecatedHostFunction(event.Data)
+}
+
+func findDeprecatedHostFunction(input string) (string, bool) {
+	lower := strings.ToLower(input)
+	for _, fn := range deprecatedSorobanHostFunctions {
+		if strings.Contains(lower, strings.ToLower(fn)) {
+			return fn, true
+		}
+	}
+	return "", false
+}
+
+// runFromRegistry replays a saved time-travel session from a snapshot registry
+// file without any network connectivity.
+func runFromRegistry(ctx context.Context, path string) error {
+	reg, err := debug.LoadFromFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to load snapshot registry: %w", err)
+	}
+
+	if len(reg.Entries) == 0 {
+		return errors.WrapValidationError("snapshot registry contains no entries")
+	}
+
+	for _, w := range reg.VerifyIntegrity() {
+		fmt.Fprintf(os.Stderr, "Warning: integrity check failed: %s\n", w.Error())
+	}
+
+	fmt.Printf("Offline replay: %s\n", reg.TxHash)
+	fmt.Printf("Network: %s | Created: %s | Entries: %d\n",
+		reg.Network, reg.CreatedAt.Format(time.RFC3339), len(reg.Entries))
+
+	runner, err := simulator.NewRunnerWithMockTime("", tracingEnabled, mockTimeFlag)
+	if err != nil {
+		return errors.WrapSimulatorNotFound(err.Error())
+	}
+	defer runner.Close()
+
+	for _, entry := range reg.Entries {
+		if len(reg.Entries) > 1 {
+			fmt.Printf("\n--- Simulating at Timestamp: %d ---\n", entry.Timestamp)
+		}
+
+		simReq := &simulator.SimulationRequest{
+			EnvelopeXdr:   reg.EnvelopeXdr,
+			ResultMetaXdr: reg.ResultMetaXdr,
+			LedgerEntries: entry.Snapshot.ToMap(),
+			Timestamp:     entry.Timestamp,
+		}
+		applySimulationFeeMocks(simReq)
+
+		simResp, err := runner.Run(ctx, simReq)
+		if err != nil {
+			return errors.WrapSimulationFailed(err, "")
+		}
+		printSimulationResult(reg.Network, simResp)
+	}
+
+	return nil
+}
+
+func pluralIes(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
+}
+
 func init() {
 	debugCmd.Flags().StringVarP(&networkFlag, "network", "n", "mainnet", "Stellar network (auto-detected when omitted; testnet, mainnet, futurenet)")
 	debugCmd.Flags().StringVar(&rpcURLFlag, "rpc-url", "", "Custom RPC URL")
@@ -1135,17 +1721,84 @@ func init() {
 	debugCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	debugCmd.Flags().StringVar(&wasmPath, "wasm", "", "Path to local WASM file for local replay (no network required)")
 	debugCmd.Flags().StringSliceVar(&args, "args", []string{}, "Mock arguments for local replay (JSON array of strings)")
+	debugCmd.Flags().StringSliceVar(&mockLedgerEntryFlags, "mock-ledger-entry", []string{}, "Override ledger entries before simulation using key:value; repeatable")
+	debugCmd.Flags().StringVar(&mockLedgerManifest, "mock-ledger-manifest", "", "Path to a JSON manifest containing ledger_entries for override state")
 	debugCmd.Flags().BoolVar(&noCacheFlag, "no-cache", false, "Disable local ledger state caching")
 	debugCmd.Flags().BoolVar(&demoMode, "demo", false, "Print sample output (no network) - for testing color detection")
 	debugCmd.Flags().BoolVar(&watchFlag, "watch", false, "Poll for transaction on-chain before debugging")
 	debugCmd.Flags().IntVar(&watchTimeoutFlag, "watch-timeout", 30, "Timeout in seconds for watch mode")
+	debugCmd.Flags().BoolVar(&hotReloadFlag, "hot-reload", false, "Hot reload local WASM changes during debug session (requires --wasm)")
+	debugCmd.Flags().DurationVar(&hotReloadInterval, "hot-reload-interval", 500*time.Millisecond, "Polling interval fallback for hot reload (e.g. 500ms)")
+	debugCmd.Flags().BoolVar(&snapshotsFlag, "snapshots", false, "Enable simulator snapshot capture (default: disabled)")
 	debugCmd.Flags().Uint32Var(&mockBaseFeeFlag, "mock-base-fee", 0, "Override base fee (stroops) for local fee sufficiency checks")
 	debugCmd.Flags().Uint64Var(&mockGasPriceFlag, "mock-gas-price", 0, "Override gas price multiplier for local fee sufficiency checks")
 	debugCmd.Flags().StringVar(&themeFlag, "theme", "", "Color theme override (dark, light, none)")
 	debugCmd.Flags().Int64Var(&mockTimeFlag, "mock-time", 0, "Override ledger timestamp for simulation (Unix seconds)")
 	debugCmd.Flags().Uint32Var(&protocolVersionFlag, "protocol-version", 0, "Override protocol version for simulation")
-
+	debugCmd.Flags().StringVar(&exportSVGFlag, "export-svg", "", "Export call graph as SVG to specified file")
+	debugCmd.Flags().StringVar(&loadSnapshotsFlag, "load-snapshots", "", "Load simulation from a snapshot registry")
+	debugCmd.Flags().StringVar(&saveSnapshotsFlag, "save-snapshots", "", "Save simulation results to a snapshot registry")
+	debugCmd.Flags().BoolVar(&assetSafetyFlag, "asset-safety", true, "Enable Move-level Asset Safety tracing (on by default for debug)")
+	debugCmd.Flags().IntVar(&stepBackFlag, "step-back", 0, "Step back N steps from the end of execution trace (time-travel)")
 	rootCmd.AddCommand(debugCmd)
+}
+
+func printWasmBacktrace(trace *simulator.WasmStackTrace) {
+	fmt.Printf("\nBacktrace (%d frames):\n", len(trace.Frames))
+	for _, frame := range trace.Frames {
+		name := "<unknown>"
+		if frame.FuncName != nil {
+			name = *frame.FuncName
+		} else if frame.FuncIndex != nil {
+			name = fmt.Sprintf("func[%d]", *frame.FuncIndex)
+		}
+
+		location := ""
+		if frame.SourceLocation != nil {
+			if frame.SourceLocation.Column > 0 {
+				location = fmt.Sprintf(" %s:%d:%d", frame.SourceLocation.File, frame.SourceLocation.Line, frame.SourceLocation.Column)
+			} else {
+				location = fmt.Sprintf(" %s:%d", frame.SourceLocation.File, frame.SourceLocation.Line)
+			}
+		} else if frame.WasmOffset != nil {
+			location = fmt.Sprintf(" @ 0x%x", *frame.WasmOffset)
+		}
+
+		fmt.Printf("  #%d %s%s\n", frame.Index, name, location)
+	}
+
+	// Show inline source context for the trap-site frame (index 0).
+	if len(trace.Frames) > 0 && trace.Frames[0].SourceLocation != nil {
+		displaySourceLocation(trace.Frames[0].SourceLocation)
+	}
+
+	fmt.Println()
+}
+
+// checkLTOWarning searches the directory tree around a WASM file for
+// Cargo.toml files with LTO settings and prints a warning if found.
+// It searches the WASM file's parent directory and up to two levels up
+// to find the project root.
+func checkLTOWarning(wasmFilePath string) {
+	dir := filepath.Dir(wasmFilePath)
+
+	// Walk up to 3 levels to find Cargo.toml files
+	for i := 0; i < 3; i++ {
+		results, err := lto.CheckProjectDir(dir)
+		if err != nil {
+			logger.Logger.Debug("LTO check failed", "dir", dir, "error", err)
+			break
+		}
+		if lto.HasLTO(results) {
+			fmt.Fprintf(os.Stderr, "\n%s\n", lto.FormatWarnings(results))
+			return
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
 }
 func displaySourceLocation(loc *simulator.SourceLocation) {
 	fmt.Printf("%s Location: %s:%d:%d\n", visualizer.Symbol("location"), loc.File, loc.Line, loc.Column)
@@ -1212,41 +1865,4 @@ func displaySourceLocation(loc *simulator.SourceLocation) {
 		}
 	}
 	fmt.Println()
-}
-
-func applySimulationFeeMocks(req *simulator.SimulationRequest) {
-	if mockBaseFeeFlag > 0 {
-		baseFee := mockBaseFeeFlag
-		req.MockBaseFee = &baseFee
-	}
-	if mockGasPriceFlag > 0 {
-		gas := mockGasPriceFlag
-		req.MockGasPrice = &gas
-	}
-}
-
-var deprecatedHostFuncs = []string{
-	"vec_unpack_to_linear_memory",
-	"bytes_copy_to_linear_memory",
-}
-
-func findDeprecatedHostFunction(event string) (string, bool) {
-	for _, fn := range deprecatedHostFuncs {
-		if strings.Contains(event, "Symbol(\""+fn+"\")") {
-			return fn, true
-		}
-	}
-	return "", false
-}
-
-func deprecatedHostFunctionInDiagnosticEvent(event simulator.DiagnosticEvent) (string, bool) {
-	if name, ok := findDeprecatedHostFunction(event.Data); ok {
-		return name, ok
-	}
-	for _, topic := range event.Topics {
-		if name, ok := findDeprecatedHostFunction(topic); ok {
-			return name, ok
-		}
-	}
-	return "", false
 }

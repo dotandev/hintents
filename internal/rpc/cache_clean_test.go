@@ -17,7 +17,7 @@ func setupCleanTestDB(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	require.NoError(t, err)
 	require.NoError(t, InitCacheWithDB(db))
-	t.Cleanup(func() { CloseCache() })
+	t.Cleanup(func() { _ = CloseCache() })
 }
 
 func TestCleanByFilter_NoFilter(t *testing.T) {

@@ -5,7 +5,8 @@
 //!
 //! This module provides caching of parsed source map mappings to speed up
 //! repetitive debugging sessions. Cached mappings are stored in
-//! ~/.erst/cache/sourcemaps indexed by WASM SHA256 hash.
+//! ~/.erst/cache/sourcemaps indexed by WASM SHA256 hash, optionally combined
+//! with the source file's modification time when loading from disk.
 
 #![allow(dead_code)]
 
@@ -16,6 +17,12 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::UNIX_EPOCH;
+
+/// Monotonically increasing counter used to generate unique temp-file names,
+/// preventing concurrent writes from clobbering each other's `.tmp` files.
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Inline OS-level advisory file locking using libc, which is a transitive
 // dependency of soroban-env-host. This avoids adding a new crate while still
@@ -23,39 +30,36 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 mod flock {
     use std::fs::File;
+    use std::io;
     use std::os::unix::io::AsRawFd;
 
-    extern "C" {
-        fn flock(fd: libc::c_int, operation: libc::c_int) -> libc::c_int;
-    }
-
     /// Acquires a shared (read) lock on `file`, blocking until it succeeds.
-    pub fn lock_shared(file: &File) -> Result<(), String> {
-        let rc = unsafe { flock(file.as_raw_fd(), libc::LOCK_SH) };
+    pub fn lock_shared(file: &File) -> io::Result<()> {
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) };
         if rc == 0 {
             Ok(())
         } else {
-            Err(format!("flock(LOCK_SH) failed: errno {}", rc))
+            Err(io::Error::last_os_error())
         }
     }
 
     /// Acquires an exclusive (write) lock on `file`, blocking until it succeeds.
-    pub fn lock_exclusive(file: &File) -> Result<(), String> {
-        let rc = unsafe { flock(file.as_raw_fd(), libc::LOCK_EX) };
+    pub fn lock_exclusive(file: &File) -> io::Result<()> {
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
         if rc == 0 {
             Ok(())
         } else {
-            Err(format!("flock(LOCK_EX) failed: errno {}", rc))
+            Err(io::Error::last_os_error())
         }
     }
 
     /// Releases any lock held on `file`.
-    pub fn unlock(file: &File) -> Result<(), String> {
-        let rc = unsafe { flock(file.as_raw_fd(), libc::LOCK_UN) };
+    pub fn unlock(file: &File) -> io::Result<()> {
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
         if rc == 0 {
             Ok(())
         } else {
-            Err(format!("flock(LOCK_UN) failed: errno {}", rc))
+            Err(io::Error::last_os_error())
         }
     }
 }
@@ -63,16 +67,15 @@ mod flock {
 #[cfg(not(unix))]
 mod flock {
     use std::fs::File;
-    // On non-Unix platforms we fall back to no-op locks. The race risk on
-    // Windows test environments is accepted until a platform-specific
-    // implementation is added.
-    pub fn lock_shared(_: &File) -> Result<(), String> {
+    use std::io;
+    // On non-Unix platforms we fall back to no-op locks.
+    pub fn lock_shared(_: &File) -> io::Result<()> {
         Ok(())
     }
-    pub fn lock_exclusive(_: &File) -> Result<(), String> {
+    pub fn lock_exclusive(_: &File) -> io::Result<()> {
         Ok(())
     }
-    pub fn unlock(_: &File) -> Result<(), String> {
+    pub fn unlock(_: &File) -> io::Result<()> {
         Ok(())
     }
 }
@@ -83,8 +86,13 @@ pub const CACHE_DIR_NAME: &str = "sourcemaps";
 /// Cache entry containing parsed source mappings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceMapCacheEntry {
-    /// The WASM hash this entry corresponds to
+    /// The cache key this entry corresponds to (WASM content hash, optionally
+    /// mixed with source file mtime via [`SourceMapCache::compute_cache_key`]).
     pub wasm_hash: String,
+    /// Source WASM file modification time (seconds since Unix epoch) when the
+    /// entry was created. Used to invalidate stale cache after recompilation.
+    #[serde(default)]
+    pub wasm_mtime: Option<u64>,
     /// Whether the WASM had debug symbols
     pub has_symbols: bool,
     /// Cached mappings from wasm offset to source location
@@ -93,7 +101,7 @@ pub struct SourceMapCacheEntry {
     pub created_at: u64,
 }
 
-/// Source map cache manager
+#[derive(Clone)]
 pub struct SourceMapCache {
     cache_dir: PathBuf,
     max_cache_size: Option<u64>,
@@ -138,19 +146,62 @@ impl SourceMapCache {
         self
     }
 
-    /// Gets the default cache directory (~/.erst/cache/sourcemaps)
+    /// Gets the default cache directory (~/.erst/cache/sourcemaps).
+    /// Falls back to the OS temp directory when the home directory is unavailable.
     fn get_default_cache_dir() -> Result<PathBuf, String> {
-        let home_dir =
-            dirs::home_dir().ok_or_else(|| "Failed to determine home directory".to_string())?;
-        Ok(home_dir.join(".erst").join("cache").join(CACHE_DIR_NAME))
+        if let Some(home_dir) = dirs::home_dir() {
+            return Ok(home_dir.join(".erst").join("cache").join(CACHE_DIR_NAME));
+        }
+        // Home directory unavailable; use the OS temp directory as a fallback.
+        let temp_cache = std::env::temp_dir()
+            .join("erst")
+            .join("cache")
+            .join(CACHE_DIR_NAME);
+        fs::create_dir_all(&temp_cache).map_err(|e| {
+            format!(
+                "Failed to create cache directory in temp dir {:?}: {e}",
+                temp_cache
+            )
+        })?;
+        Ok(temp_cache)
     }
 
-    /// Computes SHA256 hash of WASM bytes
+    /// Computes SHA256 hash of WASM bytes (content only, no mtime).
     pub fn compute_wasm_hash(wasm_bytes: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(wasm_bytes);
         let result = hasher.finalize();
         hex::encode(result)
+    }
+
+    /// Reads the modification time of a WASM file as seconds since Unix epoch.
+    pub fn wasm_mtime_from_path(path: &Path) -> Option<u64> {
+        fs::metadata(path).ok().and_then(|meta| {
+            meta.modified().ok().and_then(|modified| {
+                modified
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|duration| duration.as_secs())
+            })
+        })
+    }
+
+    /// Computes the cache key for WASM bytes, optionally incorporating file mtime.
+    ///
+    /// When `wasm_mtime` is provided the mtime is mixed into the hash so that a
+    /// recompiled `.wasm` file with the same path but a newer modification time
+    /// produces a distinct cache key and does not reuse stale mappings.
+    pub fn compute_cache_key(wasm_bytes: &[u8], wasm_mtime: Option<u64>) -> String {
+        let content_hash = Self::compute_wasm_hash(wasm_bytes);
+        match wasm_mtime {
+            None => content_hash,
+            Some(mtime) => {
+                let mut hasher = Sha256::new();
+                hasher.update(content_hash.as_bytes());
+                hasher.update(mtime.to_le_bytes());
+                hex::encode(hasher.finalize())
+            }
+        }
     }
 
     /// Gets the cache file path for a given WASM hash
@@ -175,9 +226,8 @@ impl SourceMapCache {
         let lock_path = Self::get_lock_path(cache_path);
         File::options()
             .create(true)
-            .truncate(true)
+            .append(true) // Use append instead of truncate to avoid racing with other openers
             .read(true)
-            .write(true)
             .open(&lock_path)
             .map_err(|e| format!("Failed to open lock file {:?}: {}", lock_path, e))
     }
@@ -185,13 +235,24 @@ impl SourceMapCache {
     /// Gets a cached source map entry if it exists and is valid.
     /// When `no_cache` is true, skips the cache and returns None immediately,
     /// forcing the caller to re-parse WASM symbols from scratch.
-    pub fn get(&self, wasm_hash: &str, no_cache: bool) -> Option<SourceMapCacheEntry> {
+    pub fn get(&self, cache_key: &str, no_cache: bool) -> Option<SourceMapCacheEntry> {
+        self.get_with_mtime(cache_key, None, no_cache)
+    }
+
+    /// Like [`Self::get`], but rejects entries whose stored mtime does not match
+    /// `expected_mtime` when an expected value is provided.
+    pub fn get_with_mtime(
+        &self,
+        cache_key: &str,
+        expected_mtime: Option<u64>,
+        no_cache: bool,
+    ) -> Option<SourceMapCacheEntry> {
         if no_cache {
             println!("Cache bypassed via --no-cache flag. Re-parsing WASM symbols.");
             return None;
         }
 
-        let cache_path = self.get_cache_path(wasm_hash);
+        let cache_path = self.get_cache_path(cache_key);
 
         if !cache_path.exists() {
             return None;
@@ -207,7 +268,7 @@ impl SourceMapCache {
             }
         };
         if let Err(e) = flock::lock_shared(&lock_file) {
-            eprintln!("Failed to acquire shared lock: {}", e);
+            eprintln!("Failed to acquire shared lock on {:?}: {}", cache_path, e);
             return None;
         }
 
@@ -228,11 +289,22 @@ impl SourceMapCache {
             return None;
         };
 
-        let result = match bincode::deserialize(&bytes) {
+        let result = match bincode::deserialize::<SourceMapCacheEntry>(&bytes) {
             Ok(entry) => {
+                if let Some(expected_mtime) = expected_mtime {
+                    if entry.wasm_mtime != Some(expected_mtime) {
+                        println!(
+                            "Cache miss: WASM file mtime changed (expected {}, found {:?})",
+                            expected_mtime, entry.wasm_mtime
+                        );
+                        let _ = flock::unlock(&lock_file);
+                        return None;
+                    }
+                }
+
                 println!(
                     "Cache hit! Loading source map from cache for WASM: {}",
-                    &wasm_hash[..8]
+                    &cache_key[..8.min(cache_key.len())]
                 );
                 Some(entry)
             }
@@ -246,38 +318,67 @@ impl SourceMapCache {
         result
     }
 
-    /// Stores a source map entry in the cache.
+    pub fn store(&self, entry: SourceMapCacheEntry) -> Result<(), String> {
+        let cache_clone = self.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = cache_clone.store_sync(entry) {
+                eprintln!("Failed to store source map in background: {}", e);
+            }
+        });
+        Ok(())
+    }
+
+    /// Synchronously stores a source map entry in the cache.
     /// Uses an exclusive OS-level file lock and atomic write (temp file + rename)
     /// to prevent data corruption when multiple processes write concurrently.
-    pub fn store(&self, entry: SourceMapCacheEntry) -> Result<(), String> {
-        // Ensure cache directory exists
-        fs::create_dir_all(&self.cache_dir)
-            .map_err(|e| format!("Failed to create cache directory: {}", e))?;
+    pub fn store_sync(&self, entry: SourceMapCacheEntry) -> Result<(), String> {
+        // Ensure cache directory exists.
+        // On Windows, concurrent calls to create_dir_all can race and return
+        // AlreadyExists (os error 183) even though the directory now exists —
+        // treat that as success.
+        match fs::create_dir_all(&self.cache_dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("Failed to create cache directory: {}", e)),
+        }
 
         let cache_path = self.get_cache_path(&entry.wasm_hash);
 
         // Acquire an exclusive OS-level lock before writing.
-        let lock_file = Self::open_lock_file(&cache_path)?;
-        flock::lock_exclusive(&lock_file)?;
+        let lock_file = Self::open_lock_file(&cache_path)
+            .map_err(|e| format!("Failed to open lock file {:?}: {}", cache_path, e))?;
+        flock::lock_exclusive(&lock_file).map_err(|e| {
+            format!(
+                "Failed to acquire exclusive lock on {:?}: {}",
+                cache_path, e
+            )
+        })?;
 
         // Serialize the entry
         let bytes = bincode::serialize(&entry)
             .map_err(|e| format!("Failed to serialize cache entry: {}", e))?;
 
-        // Write atomically: write to a tmp file then rename to avoid readers
-        // observing a partially-written file.
-        let tmp_path = self.cache_dir.join(format!("{}.tmp", entry.wasm_hash));
+        // Write atomically: write to a unique tmp file then rename to avoid
+        // readers observing a partially-written file and to prevent concurrent
+        // writers from clobbering each other's tmp file (critical on Windows
+        // where flock is a no-op).
+        let tmp_id = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tmp_path = self
+            .cache_dir
+            .join(format!("{}.{}.tmp", entry.wasm_hash, tmp_id));
         let write_result = (|| {
             let mut file = File::create(&tmp_path)
-                .map_err(|e| format!("Failed to create temp cache file: {}", e))?;
+                .map_err(|e| format!("Failed to create temp cache file {:?}: {}", tmp_path, e))?;
             file.write_all(&bytes)
-                .map_err(|e| format!("Failed to write temp cache file: {}", e))?;
-            fs::rename(&tmp_path, &cache_path)
-                .map_err(|e| format!("Failed to rename temp cache file: {}", e))?;
+                .map_err(|e| format!("Failed to write temp cache file {:?}: {}", tmp_path, e))?;
+            fs::rename(&tmp_path, &cache_path).map_err(|e| {
+                format!(
+                    "Failed to rename temp cache file {:?} to {:?}: {}",
+                    tmp_path, cache_path, e
+                )
+            })?;
             Ok::<(), String>(())
         })();
-
-        let _ = flock::unlock(&lock_file);
 
         // Clean up tmp file on failure.
         if write_result.is_err() {
@@ -411,6 +512,7 @@ impl SourceMapCache {
 
                             entries.push(CachedEntryInfo {
                                 wasm_hash: cache_entry.wasm_hash,
+                                wasm_mtime: cache_entry.wasm_mtime,
                                 has_symbols: cache_entry.has_symbols,
                                 mappings_count: cache_entry.mappings.len() as u64,
                                 created_at: cache_entry.created_at,
@@ -433,7 +535,18 @@ impl SourceMapCache {
 
 impl Default for SourceMapCache {
     fn default() -> Self {
-        Self::new().expect("Failed to create default source map cache")
+        Self::new().unwrap_or_else(|e| {
+            eprintln!(
+                "Warning: source map cache unavailable ({e}); falling back to temp directory"
+            );
+            Self {
+                cache_dir: std::env::temp_dir()
+                    .join("erst")
+                    .join("cache")
+                    .join(CACHE_DIR_NAME),
+                max_cache_size: None,
+            }
+        })
     }
 }
 
@@ -441,6 +554,7 @@ impl Default for SourceMapCache {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedEntryInfo {
     pub wasm_hash: String,
+    pub wasm_mtime: Option<u64>,
     pub has_symbols: bool,
     pub mappings_count: u64,
     pub created_at: u64,
@@ -478,6 +592,63 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_cache_key_without_mtime_matches_content_hash() {
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        let content_hash = SourceMapCache::compute_wasm_hash(&wasm_bytes);
+        let cache_key = SourceMapCache::compute_cache_key(&wasm_bytes, None);
+        assert_eq!(cache_key, content_hash);
+    }
+
+    #[test]
+    fn test_compute_cache_key_changes_with_mtime() {
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        let key1 = SourceMapCache::compute_cache_key(&wasm_bytes, Some(1_000));
+        let key2 = SourceMapCache::compute_cache_key(&wasm_bytes, Some(2_000));
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_wasm_mtime_from_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let wasm_path = temp_dir.path().join("contract.wasm");
+        fs::write(&wasm_path, b"\x00asm").unwrap();
+
+        let mtime = SourceMapCache::wasm_mtime_from_path(&wasm_path);
+        assert!(mtime.is_some());
+    }
+
+    #[test]
+    fn test_cache_invalidates_on_mtime_change() {
+        let (cache, _temp) = create_test_cache();
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        let mtime1 = 1_700_000_000u64;
+        let mtime2 = 1_700_000_100u64;
+
+        let cache_key = SourceMapCache::compute_cache_key(&wasm_bytes, Some(mtime1));
+        let entry = SourceMapCacheEntry {
+            wasm_hash: cache_key.clone(),
+            wasm_mtime: Some(mtime1),
+            has_symbols: true,
+            mappings: HashMap::new(),
+            created_at: 1_234_567_890,
+        };
+
+        cache.store_sync(entry).unwrap();
+
+        assert!(cache
+            .get_with_mtime(&cache_key, Some(mtime1), false)
+            .is_some());
+        assert!(cache
+            .get_with_mtime(&cache_key, Some(mtime2), false)
+            .is_none());
+
+        let new_key = SourceMapCache::compute_cache_key(&wasm_bytes, Some(mtime2));
+        assert!(cache
+            .get_with_mtime(&new_key, Some(mtime2), false)
+            .is_none());
+    }
+
+    #[test]
     fn test_store_and_get() {
         let (cache, _temp) = create_test_cache();
 
@@ -498,13 +669,14 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash: wasm_hash.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings,
-            created_at: 1234567890,
+            created_at: 1_234_567_890,
         };
 
         // Store the entry
-        cache.store(entry.clone()).unwrap();
+        cache.store_sync(entry.clone()).unwrap();
 
         // Retrieve the entry — no_cache=false so cache is used normally
         let retrieved = cache.get(&wasm_hash, false).unwrap();
@@ -517,7 +689,10 @@ mod tests {
     fn test_get_missing() {
         let (cache, _temp) = create_test_cache();
 
-        let result = cache.get("nonexistent_hash_12345678901234567890123456789012", false);
+        let result = cache.get(
+            "nonexistent_hash_1_234_567_8901_234_567_8901_234_567_89012",
+            false,
+        );
         assert!(result.is_none());
     }
 
@@ -530,13 +705,14 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash: wasm_hash.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings: HashMap::new(),
-            created_at: 1234567890,
+            created_at: 1_234_567_890,
         };
 
         // Store an entry so it exists on disk
-        cache.store(entry).unwrap();
+        cache.store_sync(entry).unwrap();
         assert!(cache.get(&wasm_hash, false).is_some());
 
         // With no_cache=true, it should return None even though cache exists
@@ -553,12 +729,13 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash: wasm_hash.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings: HashMap::new(),
-            created_at: 1234567890,
+            created_at: 1_234_567_890,
         };
 
-        cache.store(entry).unwrap();
+        cache.store_sync(entry).unwrap();
         assert!(cache.get(&wasm_hash, false).is_some());
 
         let count = cache.clear().unwrap();
@@ -590,12 +767,13 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash,
+            wasm_mtime: None,
             has_symbols: true,
             mappings,
-            created_at: 1234567890,
+            created_at: 1_234_567_890,
         };
 
-        cache.store(entry).unwrap();
+        cache.store_sync(entry).unwrap();
 
         let size = cache.get_cache_size().unwrap();
         assert!(size > 0);
@@ -613,12 +791,13 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash: wasm_hash.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings: HashMap::new(),
-            created_at: 1234567890,
+            created_at: 1_234_567_890,
         };
 
-        cache.store(entry).unwrap();
+        cache.store_sync(entry).unwrap();
 
         let list = cache.list_cached().unwrap();
         assert_eq!(list.len(), 1);
@@ -649,12 +828,13 @@ mod tests {
 
         let entry1 = SourceMapCacheEntry {
             wasm_hash: wasm_hash1.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings: mappings1,
             created_at: 1000,
         };
 
-        cache.store(entry1).unwrap();
+        cache.store_sync(entry1).unwrap();
 
         let size1 = cache.get_cache_size().unwrap();
         assert!(size1 > 0, "Cache should have some size");
@@ -678,12 +858,13 @@ mod tests {
 
         let entry2 = SourceMapCacheEntry {
             wasm_hash: wasm_hash2.clone(),
+            wasm_mtime: None,
             has_symbols: true,
             mappings: mappings2,
             created_at: 2000,
         };
 
-        cache.store(entry2).unwrap();
+        cache.store_sync(entry2).unwrap();
 
         let list = cache.list_cached().unwrap();
         assert!(
@@ -722,12 +903,13 @@ mod tests {
 
             let entry = SourceMapCacheEntry {
                 wasm_hash,
+                wasm_mtime: None,
                 has_symbols: true,
                 mappings,
                 created_at: 1000 + i,
             };
 
-            cache.store(entry).unwrap();
+            cache.store_sync(entry).unwrap();
         }
 
         let list = cache.list_cached().unwrap();
@@ -754,12 +936,13 @@ mod tests {
 
         let entry = SourceMapCacheEntry {
             wasm_hash,
+            wasm_mtime: None,
             has_symbols: true,
             mappings: HashMap::new(),
-            created_at: 1234567890,
+            created_at: 1_234_567_890,
         };
 
-        cache.store(entry).unwrap();
+        cache.store_sync(entry).unwrap();
 
         let list = cache.list_cached().unwrap();
         assert_eq!(list.len(), 1);
@@ -788,12 +971,13 @@ mod tests {
 
             let entry = SourceMapCacheEntry {
                 wasm_hash,
+                wasm_mtime: None,
                 has_symbols: true,
                 mappings,
                 created_at: 1000 + i,
             };
 
-            cache.store(entry).unwrap();
+            cache.store_sync(entry).unwrap();
         }
 
         let list = cache.list_cached().unwrap();

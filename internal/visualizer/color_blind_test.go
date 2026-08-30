@@ -9,8 +9,8 @@ import (
 )
 
 func TestColorBlindThemes(t *testing.T) {
-	os.Setenv("FORCE_COLOR", "1")
-	defer os.Unsetenv("FORCE_COLOR")
+	_ = os.Setenv("FORCE_COLOR", "1")
+	defer func() { _ = os.Unsetenv("FORCE_COLOR") }()
 
 	tests := []struct {
 		name  string
@@ -50,8 +50,8 @@ func TestColorBlindThemes(t *testing.T) {
 }
 
 func TestThemeConsistency(t *testing.T) {
-	os.Setenv("FORCE_COLOR", "1")
-	defer os.Unsetenv("FORCE_COLOR")
+	_ = os.Setenv("FORCE_COLOR", "1")
+	defer func() { _ = os.Unsetenv("FORCE_COLOR") }()
 
 	themes := []Theme{
 		ThemeDefault,

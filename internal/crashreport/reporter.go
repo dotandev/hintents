@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"runtime"
@@ -94,6 +95,7 @@ type Reporter struct {
 	cfg          Config
 	client       *http.Client
 	sentryActive bool
+	stderr       io.Writer
 }
 
 // New creates a Reporter from cfg, initialising Sentry if a DSN is available.
@@ -123,6 +125,7 @@ func New(cfg Config) *Reporter {
 		client: &http.Client{
 			Timeout: defaultTimeout,
 		},
+		stderr: os.Stderr,
 	}
 
 	if cfg.SentryDSN != "" {
@@ -178,6 +181,7 @@ func (r *Reporter) Send(ctx context.Context, err error, stack []byte, command st
 	}
 
 	if len(errs) > 0 {
+		fmt.Fprintf(r.stderr, "warning: failed to submit crash report\n")
 		return fmt.Errorf("crashreport: %v", errs)
 	}
 	return nil
@@ -220,7 +224,7 @@ func (r *Reporter) sendToEndpoint(ctx context.Context, report Report) error {
 	if err != nil {
 		return fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("server returned %d", resp.StatusCode)

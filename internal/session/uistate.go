@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // register sqlite driver
 )
 
 const maxRecentSearches = 20
@@ -48,7 +48,7 @@ func newUIStateStoreAt(dbPath string) (*UIStateStore, error) {
 	}
 	s := &UIStateStore{db: db}
 	if err := s.initSchema(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	_ = os.Chmod(dbPath, 0600)
@@ -151,7 +151,7 @@ func (s *UIStateStore) RecentSearches(ctx context.Context, limit int) ([]string,
 	if err != nil {
 		return nil, fmt.Errorf("failed to query recent searches: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var q string

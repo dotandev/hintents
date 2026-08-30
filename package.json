@@ -1,6 +1,8 @@
 {
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "@aws-sdk/client-kms": "^3.609.0",
     "@stellar/stellar-sdk": "^14.5.0",
     "axios": "^1.13.4",
     "buffer": "^6.0.3",
@@ -15,12 +17,9 @@
     "pkcs11js": "^2.1.6",
     "stream-browserify": "^3.0.0"
   },
-  "optionalDependencies": {
-    "@aws-sdk/client-kms": "^3.0.0"
-  },
   "scripts": {
     "test": "jest",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js"
   },
   "devDependencies": {

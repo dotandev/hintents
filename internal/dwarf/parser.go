@@ -68,7 +68,6 @@ type Frame struct {
 // Parser handles DWARF debug information extraction
 type Parser struct {
 	data       *dwarf.Data
-	reader     *dwarf.Reader
 	binaryType string // "wasm", "elf", "macho", "pe"
 }
 
@@ -117,10 +116,10 @@ func parseWASM(data []byte) (*Parser, error) {
 	if !ok || len(infoSec) == 0 {
 		return nil, ErrNoDebugInfo
 	}
-	abbrevSec, _ := sections[".debug_abbrev"]
-	lineSec, _ := sections[".debug_line"]
-	rangesSec, _ := sections[".debug_ranges"]
-	strSec, _ := sections[".debug_str"]
+	abbrevSec := sections[".debug_abbrev"]
+	lineSec := sections[".debug_line"]
+	rangesSec := sections[".debug_ranges"]
+	strSec := sections[".debug_str"]
 
 	dwarfData, err = dwarf.New(abbrevSec, nil, nil, infoSec, lineSec, nil, rangesSec, strSec)
 
@@ -260,7 +259,6 @@ func parsePE(data []byte) (*Parser, error) {
 // bytesToReader converts a byte slice to an io.ReaderAt
 type bytesReader struct {
 	data []byte
-	off  int
 }
 
 func (r *bytesReader) ReadAt(p []byte, off int64) (n int, err error) {
@@ -571,13 +569,7 @@ func (p *Parser) findLineForAddr(lr *dwarf.LineReader, addr uint64) *SourceLocat
 //	0x9f  DW_OP_stack_value   – the value is the top of the expression stack
 //	0x00  (no-op / terminator in some older encodings)
 //
-// DWARF location expression opcodes (DW_OP_*) used in formatLocation.
-// These are defined in the DWARF spec and are not exported by debug/dwarf.
-const (
-	dwOpAddr       = 0x03 // DW_OP_addr — constant address
-	dwOpStackValue = 0x9f // DW_OP_stack_value — value is on the expression stack
-	dwOpLit0       = 0x30 // DW_OP_lit0 — literal 0 (marks end-of-list in some contexts)
-)
+// DW_OP_* constants are used in formatLocation if needed.
 
 func formatLocation(loc []byte) string {
 	if len(loc) == 0 {

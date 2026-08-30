@@ -20,7 +20,7 @@ func NewFromEnv() (Signer, error) {
 	case "software":
 		keyHex := os.Getenv("ERST_SOFTWARE_PRIVATE_KEY_HEX")
 		if keyHex == "" {
-			return nil, &SignerError{Op: "factory", Msg: "ERST_SOFTWARE_PRIVATE_KEY_HEX is required for software signer"}
+			return nil, &Error{Op: "factory", Msg: "ERST_SOFTWARE_PRIVATE_KEY_HEX is required for software signer"}
 		}
 		return NewInMemorySigner(keyHex)
 
@@ -32,6 +32,6 @@ func NewFromEnv() (Signer, error) {
 		return NewPkcs11Signer(*cfg)
 
 	default:
-		return nil, &SignerError{Op: "factory", Msg: "unsupported ERST_SIGNER_TYPE: " + signerType}
+		return nil, &Error{Op: "factory", Msg: "unsupported ERST_SIGNER_TYPE: " + signerType}
 	}
 }

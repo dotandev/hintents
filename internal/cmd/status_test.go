@@ -15,6 +15,7 @@ import (
 func TestStatusCommandRegistered(t *testing.T) {
 	if statusCmd == nil {
 		t.Fatal("statusCmd should not be nil")
+		return
 	}
 	if statusCmd.Use != "status" {
 		t.Errorf("statusCmd.Use = %q, want %q", statusCmd.Use, "status")
@@ -28,6 +29,7 @@ func TestStatusFixFlag(t *testing.T) {
 	flag := statusCmd.Flags().Lookup("fix")
 	if flag == nil {
 		t.Fatal("status command should have --fix flag")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("--fix default = %q, want %q", flag.DefValue, "false")
@@ -158,7 +160,7 @@ func TestRepairProtocolDarwin(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	// Create the LaunchAgents directory
-	os.MkdirAll(filepath.Join(tmpDir, "Library", "LaunchAgents"), 0755)
+	_ = os.MkdirAll(filepath.Join(tmpDir, "Library", "LaunchAgents"), 0755)
 
 	var buf bytes.Buffer
 	err := repairProtocolDarwin("/usr/local/bin/erst", &buf)

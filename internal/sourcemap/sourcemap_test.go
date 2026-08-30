@@ -185,7 +185,7 @@ func TestGetContractInfo_Found(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(info)
+		_ = json.NewEncoder(w).Encode(info)
 	}))
 	defer server.Close()
 
@@ -258,7 +258,7 @@ func TestGetWasmCode_Found(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write(wasmBytes)
+		_, _ = w.Write(wasmBytes)
 	}))
 	defer server.Close()
 
@@ -307,7 +307,7 @@ func TestFetchVerifiedSource_NotVerified(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(info)
+		_ = json.NewEncoder(w).Encode(info)
 	}))
 	defer server.Close()
 
@@ -332,7 +332,7 @@ func TestFetchVerifiedSource_NoRepository(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(info)
+		_ = json.NewEncoder(w).Encode(info)
 	}))
 	defer server.Close()
 
@@ -603,7 +603,7 @@ func TestResolver_ResolveFromRegistry(t *testing.T) {
 			Verified:   true,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(info)
+		_ = json.NewEncoder(w).Encode(info)
 	})
 
 	server := httptest.NewServer(mux)
@@ -612,7 +612,7 @@ func TestResolver_ResolveFromRegistry(t *testing.T) {
 	// Mock GitHub API
 	githubMux := http.NewServeMux()
 	githubMux.HandleFunc("/repos/test/repo", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"default_branch": "main"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"default_branch": "main"})
 	})
 	githubMux.HandleFunc("/repos/test/repo/git/trees/main", func(w http.ResponseWriter, r *http.Request) {
 		tree := map[string]interface{}{
@@ -622,7 +622,7 @@ func TestResolver_ResolveFromRegistry(t *testing.T) {
 				{"path": "README.md", "type": "blob", "size": 200},
 			},
 		}
-		json.NewEncoder(w).Encode(tree)
+		_ = json.NewEncoder(w).Encode(tree)
 	})
 
 	// We cannot easily mock raw.githubusercontent.com in this test,

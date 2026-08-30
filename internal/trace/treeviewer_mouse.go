@@ -46,26 +46,18 @@ func (tv *TreeViewerWithMouse) StartWithMouse() error {
 	if err := tv.enableRawMode(); err != nil {
 		return fmt.Errorf("failed to enable raw mode: %w", err)
 	}
-	defer tv.restoreTerminalState(initialTermState) //nolint:errcheck
+	defer func() { _ = tv.restoreTerminalState(initialTermState) }() //nolint:errcheck // Best-effort terminal restore on exit
 
 	// Enable mouse tracking
 	if err := tv.mouseTracker.Enable(); err != nil {
 		return fmt.Errorf("failed to enable mouse tracking: %w", err)
 	}
-	defer tv.mouseTracker.Disable() //nolint:errcheck
+	defer func() { _ = tv.mouseTracker.Disable() }() //nolint:errcheck // Best-effort mouse tracking disable on exit
 
-	// Build initial tree
+	// Build initial tree from the execution trace, nesting cross-contract steps.
 	nodes := make([]*TraceNode, 0)
-	if tv.trace != nil && len(tv.trace.States) > 0 {
-		// For now, create a simplified tree from trace states
-		root := NewTraceNode("root", "trace")
-		for i, state := range tv.trace.States {
-			node := NewTraceNode(fmt.Sprintf("step-%d", i), state.Operation)
-			node.Function = state.Function
-			node.ContractID = state.ContractID
-			node.Error = state.Error
-			root.AddChild(node)
-		}
+	if tv.trace != nil {
+		root := tv.trace.BuildTraceTree()
 		nodes = append(nodes, root)
 	}
 
@@ -136,18 +128,23 @@ func (tv *TreeViewerWithMouse) handleInput() bool {
 	}
 
 	// Handle keyboard input
-	switch {
-	case input == "\x1b[A" || input == "k": // Up arrow or k
+	switch input {
+	case "n": // Next step/instruction
+		tv.NextStep()
+		tv.renderView()
+		return false
+
+	case "\x1b[A", "k": // Up arrow or k
 		tv.renderer.SelectUp()
 		tv.renderView()
 		return false
 
-	case input == "\x1b[B" || input == "j": // Down arrow or j
+	case "\x1b[B", "j": // Down arrow or j
 		tv.renderer.SelectDown()
 		tv.renderView()
 		return false
 
-	case input == " " || input == "\r": // Space or Enter - toggle expand
+	case " ", "\r": // Space or Enter - toggle expand
 		node := tv.renderer.GetSelectedNode()
 		if node != nil && !node.IsLeaf() {
 			node.ToggleExpanded()
@@ -156,7 +153,7 @@ func (tv *TreeViewerWithMouse) handleInput() bool {
 		}
 		return false
 
-	case input == "e": // Expand all
+	case "e": // Expand all
 		if root := tv.getTraceRoot(); root != nil {
 			root.ExpandAll()
 			tv.renderer.RenderTree(root)
@@ -164,7 +161,7 @@ func (tv *TreeViewerWithMouse) handleInput() bool {
 		}
 		return false
 
-	case input == "c": // Collapse all
+	case "c": // Collapse all
 		if root := tv.getTraceRoot(); root != nil {
 			root.CollapseAll()
 			tv.renderer.RenderTree(root)
@@ -172,10 +169,10 @@ func (tv *TreeViewerWithMouse) handleInput() bool {
 		}
 		return false
 
-	case input == "q" || input == "\x03": // q or Ctrl+C - quit
+	case "q", "\x03": // q or Ctrl+C - quit
 		return true
 
-	case input == "h": // Help
+	case "h": // Help
 		tv.showHelp()
 		return false
 	}
@@ -186,9 +183,10 @@ func (tv *TreeViewerWithMouse) handleInput() bool {
 // handleMouseEvent processes a mouse event
 func (tv *TreeViewerWithMouse) handleMouseEvent(evt *MouseEvent) {
 	if evt.IsScrollEvent() {
-		if evt.Button == ScrollUp {
+		switch evt.Button {
+		case ScrollUp:
 			tv.renderer.SelectUp()
-		} else if evt.Button == ScrollDown {
+		case ScrollDown:
 			tv.renderer.SelectDown()
 		}
 	} else if evt.IsClickEvent() {
@@ -211,20 +209,38 @@ func (tv *TreeViewerWithMouse) getTraceRoot() *TraceNode {
 
 // renderView clears and renders the current view
 func (tv *TreeViewerWithMouse) renderView() {
-	// Clear screen
-	_, _ = fmt.Print("\x1b[2J\x1b[H") //nolint:errcheck
+	tv.clearScreen()
 
 	// Render header
-	_, _ = fmt.Printf("ERST Interactive Trace Tree Viewer (Mouse Support Enabled)\n")                  //nolint:errcheck
-	_, _ = fmt.Printf("Transaction: %s | Steps: %d\n", tv.trace.TransactionHash, len(tv.trace.States)) //nolint:errcheck
-	_, _ = fmt.Print("─────────────────────────────────────────────────────────\n")                    //nolint:errcheck
+	_, _ = fmt.Printf("ERST Interactive Trace Tree Viewer (Mouse Support Enabled)\n")                  //nolint:errcheck // Terminal output, write failure is non-critical
+	_, _ = fmt.Printf("Transaction: %s | Steps: %d\n", tv.trace.TransactionHash, len(tv.trace.States)) //nolint:errcheck // Terminal output, write failure is non-critical
+	_, _ = fmt.Print("─────────────────────────────────────────────────────────\n")                    //nolint:errcheck // Terminal output, write failure is non-critical
 
 	// Render tree
-	_, _ = fmt.Print(tv.renderer.Render()) //nolint:errcheck
+	_, _ = fmt.Print(tv.renderer.Render()) //nolint:errcheck // Terminal output, write failure is non-critical
 
 	// Render footer
-	_, _ = fmt.Print("\n─────────────────────────────────────────────────────────\n")                                                             //nolint:errcheck
-	_, _ = fmt.Print("Controls: ↑↓/kj=navigate | Space/Enter=expand | e=expand-all | c=collapse-all | h=help | q=quit | Click [+/-] to expand\n") //nolint:errcheck
+	_, _ = fmt.Print("\n─────────────────────────────────────────────────────────\n")                                                   //nolint:errcheck // Terminal output, write failure is non-critical
+	_, _ = fmt.Print("Controls: n=next-step | ↑↓/kj=navigate | Space/Enter=expand | e=expand-all | c=collapse-all | h=help | q=quit\n") //nolint:errcheck // Terminal output, write failure is non-critical
+	_, _ = fmt.Print(tv.renderCurrentStateView())                                                                                       //nolint:errcheck // Terminal output, write failure is non-critical
+}
+
+// clearScreen clears the terminal before a redraw. On a VT-capable
+// terminal this uses the standard "clear + move cursor home" escape
+// sequence; on a terminal where that isn't safe (e.g. legacy Windows
+// cmd.exe without ENABLE_VIRTUAL_TERMINAL_PROCESSING) it instead scrolls
+// the previous frame off-screen with blank lines, which every terminal
+// handles correctly without printing raw escape-code text.
+func (tv *TreeViewerWithMouse) clearScreen() {
+	if !ansiOutputSupported() {
+		height := tv.screenHeight
+		if height <= 0 {
+			height = 24
+		}
+		_, _ = fmt.Print(strings.Repeat("\n", height)) //nolint:errcheck // Terminal output, write failure is non-critical
+		return
+	}
+	_, _ = fmt.Print("\x1b[2J\x1b[H") //nolint:errcheck // Terminal output, write failure is non-critical
 }
 
 // showHelp displays help information
@@ -234,6 +250,7 @@ func (tv *TreeViewerWithMouse) showHelp() {
 ║                              KEYBOARD SHORTCUTS                            ║
 ├────────────────────────────────────────────────────────────────────────────┤
 ║ Navigation:                                                                ║
+║   n              Move to next instruction/event                            ║
 ║   ↑ / k          Move up                                                   ║
 ║   ↓ / j          Move down                                                 ║
 ║   Space/Enter    Toggle expand/collapse on selected node                  ║
@@ -255,13 +272,62 @@ symbols with your mouse, or use keyboard shortcuts to navigate.
 
 Press any key to continue...
 `
-	_, _ = fmt.Print(helpText) //nolint:errcheck
+	_, _ = fmt.Print(helpText) //nolint:errcheck // Terminal output, write failure is non-critical
 
 	// Wait for input
 	buf := make([]byte, 1)
-	_, _ = syscall.Read(0, buf) //nolint:errcheck
+	_, _ = syscall.Read(0, buf) //nolint:errcheck // Best-effort input wait in help view
 
 	tv.renderView()
+}
+
+// NextStep advances to the next execution step and synchronizes tree focus
+// to the corresponding node in the rendered list.
+func (tv *TreeViewerWithMouse) NextStep() {
+	if tv.trace == nil || len(tv.trace.States) == 0 {
+		return
+	}
+
+	state, err := tv.trace.StepForward()
+	if err != nil {
+		return
+	}
+
+	// Tree nodes are currently built as step-<index>; sync focus to the new step.
+	tv.renderer.SelectNodeByID(fmt.Sprintf("step-%d", state.Step))
+}
+
+func (tv *TreeViewerWithMouse) renderCurrentStateView() string {
+	if tv.trace == nil || len(tv.trace.States) == 0 {
+		return "State: no trace loaded\n"
+	}
+
+	state, err := tv.trace.GetCurrentState()
+	if err != nil {
+		return "State: unavailable\n"
+	}
+
+	operation := state.Operation
+	if operation == "" {
+		operation = "-"
+	}
+	eventType := state.EventType
+	if eventType == "" {
+		eventType = "inferred"
+	}
+	function := state.Function
+	if function == "" {
+		function = "-"
+	}
+
+	return fmt.Sprintf(
+		"State: step=%d/%d op=%s event=%s fn=%s\n",
+		state.Step,
+		len(tv.trace.States)-1,
+		operation,
+		eventType,
+		function,
+	)
 }
 
 // Terminal control methods
@@ -275,13 +341,19 @@ func (tv *TreeViewerWithMouse) saveTerminalState() (string, error) {
 func (tv *TreeViewerWithMouse) restoreTerminalState(state string) error {
 	// Restore terminal settings
 	// In production, would use stty
-	_, _ = fmt.Print("\x1b[?25h") // Show cursor
+	if ansiOutputSupported() {
+		_, _ = fmt.Print("\x1b[?25h") // Show cursor
+	}
 	return nil
 }
 
 func (tv *TreeViewerWithMouse) enableRawMode() error {
 	// Enable raw mode using stty-like behavior
-	// Hide cursor
-	_, _ = fmt.Print("\x1b[?25l") //nolint:errcheck
+	// Hide cursor -- only where the escape sequence will actually be
+	// interpreted; otherwise leaving the cursor visible is a harmless,
+	// safe fallback (see ansi.go).
+	if ansiOutputSupported() {
+		_, _ = fmt.Print("\x1b[?25l") //nolint:errcheck // Terminal output, write failure is non-critical
+	}
 	return nil
 }

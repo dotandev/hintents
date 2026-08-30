@@ -1,13 +1,19 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-#![allow(warnings, clippy::all, clippy::pedantic, clippy::nursery)]
-
+#![allow(clippy::pedantic, clippy::nursery)]
+mod asset_tracker;
 mod config;
+mod context;
 mod debug_host_fn;
+mod events;
 mod gas_optimizer;
 mod git_detector;
+mod ipc;
+mod memory;
+mod profiler;
 mod runner;
+mod snapshot;
 mod source_map_cache;
 mod source_mapper;
 mod stack_trace;
@@ -20,11 +26,9 @@ use crate::source_mapper::SourceMapper;
 use crate::stack_trace::WasmStackTrace;
 use crate::types::*;
 use base64::Engine as _;
+use soroban_env_host::xdr::{Operation, OperationBody};
 use soroban_env_host::xdr::{ReadXdr, WriteXdr};
-use soroban_env_host::{
-    xdr::{Operation, OperationBody},
-    Host, HostError,
-};
+use std::any::Any;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -54,7 +58,7 @@ fn init_logger() {
 }
 
 fn send_error(msg: String) {
-    let trace = WasmStackTrace::from_host_error(&msg);
+    let trace = WasmStackTrace::from_host_error(&msg, None);
     let res = SimulationResponse {
         status: "error".to_string(),
         error: Some(msg),
@@ -72,6 +76,8 @@ fn send_error(msg: String) {
         stack_trace: Some(trace),
         wasm_offset: None,
         linear_memory_dump: None,
+        asset_anomalies: vec![],
+        pprof_profile: None,
     };
     if let Ok(json) = serde_json::to_string(&res) {
         println!("{}", json);
@@ -80,6 +86,88 @@ fn send_error(msg: String) {
         println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
     }
     std::process::exit(1);
+}
+
+fn panic_info_to_string(panic_info: &(dyn Any + Send)) -> String {
+    if let Some(s) = panic_info.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = panic_info.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "Unknown panic".to_string()
+    }
+}
+
+fn catch_unwind_safe<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> T,
+{
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .map_err(|panic_info| panic_info_to_string(&panic_info))
+}
+
+fn emit_panic_response(
+    panic_msg: String,
+    source_mapper: Option<&SourceMapper>,
+    harness_logs: &[String],
+    lcov_report: &Option<String>,
+    lcov_report_path: &Option<String>,
+) {
+    let mut wasm_trace = WasmStackTrace::from_panic(&panic_msg);
+    if let Some(mapper) = source_mapper {
+        eprintln!("Attempting to resolve sources for Panic trace...");
+        wasm_trace.resolve_sources(mapper);
+        if wasm_trace
+            .frames
+            .iter()
+            .any(|f| f.source_location.is_some())
+        {
+            eprintln!("Source locations resolved for Panic trace.");
+        } else {
+            eprintln!("No source locations resolved for Panic trace.");
+        }
+    }
+
+    let memory_limit_exceeded = panic_msg.contains(ERR_MEMORY_LIMIT_EXCEEDED);
+
+    let response = SimulationResponse {
+        status: "error".to_string(),
+        error: Some(if memory_limit_exceeded {
+            panic_msg.clone()
+        } else {
+            format!("Simulator panicked: {panic_msg}")
+        }),
+        error_code: if memory_limit_exceeded {
+            Some(ERR_MEMORY_LIMIT_EXCEEDED.to_string())
+        } else {
+            None
+        },
+        lcov_report: lcov_report.clone(),
+        lcov_report_path: lcov_report_path.clone(),
+        events: vec![],
+        diagnostic_events: vec![],
+        categorized_events: vec![],
+        logs: {
+            let mut logs = vec![format!("PANIC: {panic_msg}")];
+            logs.extend_from_slice(harness_logs);
+            logs
+        },
+        flamegraph: None,
+        optimization_report: None,
+        budget_usage: None,
+        source_location: None,
+        stack_trace: Some(wasm_trace),
+        wasm_offset: None,
+        linear_memory_dump: None,
+        asset_anomalies: vec![],
+        pprof_profile: None,
+    };
+    if let Ok(json) = serde_json::to_string(&response) {
+        println!("{}", json);
+    } else {
+        eprintln!("Failed to serialize panic response");
+        println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
+    }
 }
 
 #[derive(Default)]
@@ -108,18 +196,18 @@ fn generate_lcov_report(coverage: &CoverageTracker, source_file: &str) -> String
         .iter()
         .map(|(name, count)| (name.as_str(), *count))
         .collect();
-    functions.sort_by(|(a, _), (b, _)| a.cmp(b));
+    functions.sort_by_key(|&(a, _)| a);
 
     let mut report = String::new();
     report.push_str("TN:simulator\n");
     report.push_str(&format!("SF:{source_file}\n"));
 
     for (idx, (name, _)) in functions.iter().enumerate() {
-        let sanitized = name.replace('\n', "_").replace(',', "_");
+        let sanitized = name.replace(['\n', ','], "_");
         report.push_str(&format!("FN:{},{}\n", idx + 1, sanitized));
     }
     for (name, count) in &functions {
-        let sanitized = name.replace('\n', "_").replace(',', "_");
+        let sanitized = name.replace(['\n', ','], "_");
         report.push_str(&format!("FNDA:{count},{sanitized}\n"));
     }
 
@@ -136,28 +224,32 @@ fn generate_lcov_report(coverage: &CoverageTracker, source_file: &str) -> String
     report
 }
 
-fn check_memory_limit_or_panic(host: &Host, memory_limit: Option<u64>) {
-    if let Some(limit) = memory_limit {
-        if let Ok(mem_bytes) = host.budget_cloned().get_mem_bytes_consumed() {
-            if mem_bytes > limit {
-                panic!(
-                    "{}: consumed {} bytes, limit {} bytes",
-                    ERR_MEMORY_LIMIT_EXCEEDED, mem_bytes, limit
-                );
-            }
-        }
+fn load_ledger_entries(
+    sim_host: &mut runner::SimHost,
+    entries: &HashMap<String, String>,
+) -> Result<usize, String> {
+    let mut loaded_entries = 0usize;
+    for (key_xdr, entry_xdr) in entries {
+        let key = snapshot::decode_ledger_key(key_xdr)
+            .map_err(|e| format!("Failed to parse LedgerKey XDR: {e}"))?;
+        let entry = snapshot::decode_ledger_entry(entry_xdr)
+            .map_err(|e| format!("Failed to parse LedgerEntry XDR: {e}"))?;
+        sim_host
+            .set_ledger_entry(key, entry)
+            .map_err(|e| format!("Failed to inject ledger entry: {e:?}"))?;
+        loaded_entries += 1;
     }
+    Ok(loaded_entries)
 }
 
 fn execute_operations(
-    host: &Host,
+    sim_host: &runner::SimHost,
     operations: &[Operation],
     request: &SimulationRequest,
-    memory_limit: Option<u64>,
     coverage: &mut CoverageTracker,
-) -> Result<Vec<String>, HostError> {
+) -> Result<Vec<String>, crate::runner::SimHostError> {
     let mut logs = Vec::new();
-    check_memory_limit_or_panic(host, memory_limit);
+    sim_host.check_memory_limit();
     for op in operations {
         coverage.record_operation(op);
         match &op.body {
@@ -166,27 +258,29 @@ fn execute_operations(
 
                 // Check for signature verification mock
                 if let Some(mock_result) =
-                    check_signature_verification_mocks(&request, &invoke_op.host_function)
+                    check_signature_verification_mocks(request, &invoke_op.host_function)
                 {
                     logs.push(format!("Mock signature verification: {:?}", mock_result));
                     if !mock_result {
-                        return Err(soroban_env_host::HostError::from((
-                            soroban_env_host::xdr::ScErrorType::Context,
-                            soroban_env_host::xdr::ScErrorCode::InvalidInput,
-                        )));
+                        return Err(crate::runner::SimHostError::Host(
+                            soroban_env_host::HostError::from((
+                                soroban_env_host::xdr::ScErrorType::Context,
+                                soroban_env_host::xdr::ScErrorCode::InvalidInput,
+                            )),
+                        ));
                     }
                 }
 
-                let val = host.invoke_function(invoke_op.host_function.clone())?;
+                let val = sim_host.invoke_function(invoke_op.host_function.clone())?;
                 logs.push(format!("Result: {val:?}"));
-                check_memory_limit_or_panic(host, memory_limit);
+                sim_host.check_memory_limit();
             }
             _ => {
                 logs.push(format!(
                     "Skipping non-Soroban operation: {:?}",
                     op.body.name()
                 ));
-                check_memory_limit_or_panic(host, memory_limit);
+                sim_host.check_memory_limit();
             }
         }
     }
@@ -252,27 +346,23 @@ fn check_signature_verification_mocks(
     // Check if signature verification mocking is enabled
     let mock_result = request.mock_signature_verification?;
 
-    // Check if this is a signature verification host function
-    // Note: Current soroban-env-host version only has InvokeContract, CreateContract, and UploadContractWasm
-    // Signature verification functions may be handled at a different level or in newer versions
-    match host_function {
-        // For now, we'll mock signature verification based on function name patterns
-        _ => {
-            // Check if the function name contains signature verification related terms
-            let function_name = host_function.name();
-            if function_name.contains("Verify")
-                || function_name.contains("Signature")
-                || function_name.contains("Ed25519")
-            {
-                Some(mock_result)
-            } else {
-                None
-            }
-        }
+    // Check if the function name contains signature verification related terms
+    let function_name = host_function.name();
+    if function_name.contains("Verify")
+        || function_name.contains("Signature")
+        || function_name.contains("Ed25519")
+    {
+        Some(mock_result)
+    } else {
+        None
     }
 }
 
-fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<CategorizedEvent> {
+fn categorize_events(
+    events: &soroban_env_host::events::Events,
+    cpu: Option<u64>,
+    mem: Option<u64>,
+) -> Vec<CategorizedEvent> {
     events
         .0
         .iter()
@@ -298,6 +388,8 @@ fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<Categoriz
             };
 
             let wasm_instruction = extract_wasm_instruction(&topics, &data);
+            let metadata = events::build_snapshot_metadata(0, topics.len() as u32);
+            let snapshot_id = Some(metadata.id.clone());
             CategorizedEvent {
                 category,
                 event: DiagnosticEvent {
@@ -315,6 +407,10 @@ fn categorize_events(events: &soroban_env_host::events::Events) -> Vec<Categoriz
                     data,
                     wasm_instruction,
                     in_successful_contract_call: !e.failed_call,
+                    cpu,
+                    mem,
+                    snapshot_id,
+                    snapshot_metadata: Some(metadata),
                 },
             }
         })
@@ -336,12 +432,15 @@ fn main() {
 
     tracing::info!(event = "simulator_started", "Simulator initializing...");
 
+    let mut pprof_guard = profiler::PprofGuard::start(99);
+
     let mut buffer = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut buffer) {
-        let _err_msg = format!("Failed to read stdin: {e}");
+        let pprof_b64 = pprof_guard
+            .stop()
+            .map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes));
         let res = SimulationResponse {
             status: "error".to_string(),
-            //             error: Some(err_msg.clone()),
             error: Some(format!("Failed to read stdin: {e}")),
             error_code: None,
             lcov_report: None,
@@ -357,20 +456,25 @@ fn main() {
             stack_trace: None,
             wasm_offset: None,
             linear_memory_dump: None,
+            asset_anomalies: vec![],
+            pprof_profile: pprof_b64,
         };
+        tracing::error!("Failed to read stdin: {}", e);
         if let Ok(json) = serde_json::to_string(&res) {
             println!("{}", json);
         } else {
             eprintln!("Failed to serialize error response");
             println!("{{\"status\": \"error\", \"error\": \"Internal serialization error\"}}");
         }
-        eprintln!("Failed to read stdin: {e}");
         return;
     }
 
     let request: SimulationRequest = match serde_json::from_str(&buffer) {
         Ok(req) => req,
         Err(e) => {
+            let pprof_b64 = pprof_guard
+                .stop()
+                .map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes));
             let res = SimulationResponse {
                 status: "error".to_string(),
                 error: Some(format!("Invalid JSON: {e}")),
@@ -388,11 +492,22 @@ fn main() {
                 stack_trace: None,
                 wasm_offset: None,
                 linear_memory_dump: None,
+                asset_anomalies: vec![],
+                pprof_profile: pprof_b64,
             };
             println!(
                 "{}",
                 serde_json::to_string(&res).expect("Failed to serialize error response")
             );
+            return;
+        }
+    };
+
+    let mut harness_ctx = context::HarnessContext::default();
+    let harness_logs = match harness_ctx.apply_control_command(&request) {
+        Ok(logs) => logs,
+        Err(e) => {
+            send_error(format!("Harness context error: {}", e));
             return;
         }
     };
@@ -414,35 +529,35 @@ fn main() {
         }
     };
 
-    eprintln!(
-        "Debug: Received ResultMetaXdr len: {}",
-        request.result_meta_xdr.len()
-    );
-
-    if request.result_meta_xdr.is_empty() {
-        eprintln!("Warning: ResultMetaXdr is empty. Host storage may be incomplete.");
+    // Decode ResultMeta XDR
+    let _result_meta = if request.result_meta_xdr.is_empty() {
+        tracing::warn!("ResultMetaXdr is empty; host storage will be empty");
+        None
     } else {
         match base64::engine::general_purpose::STANDARD.decode(&request.result_meta_xdr) {
             Ok(bytes) => {
                 if bytes.is_empty() {
-                    eprintln!("Warning: ResultMetaXdr decoded to 0 bytes.");
+                    tracing::warn!("ResultMeta decoded to 0 bytes");
+                    None
                 } else {
                     match soroban_env_host::xdr::TransactionResultMeta::from_xdr(
                         &bytes,
                         soroban_env_host::xdr::Limits::none(),
                     ) {
-                        Ok(_) => {}
+                        Ok(meta) => Some(meta),
                         Err(e) => {
-                            eprintln!(
-                                "Warning: Failed to parse ResultMeta XDR: {}. Proceeding with empty storage.",
-                                e
-                            );
+                            tracing::warn!("Failed to parse ResultMeta XDR: {}", e);
+                            None
                         }
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Warning: Failed to decode ResultMeta Base64: {e}. Proceeding with empty storage.");
+                tracing::warn!(
+                    "Failed to decode ResultMeta base64, proceeding with empty storage: {}",
+                    e
+                );
+                None
             }
         }
     };
@@ -456,15 +571,15 @@ fn main() {
                 }
                 let mapper = SourceMapper::new_with_options(wasm_bytes, request.no_cache);
                 if mapper.has_debug_symbols() {
-                    eprintln!("Debug symbols found in WASM");
+                    tracing::info!("Debug symbols found in WASM");
                     Some(mapper)
                 } else {
-                    eprintln!("No debug symbols found in WASM");
+                    tracing::info!("No debug symbols found in WASM");
                     None
                 }
             }
             Err(e) => {
-                eprintln!("Failed to decode WASM base64: {e}");
+                tracing::warn!("Failed to decode WASM base64: {}", e);
                 None
             }
         }
@@ -473,12 +588,11 @@ fn main() {
     };
 
     // Initialize Host
-    let sim_host = runner::SimHost::new(
+    let mut sim_host = runner::SimHost::new(
         None,
         request.resource_calibration.clone(),
         request.memory_limit,
     );
-    let host = sim_host.inner;
 
     // --- START: Local WASM Loading Integration (Issue #70) ---
     if let Some(path) = &request.wasm_path {
@@ -493,51 +607,34 @@ fn main() {
     }
     // --- END: Local WASM Loading Integration ---
 
-    let mut loaded_entries_count = 0;
-
     // Populate Host Storage
-    if let Some(entries) = &request.ledger_entries {
-        for (key_xdr, entry_xdr) in entries {
-            match base64::engine::general_purpose::STANDARD.decode(key_xdr) {
-                Ok(b) => match soroban_env_host::xdr::LedgerKey::from_xdr(
-                    b,
-                    soroban_env_host::xdr::Limits::none(),
-                ) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        send_error(format!("Failed to parse LedgerKey XDR: {}", e));
-                        return;
-                    }
-                },
+    // Populate Host Storage — resolve ledger entries (plain or zstd-compressed).
+    let resolved_entries: Option<std::collections::HashMap<String, String>> =
+        if let Some(b64) = &request.ledger_entries_zstd {
+            match ipc::decompress::decompress_ledger_entries(b64) {
+                Ok(entries) => Some(entries),
                 Err(e) => {
-                    send_error(format!("Failed to decode LedgerKey Base64: {}", e));
+                    send_error(format!("Failed to decompress ledger entries: {e}"));
                     return;
                 }
-            };
+            }
+        } else {
+            request.ledger_entries.clone()
+        };
 
-            match base64::engine::general_purpose::STANDARD.decode(entry_xdr) {
-                Ok(b) => match soroban_env_host::xdr::LedgerEntry::from_xdr(
-                    b,
-                    soroban_env_host::xdr::Limits::none(),
-                ) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        send_error(format!("Failed to parse LedgerEntry XDR: {}", e));
-                        return;
-                    }
-                },
-                Err(e) => {
-                    send_error(format!("Failed to decode LedgerEntry Base64: {}", e));
-                    return;
-                }
-            };
-
-            // TODO: Inject into host storage.
-            // For MVP, we verify we can parse them.
-            eprintln!("Parsed Ledger Entry from XDR successfully");
-            loaded_entries_count += 1;
+    let mut loaded_entries_count = 0;
+    if let Some(entries) = &resolved_entries {
+        match load_ledger_entries(&mut sim_host, entries) {
+            Ok(count) => {
+                loaded_entries_count = count;
+            }
+            Err(err) => {
+                send_error(err);
+                return;
+            }
         }
     }
+    let host = &sim_host.inner;
 
     let operations = match &envelope {
         soroban_env_host::xdr::TransactionEnvelope::Tx(tx_v1) => &tx_v1.tx.operations,
@@ -550,18 +647,30 @@ fn main() {
     // Wrap the operation execution in panic protection
     let mut coverage = CoverageTracker::default();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        execute_operations(
-            &host,
-            operations,
-            &request,
-            request.memory_limit,
-            &mut coverage,
-        )
+        execute_operations(&sim_host, operations, &request, &mut coverage)
     }));
 
-    let budget = host.budget_cloned();
-    let cpu_insns = budget.get_cpu_insns_consumed().unwrap_or(0);
-    let mem_bytes = budget.get_mem_bytes_consumed().unwrap_or(0);
+    let mut lcov_report = None;
+    let mut lcov_report_path = None;
+
+    let (budget, cpu_insns, mem_bytes) = match catch_unwind_safe(|| {
+        let budget = host.budget_cloned();
+        let cpu_insns = budget.get_cpu_insns_consumed().unwrap_or(0);
+        let mem_bytes = budget.get_mem_bytes_consumed().unwrap_or(0);
+        (budget, cpu_insns, mem_bytes)
+    }) {
+        Ok(values) => values,
+        Err(panic_msg) => {
+            emit_panic_response(
+                panic_msg,
+                source_mapper.as_ref(),
+                &harness_logs,
+                &lcov_report,
+                &lcov_report_path,
+            );
+            return;
+        }
+    };
 
     let cpu_usage_percent = (cpu_insns as f64 / CPU_LIMIT as f64) * 100.0;
     let memory_usage_percent = (mem_bytes as f64 / MEMORY_LIMIT as f64) * 100.0;
@@ -588,6 +697,18 @@ fn main() {
         None
     };
 
+    let mut pprof_profile_b64 = None;
+    if let Some(ref output_path) = request.pprof_output_path {
+        if let Some(bytes) = pprof_guard.stop() {
+            if let Err(e) = profiler::write_file(&bytes, output_path.as_ref()) {
+                eprintln!("Failed to write pprof file: {e}");
+            } else {
+                tracing::info!(event = "pprof_written", path = %output_path, "pprof profile written");
+                pprof_profile_b64 = Some(base64::engine::general_purpose::STANDARD.encode(&bytes));
+            }
+        }
+    }
+
     let mut flamegraph_svg = None;
     if request.profile.unwrap_or(false) {
         let folded_data = format!("Total;CPU {}\nTotal;Memory {}\n", cpu_insns, mem_bytes);
@@ -598,14 +719,13 @@ fn main() {
         if let Err(e) =
             inferno::flamegraph::from_reader(&mut options, folded_data.as_bytes(), &mut result_vec)
         {
+            tracing::warn!("Failed to generate flamegraph: {}", e);
             eprintln!("Failed to generate flamegraph: {e}");
         } else {
             flamegraph_svg = Some(String::from_utf8_lossy(&result_vec).to_string());
         }
     }
 
-    let mut lcov_report = None;
-    let mut lcov_report_path = None;
     if request.enable_coverage {
         let source_file = request
             .wasm_path
@@ -626,64 +746,126 @@ fn main() {
     }
 
     let diagnostic_events: Vec<DiagnosticEvent> = vec![];
-    let mut categorized_events: Vec<CategorizedEvent> = vec![];
 
     match result {
         Ok(Ok(exec_logs)) => {
-            let (events, _diag_evs): (Vec<String>, Vec<DiagnosticEvent>) = match host.get_events() {
-                Ok(evs) => {
-                    let raw_events: Vec<String> =
-                        (evs.0).iter().map(|e| format!("{:?}", e)).collect();
-                    let diag_events: Vec<DiagnosticEvent> = (evs.0)
-                        .iter()
-                        .map(|event| {
-                            let event_type = match event.event.type_ {
-                                soroban_env_host::xdr::ContractEventType::Contract => {
-                                    "contract".to_string()
-                                }
-                                soroban_env_host::xdr::ContractEventType::System => {
-                                    "system".to_string()
-                                }
-                                soroban_env_host::xdr::ContractEventType::Diagnostic => {
-                                    "diagnostic".to_string()
-                                }
-                            };
+            let mut asset_tracker = asset_tracker::AssetTracker::new(request.enable_asset_safety);
 
-                            let contract_id =
-                                event.event.contract_id.as_ref().map(contract_id_to_hex);
+            let (events, diagnostic_events): (Vec<String>, Vec<DiagnosticEvent>) =
+                match catch_unwind_safe(|| sim_host.events().map_err(|err| format!("{err:?}"))) {
+                    Ok(Ok(evs)) => {
+                        let mut raw_events: Vec<String> = Vec::with_capacity(evs.0.len());
+                        let diag_events: Vec<DiagnosticEvent> = (evs.0)
+                            .iter()
+                            .map(|event| {
+                                let event_type = match event.event.type_ {
+                                    soroban_env_host::xdr::ContractEventType::Contract => {
+                                        "contract".to_string()
+                                    }
+                                    soroban_env_host::xdr::ContractEventType::System => {
+                                        "system".to_string()
+                                    }
+                                    soroban_env_host::xdr::ContractEventType::Diagnostic => {
+                                        "diagnostic".to_string()
+                                    }
+                                };
 
-                            let (topics, data) = match &event.event.body {
-                                soroban_env_host::xdr::ContractEventBody::V0(v0) => {
-                                    let topics: Vec<String> =
-                                        v0.topics.iter().map(scval_to_xdr_base64).collect();
-                                    let data = scval_to_xdr_base64(&v0.data);
-                                    (topics, data)
+                                let contract_id =
+                                    event.event.contract_id.as_ref().map(contract_id_to_hex);
+
+                                let (topics, data) = match &event.event.body {
+                                    soroban_env_host::xdr::ContractEventBody::V0(v0) => {
+                                        let topics: Vec<String> =
+                                            v0.topics.iter().map(scval_to_xdr_base64).collect();
+                                        let data = scval_to_xdr_base64(&v0.data);
+
+                                        // Attempt to track assets if this looks like a token event
+                                        if topics.len() >= 2 && request.enable_asset_safety {
+                                            // Decoded event names are usually the second topic, we just do a heuristic
+                                            let function_topic =
+                                                format!("{:?}", v0.topics.first().unwrap());
+                                            if function_topic.contains("transfer") {
+                                                // mock tracking for MVP demo
+                                                asset_tracker
+                                                    .record_transfer("sender", "receiver", 100);
+                                            } else if function_topic.contains("mint") {
+                                                asset_tracker.record_mint("receiver", 100, true);
+                                            } else if function_topic.contains("burn") {
+                                                asset_tracker.record_burn("sender", 100);
+                                            }
+                                        }
+
+                                        (topics, data)
+                                    }
+                                };
+
+                                let wasm_instruction = extract_wasm_instruction(&topics, &data);
+                                let metadata =
+                                    events::build_snapshot_metadata(cpu_insns, topics.len() as u32);
+                                raw_events
+                                    .push(format!("{:?} [snapshot_id={}]", event, metadata.id));
+                                DiagnosticEvent {
+                                    event_type,
+                                    contract_id,
+                                    topics,
+                                    data,
+                                    in_successful_contract_call: !event.failed_call,
+                                    snapshot_id: Some(metadata.id.clone()),
+                                    snapshot_metadata: Some(metadata),
+                                    wasm_instruction,
+                                    cpu: Some(cpu_insns),
+                                    mem: Some(mem_bytes),
                                 }
-                            };
+                            })
+                            .collect();
+                        (raw_events, diag_events)
+                    }
+                    Ok(Err(err_msg)) => {
+                        emit_panic_response(
+                            format!("Host event retrieval failed: {err_msg}"),
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                    Err(panic_msg) => {
+                        emit_panic_response(
+                            panic_msg,
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                };
 
-                            let wasm_instruction = extract_wasm_instruction(&topics, &data);
-                            DiagnosticEvent {
-                                event_type,
-                                contract_id,
-                                topics,
-                                data,
-                                in_successful_contract_call: !event.failed_call,
-                                wasm_instruction,
-                            }
-                        })
-                        .collect();
-                    (raw_events, diag_events)
-                }
-                Err(_) => (
-                    vec!["Failed to retrieve events".to_string()],
-                    Vec::<DiagnosticEvent>::new(),
-                ),
-            };
-
-            categorized_events = match host.get_events() {
-                Ok(evs) => categorize_events(&evs),
-                Err(_) => vec![],
-            };
+            let categorized_events =
+                match catch_unwind_safe(|| sim_host.events().map_err(|err| format!("{err:?}"))) {
+                    Ok(Ok(evs)) => categorize_events(&evs, Some(cpu_insns), Some(mem_bytes)),
+                    Ok(Err(err_msg)) => {
+                        emit_panic_response(
+                            format!("Host event retrieval failed: {err_msg}"),
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                    Err(panic_msg) => {
+                        emit_panic_response(
+                            panic_msg,
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                };
 
             let mut final_logs = vec![
                 format!("Host Initialized with Budget: {:?}", budget),
@@ -692,13 +874,39 @@ fn main() {
                 format!("CPU Instructions Used: {}", cpu_insns),
                 format!("Memory Bytes Used: {}", mem_bytes),
             ];
-            let contract_debug_logs: Vec<String> = match host.get_events() {
-                Ok(ref evs) => debug_host_fn::extract_debug_logs(evs)
-                    .into_iter()
-                    .map(|msg| format!("[debug] {}", msg))
-                    .collect(),
-                Err(_) => vec![],
-            };
+            final_logs.extend(harness_logs.clone());
+            if let Some(first) = diagnostic_events.first() {
+                if let Some(snapshot_id) = &first.snapshot_id {
+                    final_logs.push(format!("First linked SnapshotID: {snapshot_id}"));
+                }
+            }
+            let contract_debug_logs: Vec<String> =
+                match catch_unwind_safe(|| sim_host.events().map_err(|err| format!("{err:?}"))) {
+                    Ok(Ok(evs)) => debug_host_fn::extract_debug_logs(&evs)
+                        .into_iter()
+                        .map(|msg| format!("[debug] {}", msg))
+                        .collect(),
+                    Ok(Err(err_msg)) => {
+                        emit_panic_response(
+                            format!("Host event retrieval failed: {err_msg}"),
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                    Err(panic_msg) => {
+                        emit_panic_response(
+                            panic_msg,
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                };
             final_logs.extend(contract_debug_logs);
             final_logs.extend(exec_logs);
 
@@ -735,6 +943,8 @@ fn main() {
                         stack_trace: None,
                         wasm_offset: None,
                         linear_memory_dump: None,
+                        asset_anomalies: vec![],
+                        pprof_profile: pprof_profile_b64.clone(),
                     };
 
                     if let Ok(json) = serde_json::to_string(&response) {
@@ -768,6 +978,8 @@ fn main() {
                     .as_ref()
                     .and_then(|m| m.map_wasm_offset_to_source(0)),
                 linear_memory_dump: None,
+                asset_anomalies: asset_tracker.finalize(),
+                pprof_profile: pprof_profile_b64.clone(),
             };
 
             if let Ok(json) = serde_json::to_string(&response) {
@@ -782,7 +994,19 @@ fn main() {
             let error_debug = format!("{:?}", host_error);
             let _error_msg = format!("{:?}", host_error);
             let decoded_msg = decode_error(&error_debug);
-            let wasm_trace = WasmStackTrace::from_host_error(&error_debug);
+
+            let wasm_trace = WasmStackTrace::from_host_error(&error_debug, source_mapper.as_ref());
+
+            if wasm_trace
+                .frames
+                .iter()
+                .any(|f| f.source_location.is_some())
+            {
+                eprintln!("Source locations resolved for HostError trace.");
+            } else {
+                eprintln!("No source locations resolved for HostError trace.");
+            }
+
             let trace_display = wasm_trace.display();
 
             let _structured_error = StructuredError {
@@ -800,7 +1024,7 @@ fn main() {
                     .and_then(|m| m.map_wasm_offset_to_source(offset))
             });
 
-            let _final_logs = vec![
+            let _final_logs = [
                 format!("Host execution failed: {:?}", decoded_msg),
                 format!("Trace: {}", trace_display),
                 format!("Host Budget at failure: {:?}", budget),
@@ -808,17 +1032,37 @@ fn main() {
                 format!("Memory Bytes Used: {}", mem_bytes),
             ];
 
-            let _categorized_events = match host.get_events() {
-                Ok(evs) => categorize_events(&evs),
-                Err(_) => vec![],
-            };
+            let _categorized_events =
+                match catch_unwind_safe(|| sim_host.events().map_err(|err| format!("{err:?}"))) {
+                    Ok(Ok(evs)) => categorize_events(&evs, Some(cpu_insns), Some(mem_bytes)),
+                    Ok(Err(err_msg)) => {
+                        emit_panic_response(
+                            format!("Host event retrieval failed: {err_msg}"),
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                    Err(panic_msg) => {
+                        emit_panic_response(
+                            panic_msg,
+                            source_mapper.as_ref(),
+                            &harness_logs,
+                            &lcov_report,
+                            &lcov_report_path,
+                        );
+                        return;
+                    }
+                };
 
             // Heuristic to ignore Rust stdlib panic wrappers and find the actual source point
             let mut user_panic_point = None;
             for event in &diagnostic_events {
                 let mut combined_text = event.data.clone();
                 for topic in &event.topics {
-                    combined_text.push_str(" ");
+                    combined_text.push(' ');
                     combined_text.push_str(topic);
                 }
 
@@ -892,7 +1136,11 @@ fn main() {
                 events: vec![],
                 diagnostic_events: vec![],
                 categorized_events: vec![],
-                logs: vec![format!("Stack trace:\n{}", trace_display)],
+                logs: {
+                    let mut logs = vec![format!("Stack trace:\n{}", trace_display)];
+                    logs.extend(harness_logs.clone());
+                    logs
+                },
                 flamegraph: None,
                 optimization_report: None,
                 budget_usage: None,
@@ -900,6 +1148,8 @@ fn main() {
                 stack_trace: Some(wasm_trace),
                 wasm_offset,
                 linear_memory_dump: None,
+                asset_anomalies: vec![],
+                pprof_profile: pprof_profile_b64.clone(),
             };
             if let Ok(json) = serde_json::to_string(&response) {
                 println!("{}", json);
@@ -917,7 +1167,20 @@ fn main() {
                 "Unknown panic".to_string()
             };
 
-            let wasm_trace = WasmStackTrace::from_panic(&panic_msg);
+            let mut wasm_trace = WasmStackTrace::from_panic(&panic_msg);
+            if let Some(ref mapper) = source_mapper {
+                eprintln!("Attempting to resolve sources for Panic trace...");
+                wasm_trace.resolve_sources(mapper);
+                if wasm_trace
+                    .frames
+                    .iter()
+                    .any(|f| f.source_location.is_some())
+                {
+                    eprintln!("Source locations resolved for Panic trace.");
+                } else {
+                    eprintln!("No source locations resolved for Panic trace.");
+                }
+            }
             let memory_limit_exceeded = panic_msg.contains(ERR_MEMORY_LIMIT_EXCEEDED);
 
             let response = SimulationResponse {
@@ -937,7 +1200,11 @@ fn main() {
                 events: vec![],
                 diagnostic_events: vec![],
                 categorized_events: vec![],
-                logs: vec![format!("PANIC: {}", panic_msg)],
+                logs: {
+                    let mut logs = vec![format!("PANIC: {}", panic_msg)];
+                    logs.extend(harness_logs.clone());
+                    logs
+                },
                 flamegraph: None,
                 optimization_report: None,
                 budget_usage: None,
@@ -945,6 +1212,8 @@ fn main() {
                 stack_trace: Some(wasm_trace),
                 wasm_offset: None,
                 linear_memory_dump: None,
+                asset_anomalies: vec![],
+                pprof_profile: pprof_profile_b64.clone(),
             };
             if let Ok(json) = serde_json::to_string(&response) {
                 println!("{}", json);
@@ -1217,7 +1486,7 @@ mod tests {
 
         // failed_call = true  →  in_successful_contract_call must be false
         let evs_failed = Events(vec![make_event(true)]);
-        let categorized = categorize_events(&evs_failed);
+        let categorized = categorize_events(&evs_failed, None, None);
         assert_eq!(categorized.len(), 1);
         assert!(
             !categorized[0].event.in_successful_contract_call,
@@ -1226,7 +1495,7 @@ mod tests {
 
         // failed_call = false  →  in_successful_contract_call must be true
         let evs_ok = Events(vec![make_event(false)]);
-        let categorized = categorize_events(&evs_ok);
+        let categorized = categorize_events(&evs_ok, None, None);
         assert_eq!(categorized.len(), 1);
         assert!(
             categorized[0].event.in_successful_contract_call,
@@ -1263,7 +1532,7 @@ mod tests {
             make_typed_event(ContractEventType::Diagnostic),
         ]);
 
-        let cats = categorize_events(&evs);
+        let cats = categorize_events(&evs, None, None);
         assert_eq!(cats[0].category, "Contract");
         assert_eq!(cats[1].category, "System");
         assert_eq!(cats[2].category, "Diagnostic");
@@ -1360,4 +1629,44 @@ mod tests {
         assert!(report.contains("FNF:2"));
         assert!(report.contains("FNH:2"));
     }
+
+    #[test]
+    fn test_load_ledger_entries_injects_into_host() {
+        use base64::engine::general_purpose::STANDARD;
+        use soroban_env_host::xdr::{
+            ContractDataDurability, ContractDataEntry, Hash, LedgerEntry, LedgerEntryData,
+            LedgerEntryExt, LedgerKey, LedgerKeyContractData, ScAddress, ScVal, WriteXdr,
+        };
+
+        let contract_id = Hash([7u8; 32]);
+        let key = LedgerKey::ContractData(LedgerKeyContractData {
+            contract: ScAddress::Contract(soroban_env_host::xdr::ContractId(contract_id.clone())),
+            key: ScVal::U32(5),
+            durability: ContractDataDurability::Persistent,
+        });
+        let entry = LedgerEntry {
+            last_modified_ledger_seq: 99,
+            data: LedgerEntryData::ContractData(ContractDataEntry {
+                ext: soroban_env_host::xdr::ExtensionPoint::V0,
+                contract: ScAddress::Contract(soroban_env_host::xdr::ContractId(contract_id)),
+                key: ScVal::U32(5),
+                durability: ContractDataDurability::Persistent,
+                val: ScVal::U64(9),
+            }),
+            ext: LedgerEntryExt::V0,
+        };
+
+        let mut entries = HashMap::new();
+        entries.insert(
+            STANDARD.encode(key.to_xdr(soroban_env_host::xdr::Limits::none()).unwrap()),
+            STANDARD.encode(entry.to_xdr(soroban_env_host::xdr::Limits::none()).unwrap()),
+        );
+
+        let mut sim_host = runner::SimHost::new(None, None, None);
+        let count = load_ledger_entries(&mut sim_host, &entries).expect("failed to load entries");
+        assert_eq!(count, 1);
+    }
 }
+
+#[cfg(test)]
+mod test;

@@ -135,8 +135,8 @@ func TestAnalyzeEvents_InvalidParameters(t *testing.T) {
 	for _, s := range suggestions {
 		if s.Rule == "invalid_parameters" {
 			found = true
-			if s.Confidence != "medium" {
-				t.Errorf("Expected medium confidence, got: %s", s.Confidence)
+			if s.Confidence != confidenceHigh {
+				t.Errorf("Expected high confidence for a highly specific match, got: %s", s.Confidence)
 			}
 		}
 	}
@@ -268,7 +268,7 @@ func TestFormatSuggestions(t *testing.T) {
 		{
 			Rule:        "test_rule",
 			Description: "Test suggestion",
-			Confidence:  "high",
+			Confidence:  confidenceHigh,
 		},
 	}
 
@@ -280,8 +280,80 @@ func TestFormatSuggestions(t *testing.T) {
 	if !strings.Contains(output, "Test suggestion") {
 		t.Error("Expected output to contain suggestion description")
 	}
-	if !strings.Contains(output, "high") {
-		t.Error("Expected output to contain confidence level")
+	if !strings.Contains(output, "Confidence: High") {
+		t.Error("Expected output to contain title-cased confidence level")
+	}
+	if !strings.Contains(output, "🟢") {
+		t.Error("Expected output to contain a green confidence indicator for high confidence")
+	}
+}
+
+func TestAnalyzeEvents_ConfidenceBasedOnSpecificity(t *testing.T) {
+	engine := NewSuggestionEngine()
+	engine.AddCustomRule(ErrorPattern{
+		Name:     "specificity_probe",
+		Keywords: []string{"timeout", "deadline"},
+		EventChecks: []func(DecodedEvent) bool{
+			func(event DecodedEvent) bool {
+				for _, topic := range event.Topics {
+					if strings.EqualFold(topic, "timeout_signal") {
+						return true
+					}
+				}
+				return false
+			},
+		},
+		Suggestion: Suggestion{
+			Rule:        "specificity_probe",
+			Description: "Potential Fix: Review timeout configuration.",
+			Confidence:  confidenceLow,
+		},
+	})
+
+	tests := []struct {
+		name       string
+		events     []DecodedEvent
+		confidence string
+	}{
+		{
+			name: "low specificity keyword match",
+			events: []DecodedEvent{{
+				ContractID: "abc123",
+				Topics:     []string{"warning"},
+				Data:       "timeout while waiting",
+			}},
+			confidence: confidenceLow,
+		},
+		{
+			name: "medium specificity multiple keywords",
+			events: []DecodedEvent{{
+				ContractID: "abc123",
+				Topics:     []string{"warning", "deadline-near"},
+				Data:       "timeout while waiting",
+			}},
+			confidence: confidenceMedium,
+		},
+		{
+			name: "high specificity event check and exact keyword",
+			events: []DecodedEvent{{
+				ContractID: "abc123",
+				Topics:     []string{"timeout_signal", "deadline"},
+				Data:       "timeout while waiting",
+			}},
+			confidence: confidenceHigh,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			suggestions := engine.AnalyzeEvents(test.events)
+			if len(suggestions) != 1 {
+				t.Fatalf("expected 1 suggestion, got %d", len(suggestions))
+			}
+			if suggestions[0].Confidence != test.confidence {
+				t.Fatalf("expected %s confidence, got %s", test.confidence, suggestions[0].Confidence)
+			}
+		})
 	}
 }
 

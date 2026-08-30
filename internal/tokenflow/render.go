@@ -35,7 +35,7 @@ func (r *Report) MermaidFlowchart() string {
 		next++
 		id := fmt.Sprintf("n%d", next)
 		nodeID[label] = id
-		b.WriteString(fmt.Sprintf("  %s[\"%s\"]\n", id, escapeMermaidLabel(label)))
+		fmt.Fprintf(&b, "  %s[\"%s\"]\n", id, escapeMermaidLabel(label))
 		return id
 	}
 
@@ -43,7 +43,7 @@ func (r *Report) MermaidFlowchart() string {
 		from := getNode(t.From)
 		to := getNode(t.To)
 		label := fmt.Sprintf("%s %s", formatAmount(t), t.Token.Display())
-		b.WriteString(fmt.Sprintf("  %s -->|\"%s\"| %s\n", from, escapeMermaidLabel(label), to))
+		fmt.Fprintf(&b, "  %s -->|\"%s\"| %s\n", from, escapeMermaidLabel(label), to)
 	}
 
 	return b.String()

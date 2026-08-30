@@ -105,9 +105,10 @@ func buildContractStats(resp *simulator.SimulationResponse) []contractStat {
 		s.estimatedCost += eventCost(eventType)
 
 		lowerType := strings.ToLower(eventType)
-		if lowerType == "storage_write" {
+		switch lowerType {
+		case "storage_write":
 			s.storageWrites++
-		} else if lowerType == "require_auth" || lowerType == "auth" {
+		case "require_auth", "auth":
 			s.authChecks++
 		}
 

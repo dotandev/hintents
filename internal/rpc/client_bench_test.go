@@ -237,7 +237,7 @@ func BenchmarkGetLedgerEntries(b *testing.B) {
 				// Read and validate request
 				body, _ := io.ReadAll(r.Body)
 				var req GetLedgerEntriesRequest
-				json.Unmarshal(body, &req)
+				_ = json.Unmarshal(body, &req)
 
 				// Create response with matching number of entries
 				resp := GetLedgerEntriesResponse{
@@ -254,7 +254,7 @@ func BenchmarkGetLedgerEntries(b *testing.B) {
 					resp.Result.Entries[i].LiveUntilLedger = 2000 + i
 				}
 
-				json.NewEncoder(w).Encode(resp)
+				_ = json.NewEncoder(w).Encode(resp)
 			}))
 			defer server.Close()
 
@@ -362,7 +362,7 @@ func BenchmarkHTTPRoundTrip(b *testing.B) {
 			w.WriteHeader(401)
 			return
 		}
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
 	defer server.Close()
 
@@ -381,8 +381,8 @@ func BenchmarkHTTPRoundTrip(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 		}
 	})
 
@@ -395,8 +395,8 @@ func BenchmarkHTTPRoundTrip(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 		}
 	})
 }
@@ -405,7 +405,7 @@ func BenchmarkHTTPRoundTrip(b *testing.B) {
 func BenchmarkJSONRPCRoundTrip(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req GetLedgerEntriesRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		resp := GetLedgerEntriesResponse{
 			Jsonrpc: "2.0",
@@ -416,7 +416,7 @@ func BenchmarkJSONRPCRoundTrip(b *testing.B) {
 		resp.Result.Entries[0].Key = "test-key"
 		resp.Result.Entries[0].Xdr = "test-xdr"
 
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -439,9 +439,9 @@ func BenchmarkJSONRPCRoundTrip(b *testing.B) {
 			b.Fatal(err)
 		}
 		respBytes, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		var rpcResp GetLedgerEntriesResponse
-		json.Unmarshal(respBytes, &rpcResp)
+		_ = json.Unmarshal(respBytes, &rpcResp)
 	}
 }

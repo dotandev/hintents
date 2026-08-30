@@ -21,7 +21,7 @@ var (
 	//
 	// Alert threshold example:
 	//   Alert when no response received in 60 seconds:
-	//   time() - remote_node_last_response_timestamp_seconds{node_address="https://soroban-testnet.stellar.org"} > 60
+	//   time() - remote_node_last_response_timestamp_seconds{node_address="<rpc-url>"} > 60
 	RemoteNodeLastResponseTimestamp = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "remote_node_last_response_timestamp_seconds",

@@ -36,7 +36,7 @@ Example:
 	RunE: runGenerateBindings,
 }
 
-func runGenerateBindings(cmd *cobra.Command, args []string) error {
+func runGenerateBindings(_ *cobra.Command, args []string) error {
 	wasmPath := args[0]
 
 	// Read WASM file

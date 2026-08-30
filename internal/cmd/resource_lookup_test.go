@@ -48,11 +48,11 @@ func TestClosestStringMatch(t *testing.T) {
 }
 
 func TestResourceNotFoundError(t *testing.T) {
-	if got := resourceNotFoundError("abc123").Error(); got != "Resource not found. Did you mean abc123?" {
+	if got := resourceNotFoundError("abc123").Error(); got != "resource not found; did you mean abc123?" {
 		t.Fatalf("unexpected suggestion message: %q", got)
 	}
 
-	if got := resourceNotFoundError("").Error(); got != "Resource not found." {
+	if got := resourceNotFoundError("").Error(); got != "resource not found" {
 		t.Fatalf("unexpected no-suggestion message: %q", got)
 	}
 }
@@ -96,7 +96,7 @@ func TestResolvePartialID(t *testing.T) {
 }
 
 func TestResolveByTxHash(t *testing.T) {
-	sessions := []*session.SessionData{
+	sessions := []*session.Data{
 		{ID: "abc123-1700000000", TxHash: "aabbccdd11223344"},
 		{ID: "def456-1700001111", TxHash: "eeff001122334455"},
 	}

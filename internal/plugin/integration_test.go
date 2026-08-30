@@ -72,7 +72,7 @@ func TestManagerWithInvalidDir(t *testing.T) {
 	}
 }
 
-func TestPluginMetadata(t *testing.T) {
+func TestMetadata(t *testing.T) {
 	mock := &mockDecoder{
 		name:    "meta-test",
 		version: "1.5.0",
@@ -174,7 +174,7 @@ func BenchmarkDecodeOperation(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		r.Decode("bench", "bench.type", data)
+		_, _ = r.Decode("bench", "bench.type", data)
 	}
 }
 
@@ -205,7 +205,7 @@ func TestManagerBaseDir(t *testing.T) {
 func TestRegistryLoadDirectory(t *testing.T) {
 	tmpdir := setupPluginDir(t)
 	pluginDir := filepath.Join(tmpdir, "plugins")
-	os.Mkdir(pluginDir, 0755)
+	_ = os.Mkdir(pluginDir, 0755)
 
 	r := NewRegistry()
 	err := r.LoadFromDirectory(pluginDir)
@@ -234,7 +234,7 @@ func TestRaceConditions(t *testing.T) {
 			if idx%2 == 0 {
 				r.ListPlugins()
 			} else {
-				r.Decode("race-test", "race.event", data)
+				_, _ = r.Decode("race-test", "race.event", data)
 			}
 			done <- true
 		}(i)
@@ -271,7 +271,7 @@ func BenchmarkConcurrentDecode(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		go func() {
-			r.Decode("concurrent-bench", "concurrent.event", data)
+			_, _ = r.Decode("concurrent-bench", "concurrent.event", data)
 			done <- true
 		}()
 		<-done

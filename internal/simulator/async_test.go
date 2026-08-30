@@ -104,7 +104,7 @@ func TestAsyncRunner_Cleanup(t *testing.T) {
 		ResultMetaXdr: "BBBB",
 	})
 
-	async.Wait(context.Background(), jobID, PollConfig{
+	_, _ = async.Wait(context.Background(), jobID, PollConfig{
 		Interval: 10 * time.Millisecond,
 		Timeout:  5 * time.Second,
 	})

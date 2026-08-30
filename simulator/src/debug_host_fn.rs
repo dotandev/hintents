@@ -25,10 +25,10 @@ pub fn extract_debug_logs(events: &Events) -> Vec<String> {
 
         let ContractEventBody::V0(v0) = &entry.event.body;
 
-        let is_log = v0.topics.first().map_or(
-            false,
-            |t| matches!(t, ScVal::Symbol(s) if s.as_slice() == b"log"),
-        );
+        let is_log = v0
+            .topics
+            .first()
+            .is_some_and(|t| matches!(t, ScVal::Symbol(s) if s.as_slice() == b"log"));
 
         if !is_log {
             continue;

@@ -5,14 +5,23 @@ package shell
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/dotandev/hintents/internal/errors"
+	"github.com/dotandev/hintents/internal/pipeline"
 	"github.com/dotandev/hintents/internal/rpc"
 	"github.com/dotandev/hintents/internal/simulator"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
+
+// maxShellTimestamp is the latest allowed ledger timestamp (2100-01-01 UTC).
+// Prevents unbounded growth when the clock is behind during extended time-travel debugging.
+const maxShellTimestamp int64 = 4102444800
 
 // Session represents an interactive shell session with persistent ledger state
 type Session struct {
@@ -72,22 +81,24 @@ func (s *Session) Invoke(ctx context.Context, contractID, function string, args 
 	// Build transaction envelope for the invocation
 	envelopeXDR, err := s.buildInvocationEnvelope(contractID, function, args)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build envelope: %w", err)
+		return nil, errors.WrapValidationError(fmt.Sprintf("failed to build envelope: %v", err))
 	}
 
-	// Create simulation request
+	// Create simulation request with snapshots enabled so updateLedgerState
+	// can read post-execution ledger entry diffs from the response.
 	req := &simulator.SimulationRequest{
-		EnvelopeXdr:    envelopeXDR,
-		ResultMetaXdr:  "",
-		LedgerEntries:  s.ledgerEntries,
-		Timestamp:      s.timestamp,
-		LedgerSequence: s.ledgerSequence,
+		EnvelopeXdr:     envelopeXDR,
+		ResultMetaXdr:   "",
+		LedgerEntries:   s.ledgerEntries,
+		Timestamp:       s.timestamp,
+		LedgerSequence:  s.ledgerSequence,
+		EnableSnapshots: true,
 	}
 
 	// Execute simulation
 	resp, err := s.runner.Run(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("simulation failed: %w", err)
+		return nil, errors.WrapSimulationFailed(err, "simulation failed")
 	}
 
 	// Update ledger state based on simulation result
@@ -105,35 +116,139 @@ func (s *Session) Invoke(ctx context.Context, contractID, function string, args 
 	return result, nil
 }
 
-// buildInvocationEnvelope creates a transaction envelope for contract invocation
-func (s *Session) buildInvocationEnvelope(contractID, function string, args []string) (string, error) {
-	// This is a simplified version - in production, you'd use stellar-sdk to build proper XDR
-	// For now, we'll create a minimal envelope structure
+// RunPipeline executes a series of commands as a single logical block,
+// piping outputs between them as requested by args like "$0".
+func (s *Session) RunPipeline(ctx context.Context, p *pipeline.Pipeline) ([]*InvocationResult, error) {
+	var results []*InvocationResult
 
-	// TODO: Implement proper XDR envelope building using stellar-sdk
-	// This would involve:
-	// 1. Creating a TransactionEnvelope
-	// 2. Adding InvokeHostFunction operation
-	// 3. Setting contract ID, function name, and arguments
-	// 4. Encoding to base64 XDR
+	// Very simple implementation for PTB-like pipelines:
+	for _, cmd := range p.Commands {
+		// Replace $0, $1 with previous results (simplified)
+		resolvedArgs := make([]string, len(cmd.Args))
+		copy(resolvedArgs, cmd.Args)
 
-	return "", fmt.Errorf("envelope building not yet implemented - requires stellar-sdk integration")
+		res, err := s.Invoke(ctx, cmd.Target, cmd.Type, resolvedArgs) // Use Type as function name for simplicity
+		if err != nil {
+			return results, errors.WrapSimulationFailed(err, fmt.Sprintf("pipeline aborted at command %s", cmd.Type))
+		}
+		results = append(results, res)
+	}
+
+	return results, nil
 }
 
-// updateLedgerState updates the session's ledger state based on simulation results
+// buildInvocationEnvelope creates a transaction envelope for contract invocation
+func (s *Session) buildInvocationEnvelope(contractID, function string, args []string) (string, error) {
+	// Decode contract ID from strkey (C...) or 32-byte hex
+	var cid xdr.ContractId
+	if len(contractID) > 0 && contractID[0] == 'C' {
+		decoded, err := strkey.Decode(strkey.VersionByteContract, contractID)
+		if err != nil {
+			return "", errors.WrapValidationError(fmt.Sprintf("decode contract id: %v", err))
+		}
+		if len(decoded) != 32 {
+			return "", errors.WrapValidationError(fmt.Sprintf("contract id must be 32 bytes, got %d", len(decoded)))
+		}
+		copy(cid[:], decoded)
+	} else {
+		return "", errors.WrapValidationError("contract id must be a strkey C... address")
+	}
+
+	// Build ScVal arguments from string representations
+	scArgs := make([]xdr.ScVal, 0, len(args))
+	for _, arg := range args {
+		s := xdr.ScString(arg)
+		scArgs = append(scArgs, xdr.ScVal{
+			Type: xdr.ScValTypeScvString,
+			Str:  &s,
+		})
+	}
+
+	// Build InvokeHostFunction operation
+	fnName := xdr.ScSymbol(function)
+	op := xdr.Operation{
+		Body: xdr.OperationBody{
+			Type: xdr.OperationTypeInvokeHostFunction,
+			InvokeHostFunctionOp: &xdr.InvokeHostFunctionOp{
+				HostFunction: xdr.HostFunction{
+					Type: xdr.HostFunctionTypeHostFunctionTypeInvokeContract,
+					InvokeContract: &xdr.InvokeContractArgs{
+						ContractAddress: xdr.ScAddress{
+							Type:       xdr.ScAddressTypeScAddressTypeContract,
+							ContractId: &cid,
+						},
+						FunctionName: fnName,
+						Args:         scArgs,
+					},
+				},
+			},
+		},
+	}
+
+	// Use zero-bytes source account (placeholder for simulation — not submitted to network)
+	var sourceBytes [32]byte
+	sourceAccount := xdr.MuxedAccount{
+		Type: xdr.CryptoKeyTypeKeyTypeEd25519,
+		Ed25519: func() *xdr.Uint256 {
+			u := xdr.Uint256(sourceBytes)
+			return &u
+		}(),
+	}
+
+	tx := xdr.Transaction{
+		SourceAccount: sourceAccount,
+		Fee:           100,
+		SeqNum:        1,
+		Cond:          xdr.Preconditions{Type: xdr.PreconditionTypePrecondNone},
+		Memo:          xdr.Memo{Type: xdr.MemoTypeMemoNone},
+		Operations:    []xdr.Operation{op},
+		Ext:           xdr.TransactionExt{V: 0},
+	}
+
+	envelope := xdr.TransactionEnvelope{
+		Type: xdr.EnvelopeTypeEnvelopeTypeTx,
+		V1: &xdr.TransactionV1Envelope{
+			Tx:         tx,
+			Signatures: []xdr.DecoratedSignature{},
+		},
+	}
+
+	envBytes, err := envelope.MarshalBinary()
+	if err != nil {
+		return "", errors.WrapMarshalFailed(err)
+	}
+
+	return base64.StdEncoding.EncodeToString(envBytes), nil
+}
+
+// updateLedgerState updates the session's ledger state based on simulation results.
+// It parses ledger entry diffs from the simulator's inline snapshot payload and
+// merges them into s.ledgerEntries to maintain persistent shell session state.
 func (s *Session) updateLedgerState(resp *simulator.SimulationResponse) {
-	// Increment ledger sequence
 	s.ledgerSequence++
 
-	// Update timestamp
 	now := time.Now().Unix()
 	if now <= s.timestamp {
 		now = s.timestamp + 1
 	}
+	if now > maxShellTimestamp {
+		now = maxShellTimestamp
+	}
 	s.timestamp = now
 
-	// TODO: Extract and update ledger entries from simulation response
-	// This would involve parsing the ResultMetaXDR to get state changes
+	if resp.OptimizationReport == nil || resp.OptimizationReport.Snapshots == nil {
+		return
+	}
+
+	// Each inline snapshot contains ledger entry pairs: [keyXDR_b64, entryXDR_b64].
+	// Merge all snapshots so the session reflects the post-simulation state.
+	for _, snapshot := range resp.OptimizationReport.Snapshots.Inline {
+		for _, pair := range snapshot.LedgerEntries {
+			if len(pair) == 2 {
+				s.ledgerEntries[pair[0]] = pair[1]
+			}
+		}
+	}
 }
 
 // GetStateSummary returns a summary of the current ledger state
@@ -156,11 +271,11 @@ func (s *Session) SaveState(filename string) error {
 
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal state: %w", err)
+		return errors.WrapMarshalFailed(err)
 	}
 
 	if err := os.WriteFile(filename, data, 0644); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+		return errors.WrapConfigError("failed to write file", err)
 	}
 
 	return nil
@@ -170,12 +285,12 @@ func (s *Session) SaveState(filename string) error {
 func (s *Session) LoadState(filename string) error {
 	data, err := os.ReadFile(filename)
 	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+		return errors.WrapConfigError("failed to read file", err)
 	}
 
 	var state LedgerState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return fmt.Errorf("failed to unmarshal state: %w", err)
+		return errors.WrapUnmarshalFailed(err, "failed to unmarshal state")
 	}
 
 	// Update session state

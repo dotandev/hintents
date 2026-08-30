@@ -18,9 +18,9 @@ const (
 
 func resourceNotFoundError(suggestion string) error {
 	if suggestion != "" {
-		return fmt.Errorf("Resource not found. Did you mean %s?", suggestion)
+		return fmt.Errorf("resource not found; did you mean %s?", suggestion)
 	}
-	return fmt.Errorf("Resource not found.")
+	return fmt.Errorf("resource not found")
 }
 
 // resolvePartialID returns the matching candidate when input is a unique
@@ -46,7 +46,7 @@ func resolvePartialID(input string, candidates []string) string {
 
 // resolveByTxHash returns the session ID whose transaction hash starts with
 // the given prefix. Returns empty when the prefix is ambiguous or absent.
-func resolveByTxHash(input string, sessions []*session.SessionData) string {
+func resolveByTxHash(input string, sessions []*session.Data) string {
 	in := strings.ToLower(strings.TrimSpace(input))
 	if in == "" {
 		return ""
@@ -74,7 +74,7 @@ func resolveByTxHash(input string, sessions []*session.SessionData) string {
 //  4. Fuzzy suggestion via Levenshtein distance
 //
 // It returns the resolved session or an error with a "Did you mean?" hint.
-func resolveSessionInput(ctx context.Context, store *session.Store, input string) (*session.SessionData, error) {
+func resolveSessionInput(ctx context.Context, store *session.Store, input string) (*session.Data, error) {
 	// 1. Exact ID
 	data, err := store.Load(ctx, input)
 	if err == nil {
@@ -123,7 +123,7 @@ func resolveSessionInput(ctx context.Context, store *session.Store, input string
 
 // suggestSessionID returns the closest session ID for a failed lookup.
 // Kept for backward compatibility; new callers should use resolveSessionInput.
-func suggestSessionID(ctx context.Context, store *session.Store, input string) (string, error) {
+func suggestSessionID(ctx context.Context, store *session.Store, input string) (string, error) { //nolint:unused // Kept for backward compatibility
 	sessions, err := store.List(ctx, sessionLookupListLimit)
 	if err != nil {
 		return "", err

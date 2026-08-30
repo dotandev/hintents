@@ -50,7 +50,7 @@ func InitDB() (*Store, error) {
 	}
 
 	if err = initSchema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 
@@ -119,7 +119,7 @@ func (s *Store) SearchSessions(params SearchParams) ([]Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []Session
 	var errorRe *regexp.Regexp

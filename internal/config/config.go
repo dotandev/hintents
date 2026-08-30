@@ -5,14 +5,22 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
-	"strings"
 
+	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/dotandev/hintents/internal/errors"
 )
+
+func joinPath(parts ...string) string {
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cleaned = append(cleaned, filepath.ToSlash(part))
+	}
+	return path.Join(cleaned...)
+}
 
 // -- Interfaces --
 
@@ -29,6 +37,10 @@ type Validator interface {
 }
 
 // -- Types --
+
+type DebugConfig struct {
+	EnableSnapshots bool `json:"enable_snapshots"`
+}
 
 type Network string
 
@@ -57,29 +69,28 @@ type Config struct {
 	CachePath         string   `json:"cache_path,omitempty"`
 	RPCToken          string   `json:"rpc_token,omitempty"`
 	// MaxCacheSize is the maximum size of the source map cache in bytes.
-	// Set via max_cache_size in config (e.g., "500MB" or bytes).
-	// Defaults to no limit (cache grows indefinitely).
 	MaxCacheSize int64 `json:"max_cache_size,omitempty"`
 	// CrashReporting enables opt-in anonymous crash reporting.
-	// Set via crash_reporting = true in config or ERST_CRASH_REPORTING=true.
 	CrashReporting bool `json:"crash_reporting,omitempty"`
 	// CrashEndpoint is a custom HTTPS URL that receives JSON crash reports.
-	// Set via crash_endpoint in config or ERST_CRASH_ENDPOINT.
 	CrashEndpoint string `json:"crash_endpoint,omitempty"`
 	// CrashSentryDSN is a Sentry Data Source Name for crash reporting.
-	// Set via crash_sentry_dsn in config or ERST_SENTRY_DSN.
 	CrashSentryDSN string `json:"crash_sentry_dsn,omitempty"`
 	// RequestTimeout is the HTTP request timeout in seconds for all RPC calls.
-	// Set via request_timeout in config or ERST_REQUEST_TIMEOUT.
-	// Defaults to 15 seconds.
 	RequestTimeout int `json:"request_timeout,omitempty"`
+	// MaxTraceDepth is the maximum depth of the call tree before it is truncated.
+	MaxTraceDepth int `json:"max_trace_depth,omitempty"`
+	// FailureThreshold is the number of failures before the circuit breaker opens.
+	FailureThreshold int `json:"failure_threshold,omitempty"`
+	// RetryTimeout is the duration in seconds to wait before retrying a failed endpoint.
+	RetryTimeout int `json:"retry_timeout,omitempty"`
 }
-
-// CustomNetworkConfig is defined in networks.go
 
 // -- Constants & Defaults --
 
 const defaultRequestTimeout = 15
+const defaultFailureThreshold = 5
+const defaultRetryTimeout = 60
 
 var validLogLevels = map[string]bool{
 	"trace": true,
@@ -90,20 +101,23 @@ var validLogLevels = map[string]bool{
 }
 
 var defaultConfig = &Config{
-	RpcUrl:         "https://soroban-testnet.stellar.org",
-	Network:        NetworkTestnet,
-	SimulatorPath:  "",
-	LogLevel:       "info",
-	CachePath:      filepath.Join(os.ExpandEnv("$HOME"), ".erst", "cache"),
-	RequestTimeout: defaultRequestTimeout,
-	MaxCacheSize:   0,
+	RpcUrl:           endpoints.SorobanTestnet,
+	Network:          NetworkTestnet,
+	SimulatorPath:    "",
+	LogLevel:         "info",
+	CachePath:        joinPath(os.ExpandEnv("$HOME"), ".erst", "cache"),
+	RequestTimeout:   defaultRequestTimeout,
+	MaxCacheSize:     0,
+	MaxTraceDepth:    50,
+	FailureThreshold: defaultFailureThreshold,
+	RetryTimeout:     defaultRetryTimeout,
 }
 
 // -- Core Functions --
 
 func Load() (*Config, error) {
 	cfg := &Config{}
-	parsers := []Parser{envParser{}, fileParser{}}
+	parsers := []Parser{fileParser{}, envParser{}}
 	for _, parser := range parsers {
 		if err := parser.Parse(cfg); err != nil {
 			return nil, err
@@ -121,25 +135,16 @@ func Load() (*Config, error) {
 
 func DefaultConfig() *Config {
 	return &Config{
-		RpcUrl:         defaultConfig.RpcUrl,
-		Network:        defaultConfig.Network,
-		SimulatorPath:  defaultConfig.SimulatorPath,
-		LogLevel:       defaultConfig.LogLevel,
-		CachePath:      defaultConfig.CachePath,
-		RequestTimeout: defaultConfig.RequestTimeout,
-		MaxCacheSize:   defaultConfig.MaxCacheSize,
-	}
-}
-
-func NewConfig(rpcUrl string, network Network) *Config {
-	return &Config{
-		RpcUrl:         rpcUrl,
-		Network:        network,
-		SimulatorPath:  defaultConfig.SimulatorPath,
-		LogLevel:       defaultConfig.LogLevel,
-		CachePath:      defaultConfig.CachePath,
-		RequestTimeout: defaultConfig.RequestTimeout,
-		MaxCacheSize:   defaultConfig.MaxCacheSize,
+		RpcUrl:           defaultConfig.RpcUrl,
+		Network:          defaultConfig.Network,
+		SimulatorPath:    defaultConfig.SimulatorPath,
+		LogLevel:         defaultConfig.LogLevel,
+		CachePath:        defaultConfig.CachePath,
+		RequestTimeout:   defaultConfig.RequestTimeout,
+		MaxCacheSize:     defaultConfig.MaxCacheSize,
+		MaxTraceDepth:    defaultConfig.MaxTraceDepth,
+		FailureThreshold: defaultConfig.FailureThreshold,
+		RetryTimeout:     defaultConfig.RetryTimeout,
 	}
 }
 
@@ -149,43 +154,19 @@ func (c *Config) MergeDefaults() {
 	configDefaultsAssigner{}.Apply(c)
 }
 
-func (c *Config) Validate() error {
-	validators := []Validator{
-		RPCValidator{},
-		NetworkValidator{},
-		SimulatorValidator{},
-		LogLevelValidator{},
-		TimeoutValidator{},
-		CrashReportingValidator{},
+func NewConfig(rpcUrl string, network Network) *Config {
+	return &Config{
+		RpcUrl:           rpcUrl,
+		Network:          network,
+		SimulatorPath:    defaultConfig.SimulatorPath,
+		LogLevel:         defaultConfig.LogLevel,
+		CachePath:        defaultConfig.CachePath,
+		RequestTimeout:   defaultConfig.RequestTimeout,
+		MaxCacheSize:     defaultConfig.MaxCacheSize,
+		MaxTraceDepth:    defaultConfig.MaxTraceDepth,
+		FailureThreshold: defaultConfig.FailureThreshold,
+		RetryTimeout:     defaultConfig.RetryTimeout,
 	}
-	for _, v := range validators {
-		if err := v.Validate(c); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (c *Config) NetworkURL() string {
-	switch c.Network {
-	case NetworkPublic:
-		return "https://soroban.stellar.org"
-	case NetworkTestnet:
-		return "https://soroban-testnet.stellar.org"
-	case NetworkFuturenet:
-		return "https://soroban-futurenet.stellar.org"
-	case NetworkStandalone:
-		return "http://localhost:8000"
-	default:
-		return c.RpcUrl
-	}
-}
-
-func (c *Config) String() string {
-	return fmt.Sprintf(
-		"Config{RPC: %s, Network: %s, LogLevel: %s, CachePath: %s}",
-		c.RpcUrl, c.Network, c.LogLevel, c.CachePath,
-	)
 }
 
 func (c *Config) WithSimulatorPath(path string) *Config {
@@ -203,30 +184,65 @@ func (c *Config) WithCachePath(path string) *Config {
 	return c
 }
 
-func (c *Config) WithRequestTimeout(seconds int) *Config {
-	c.RequestTimeout = seconds
+func (c *Config) WithRequestTimeout(timeout int) *Config {
+	c.RequestTimeout = timeout
 	return c
 }
 
-// -- Path Helpers --
-
-// GetConfigPath is defined in networks.go
-func GetGeneralConfigPath() (string, error) {
-	configDir, err := GetConfigPath()
-	if err != nil {
-		return "", err
+func (c *Config) Validate() error {
+	validators := []Validator{
+		RPCValidator{},
+		NetworkValidator{},
+		SimulatorValidator{},
+		LogLevelValidator{},
+		TimeoutValidator{},
+		MaxTraceDepthValidator{},
+		CrashReportingValidator{},
 	}
-	return filepath.Join(configDir, "config.json"), nil
+	for _, v := range validators {
+		if err := v.Validate(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Config) NetworkURL() string {
+	switch c.Network {
+	case NetworkPublic:
+		return endpoints.SorobanMainnet
+	case NetworkTestnet:
+		return endpoints.SorobanTestnet
+	case NetworkFuturenet:
+		return endpoints.SorobanFuturenet
+	case NetworkStandalone:
+		return "http://localhost:8000"
+	default:
+		return c.RpcUrl
+	}
+}
+
+func (c *Config) String() string {
+	data, _ := json.MarshalIndent(c, "", "  ")
+	return string(data)
 }
 
 // -- Load/Save Config --
+
+func GetGeneralConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return joinPath(home, ".erst", "config.json"), nil
+}
+
 func LoadConfig() (*Config, error) {
 	configPath, err := GetGeneralConfigPath()
 	if err != nil {
 		return nil, err
 	}
 
-	// If file doesn't exist, return default config
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return DefaultConfig(), nil
 	}
@@ -260,11 +276,7 @@ func SaveConfig(config *Config) error {
 		return errors.WrapConfigError("failed to marshal config", err)
 	}
 
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
-		return errors.WrapConfigError("failed to write config file", err)
-	}
-
-	return nil
+	return os.WriteFile(configPath, data, 0600)
 }
 
 // -- Parsers --
@@ -291,9 +303,24 @@ func (envParser) Parse(cfg *Config) error {
 		cfg.RPCToken = v
 	}
 	if v := os.Getenv("ERST_MAX_CACHE_SIZE"); v != "" {
-		n, err := parseSize(v)
-		if err == nil && n > 0 {
+		n, _ := strconv.ParseInt(v, 10, 64)
+		if n > 0 {
 			cfg.MaxCacheSize = n
+		}
+	}
+	if v := os.Getenv("ERST_REQUEST_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.RequestTimeout = n
+		}
+	}
+	if v := os.Getenv("ERST_MAX_TRACE_DEPTH"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.MaxTraceDepth = n
+		}
+	}
+	if v := os.Getenv("ERST_CRASH_REPORTING"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.CrashReporting = b
 		}
 	}
 	if v := os.Getenv("ERST_CRASH_ENDPOINT"); v != "" {
@@ -302,107 +329,31 @@ func (envParser) Parse(cfg *Config) error {
 	if v := os.Getenv("ERST_SENTRY_DSN"); v != "" {
 		cfg.CrashSentryDSN = v
 	}
-
-	if v := os.Getenv("ERST_REQUEST_TIMEOUT"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err == nil && n > 0 {
-			cfg.RequestTimeout = n
+	if v := os.Getenv("ERST_RPC_URLS"); v != "" {
+		cfg.RpcUrls = splitAndTrim(v)
+	}
+	if v := os.Getenv("ERST_FAILURE_THRESHOLD"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.FailureThreshold = n
 		}
 	}
-
-	switch strings.ToLower(os.Getenv("ERST_CRASH_REPORTING")) {
-	case "1", "true", "yes":
-		cfg.CrashReporting = true
-	case "0", "false", "no":
-		cfg.CrashReporting = false
+	if v := os.Getenv("ERST_RETRY_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.RetryTimeout = n
+		}
 	}
-
-	if urlsEnv := os.Getenv("ERST_RPC_URLS"); urlsEnv != "" {
-		cfg.RpcUrls = splitAndTrim(urlsEnv)
-	} else if urlsEnv := os.Getenv("STELLAR_RPC_URLS"); urlsEnv != "" {
-		cfg.RpcUrls = splitAndTrim(urlsEnv)
-	}
-
 	return nil
 }
 
 type fileParser struct{}
 
 func (fileParser) Parse(cfg *Config) error {
-	paths := []string{
-		".erst.toml",
-		filepath.Join(os.ExpandEnv("$HOME"), ".erst.toml"),
-		"/etc/erst/config.toml",
-	}
-
-	for _, path := range paths {
-		if err := cfg.loadTOML(path); err == nil {
-			return nil
-		}
-	}
-
-	return nil
+	return cfg.loadFromFile()
 }
-
-// Parsers are defined in parse.go or kept here if needed by Load()
 
 // -- Validators --
 
 type RPCValidator struct{}
-
-func (RPCValidator) Validate(cfg *Config) error {
-	if cfg.RpcUrl == "" {
-		return errors.WrapValidationError("rpc_url cannot be empty")
-	}
-	if !strings.HasPrefix(cfg.RpcUrl, "http://") && !strings.HasPrefix(cfg.RpcUrl, "https://") {
-		return errors.WrapValidationError("rpc_url must use http or https scheme")
-	}
-	for i, u := range cfg.RpcUrls {
-		u = strings.TrimSpace(u)
-		if u == "" {
-			continue
-		}
-		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
-			return errors.WrapValidationError("rpc_urls[" + strconv.Itoa(i) + "] must use http or https scheme")
-		}
-	}
-	return nil
-}
-
-type NetworkValidator struct{}
-
-func (NetworkValidator) Validate(cfg *Config) error {
-	if cfg.Network != "" && !validNetworks[string(cfg.Network)] {
-		return errors.WrapInvalidNetwork(string(cfg.Network))
-	}
-	return nil
-}
-
-type SimulatorValidator struct{}
-
-func (SimulatorValidator) Validate(cfg *Config) error {
-	if cfg.SimulatorPath == "" {
-		return nil
-	}
-	if !filepath.IsAbs(cfg.SimulatorPath) {
-		return errors.WrapValidationError("simulator_path must be an absolute path")
-	}
-	return nil
-}
-
-type LogLevelValidator struct{}
-
-func (LogLevelValidator) Validate(cfg *Config) error {
-	if cfg.LogLevel == "" {
-		return nil
-	}
-	if !validLogLevels[strings.ToLower(cfg.LogLevel)] {
-		return errors.WrapValidationError("log_level must be one of: trace, debug, info, warn, error")
-	}
-	return nil
-}
-
-// Validators are defined in dedicated files
 
 type configDefaultsAssigner struct{}
 
@@ -413,9 +364,6 @@ func (configDefaultsAssigner) Apply(cfg *Config) {
 	if cfg.Network == "" {
 		cfg.Network = defaultConfig.Network
 	}
-	if cfg.SimulatorPath == "" {
-		cfg.SimulatorPath = defaultConfig.SimulatorPath
-	}
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = defaultConfig.LogLevel
 	}
@@ -425,8 +373,13 @@ func (configDefaultsAssigner) Apply(cfg *Config) {
 	if cfg.RequestTimeout == 0 {
 		cfg.RequestTimeout = defaultRequestTimeout
 	}
+	if cfg.MaxTraceDepth == 0 {
+		cfg.MaxTraceDepth = 50
+	}
+	if cfg.FailureThreshold == 0 {
+		cfg.FailureThreshold = defaultFailureThreshold
+	}
+	if cfg.RetryTimeout == 0 {
+		cfg.RetryTimeout = defaultRetryTimeout
+	}
 }
-
-// -- Internal Helpers --
-
-// End of config.go

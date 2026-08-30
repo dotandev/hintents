@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 )
 
@@ -32,7 +33,7 @@ func TestWithToken(t *testing.T) {
 }
 
 func TestWithHorizonURL(t *testing.T) {
-	url := "https://horizon-testnet.stellar.org/"
+	url := endpoints.HorizonTestnet
 	client, err := NewClient(WithHorizonURL(url))
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -50,7 +51,7 @@ func TestWithInvalidHorizonURL(t *testing.T) {
 }
 
 func TestWithAltURLs(t *testing.T) {
-	urls := []string{"https://horizon-testnet.stellar.org/", "https://horizon-futurenet.stellar.org/"}
+	urls := []string{endpoints.HorizonTestnet, endpoints.HorizonFuturenet}
 	client, err := NewClient(WithAltURLs(urls))
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -71,7 +72,7 @@ func TestWithInvalidAltURL(t *testing.T) {
 }
 
 func TestWithSorobanURL(t *testing.T) {
-	url := "https://soroban-testnet.stellar.org"
+	url := endpoints.SorobanTestnet
 	client, err := NewClient(WithSorobanURL(url))
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -260,8 +261,8 @@ func TestFuturenetDefaults(t *testing.T) {
 
 func TestAltURLsAsFailover(t *testing.T) {
 	urls := []string{
-		"https://horizon-testnet.stellar.org/",
-		"https://horizon-futurenet.stellar.org/",
+		endpoints.HorizonTestnet,
+		endpoints.HorizonFuturenet,
 	}
 	client, err := NewClient(WithAltURLs(urls))
 	if err != nil {
@@ -310,13 +311,13 @@ func TestDeprecatedNewClientWithURLs(t *testing.T) {
 
 func BenchmarkNewClient(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		NewClient(WithNetwork(Testnet), WithToken("token"))
+		_, _ = NewClient(WithNetwork(Testnet), WithToken("token"))
 	}
 }
 
 func BenchmarkNewClientWithMultipleOptions(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		NewClient(
+		_, _ = NewClient(
 			WithNetwork(Testnet),
 			WithToken("token"),
 			WithHorizonURL(TestnetHorizonURL),
@@ -328,6 +329,6 @@ func BenchmarkNewClientWithMultipleOptions(b *testing.B) {
 
 func BenchmarkNewCustomClient(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		NewCustomClient(TestnetConfig)
+		_, _ = NewCustomClient(TestnetConfig)
 	}
 }

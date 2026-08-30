@@ -10,6 +10,26 @@
 
 The primary goal of `erst` is to eliminate the opaque "black box" experience of failed Stellar smart contract transactions. By providing local-first, high-fidelity replay and tracing, `erst` maps generic network errors back to human-readable diagnostic events and source code.
 
+## Installation
+
+### Prerequisites
+- **Go** (1.25.0 or later)
+- **Rust** (1.87 or later, with Cargo)
+
+### From Source
+```bash
+# Clone the repository
+git clone https://github.com/dotandev/hintents.git
+cd hintents
+
+# Build the Rust simulator
+cd simulator && cargo build && cd ..
+
+# Build the Go CLI
+go build -o erst ./cmd/erst
+```
+*Note: We will provide pre-compiled binaries via Homebrew and direct downloads in future releases.*
+
 **Core Features (Planned):**
 
 1.  **Transaction Replay**: Fetch a failed transaction's envelope and ledger state from an RPC provider.
@@ -135,6 +155,34 @@ The command prints the signed audit log JSON to stdout so it can be redirected t
 
 For YubiKey PIV (YKCS11) usage details, see [docs/pkcs11-yubikey.md](docs/pkcs11-yubikey.md).
 
+### Protocol Handler
+
+Erst registers a custom `erst://` URI scheme, allowing external tools (browsers, dashboards) to deep-link directly into a debug session.
+
+Register the protocol handler:
+
+```bash
+./erst protocol:register
+```
+
+Open a debug session via URI:
+
+```bash
+./erst protocol:handle "erst://debug/<transaction-hash>?network=testnet"
+```
+
+With an optional operation index:
+
+```bash
+./erst protocol:handle "erst://debug/<transaction-hash>?network=mainnet&op=0"
+```
+
+Unregister the handler when no longer needed:
+
+```bash
+./erst protocol:unregister
+```
+
 ## Documentation
 
 - **[Architecture Overview](docs/architecture.md)**: Deep dive into how the Go CLI communicates with the Rust simulator, including data flow, IPC mechanisms, and design decisions.
@@ -142,7 +190,9 @@ For YubiKey PIV (YKCS11) usage details, see [docs/pkcs11-yubikey.md](docs/pkcs11
 - **[Source Mapping](docs/source-mapping.md)**: Implementation details for mapping WASM failures to Rust source code.
 - **[Debug Symbols Guide](docs/debug-symbols-guide.md)**: How to compile Soroban contracts with debug symbols.
 - **[Error Suggestions](docs/ERROR_SUGGESTIONS.md)**: Heuristic-based error suggestion engine for common Soroban errors.
+- **[Canonical JSON Serialization](docs/CANONICAL_JSON.md)**: Deterministic JSON serialization for audit log hashing.
 - **[Interactive Trace Showcase](docs/showcase/README.md)**: Try out the interactive trace explorer online.
+- **[Time Travel Guide](docs/TIME_TRAVEL_GUIDE.md)**: How to use Magic Rewind to replay transactions across time, save sessions to disk, and share reproducible debug files.
 
 ## Technical Analysis
 
@@ -195,7 +245,7 @@ We are building this open-source to help the entire Stellar community. All contr
 4.  Run tests:
     ```bash
     go test ./...
-    cargo test --release -p erst-sim
+    cd simulator && cargo test --verbose
     ```
 
 ## Development
@@ -474,6 +524,12 @@ When reviewing PRs, ensure:
 - **Clear Messages**: Every commit should have a clear, descriptive message
 - **Lint-Free**: Only suppress linting errors if they are objectively false positives. Always explain suppression with `// nolint:rule-name` comments
 - **Assume Bad Faith in Code**: Write code defensively, validate inputs, handle edge cases
+
+## Contributing
+
+We welcome community contributions! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, how to set up your development environment, and the process for submitting pull requests to us.
+
+If you discover a security vulnerability, please refer to our [SECURITY.md](SECURITY.md) for instructions on responsible disclosure.
 
 ## Contributors
 

@@ -1123,7 +1123,7 @@ func setupTestCacheDB(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		CloseCache()
+		_ = CloseCache()
 	})
 }
 
@@ -1135,11 +1135,11 @@ func BenchmarkCacheTTL_Set(b *testing.B) {
 	if err := InitCacheWithDB(db); err != nil {
 		b.Fatal(err)
 	}
-	defer CloseCache()
+	defer func() { _ = CloseCache() }()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		SetWithTTL("bench-key", "bench-value", 24*time.Hour)
+		_ = SetWithTTL("bench-key", "bench-value", 24*time.Hour)
 	}
 }
 
@@ -1151,11 +1151,11 @@ func BenchmarkCacheTTL_Get(b *testing.B) {
 	if err := InitCacheWithDB(db); err != nil {
 		b.Fatal(err)
 	}
-	defer CloseCache()
+	defer func() { _ = CloseCache() }()
 
-	SetWithTTL("bench-get", "bench-value", 24*time.Hour)
+	_ = SetWithTTL("bench-get", "bench-value", 24*time.Hour)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Get("bench-get")
+		_, _, _ = Get("bench-get")
 	}
 }

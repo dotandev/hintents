@@ -45,22 +45,22 @@ func TestDetectTheme(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			os.Unsetenv("ERST_THEME")
-			os.Unsetenv("COLORTERM")
+			_ = os.Unsetenv("ERST_THEME")
+			_ = os.Unsetenv("COLORTERM")
 
 			if tt.envTheme != "" {
-				os.Setenv("ERST_THEME", tt.envTheme)
+				_ = os.Setenv("ERST_THEME", tt.envTheme)
 			}
 			if tt.colorTerm != "" {
-				os.Setenv("COLORTERM", tt.colorTerm)
+				_ = os.Setenv("COLORTERM", tt.colorTerm)
 			}
 
 			if got := DetectTheme(); got != tt.want {
 				t.Errorf("DetectTheme() = %v, want %v", got, tt.want)
 			}
 
-			os.Unsetenv("ERST_THEME")
-			os.Unsetenv("COLORTERM")
+			_ = os.Unsetenv("ERST_THEME")
+			_ = os.Unsetenv("COLORTERM")
 		})
 	}
 }
@@ -97,8 +97,8 @@ func TestThemeAwareIndicators(t *testing.T) {
 	originalTheme := GetTheme()
 	defer SetTheme(originalTheme)
 
-	os.Setenv("FORCE_COLOR", "1")
-	defer os.Unsetenv("FORCE_COLOR")
+	_ = os.Setenv("FORCE_COLOR", "1")
+	defer func() { _ = os.Unsetenv("FORCE_COLOR") }()
 
 	tests := []struct {
 		name  string

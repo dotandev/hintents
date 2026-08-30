@@ -303,3 +303,80 @@ func ledgerKeyFromEntry(entry xdr.LedgerEntry) *xdr.LedgerKey {
 
 	return nil
 }
+
+// ExtractPostStateLedgerEntries extracts the ledger entries representing the
+// state *after* a transaction was applied. It reads the "Updated" and "Created"
+// change records from TxChangesAfter and operation-level changes, giving the
+// caller a map of XDR key → XDR entry that reflects post-transaction state.
+//
+// Removed entries (LedgerEntryChangeTypeLedgerEntryRemoved) are represented as
+// an empty string value so callers can distinguish "entry deleted" from "entry
+// not present in the diff".
+func ExtractPostStateLedgerEntries(resultMetaXDR string) (map[string]string, error) {
+	metaBytes, err := base64.StdEncoding.DecodeString(resultMetaXDR)
+	if err != nil {
+		return nil, errors.WrapUnmarshalFailed(err, "result meta")
+	}
+
+	var resultMeta xdr.TransactionResultMeta
+	if err := resultMeta.UnmarshalBinary(metaBytes); err != nil {
+		return nil, errors.WrapUnmarshalFailed(err, "result meta binary")
+	}
+
+	after := make(map[string]string)
+
+	switch resultMeta.TxApplyProcessing.V {
+	case 0:
+		if resultMeta.TxApplyProcessing.Operations != nil {
+			extractPostStateFromOperations(*resultMeta.TxApplyProcessing.Operations, after)
+		}
+	case 1:
+		if v1 := resultMeta.TxApplyProcessing.V1; v1 != nil {
+			extractPostStateFromOperations(v1.Operations, after)
+		}
+	case 2:
+		if v2 := resultMeta.TxApplyProcessing.V2; v2 != nil {
+			extractPostStateFromOperations(v2.Operations, after)
+			extractPostStateFromChanges(v2.TxChangesAfter, after)
+		}
+	case 3:
+		if v3 := resultMeta.TxApplyProcessing.V3; v3 != nil {
+			extractPostStateFromOperations(v3.Operations, after)
+			extractPostStateFromChanges(v3.TxChangesAfter, after)
+		}
+	}
+
+	return after, nil
+}
+
+// extractPostStateFromOperations collects post-state entries from operation-level changes.
+func extractPostStateFromOperations(operations []xdr.OperationMeta, after map[string]string) {
+	for _, op := range operations {
+		extractPostStateFromChanges(op.Changes, after)
+	}
+}
+
+// extractPostStateFromChanges processes a LedgerEntryChanges slice and records
+// the final state of each entry. Created and Updated entries are stored as their
+// XDR value; Removed entries are stored as an empty string.
+func extractPostStateFromChanges(changes xdr.LedgerEntryChanges, after map[string]string) {
+	for _, change := range changes {
+		switch change.Type {
+		case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
+			if change.Created != nil {
+				addEntry(*change.Created, after)
+			}
+		case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+			if change.Updated != nil {
+				addEntry(*change.Updated, after)
+			}
+		case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+			if change.Removed != nil {
+				keyXDR, err := EncodeLedgerKey(*change.Removed)
+				if err == nil {
+					after[keyXDR] = "" // empty value signals deletion
+				}
+			}
+		}
+	}
+}

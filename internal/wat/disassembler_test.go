@@ -4,6 +4,7 @@
 package wat
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -567,5 +568,164 @@ func TestDecodeBlockType_Empty(t *testing.T) {
 	bt, n := decodeBlockType([]byte{})
 	if bt != "" || n != 0 {
 		t.Errorf("empty block: got %q, %d", bt, n)
+	}
+}
+
+// =============================================================================
+// CrossReferenceEvents Tests
+// =============================================================================
+
+// testEvent is a minimal DiagnosticEventSource for testing.
+type testEvent struct{ wasmInstruction *string }
+
+func (e *testEvent) GetWasmInstruction() *string { return e.wasmInstruction }
+
+func strPtr(s string) *string { return &s }
+
+func TestCrossReferenceEvents_Basic(t *testing.T) {
+	// Build a WASM with: i32.const 1, i32.add, drop
+	body := []byte{0x41, 0x01, 0x6a, 0x1a}
+	wasm := buildMinimalWasm(body)
+
+	d := NewDisassembler(wasm)
+	instructions, err := d.DecodeAll()
+	if err != nil {
+		t.Fatalf("DecodeAll: %v", err)
+	}
+
+	// Find the i32.add offset.
+	var addOffset uint64
+	for _, inst := range instructions {
+		if inst.Mnemonic == "i32.add" {
+			addOffset = inst.Offset
+			break
+		}
+	}
+
+	events := []DiagnosticEventSource{
+		&testEvent{wasmInstruction: strPtr(strconv.FormatUint(addOffset, 10))},
+	}
+
+	refs, err := CrossReferenceEvents(wasm, events)
+	if err != nil {
+		t.Fatalf("CrossReferenceEvents: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 ref, got %d", len(refs))
+	}
+	if refs[0].Instruction == nil {
+		t.Fatal("expected instruction to be resolved")
+	}
+	if refs[0].Instruction.Mnemonic != "i32.add" {
+		t.Errorf("expected 'i32.add', got %q", refs[0].Instruction.Mnemonic)
+	}
+	if refs[0].EventIndex != 0 {
+		t.Errorf("expected EventIndex 0, got %d", refs[0].EventIndex)
+	}
+}
+
+func TestCrossReferenceEvents_SkipsNilInstruction(t *testing.T) {
+	wasm := buildMinimalWasm([]byte{0x01}) // nop
+	events := []DiagnosticEventSource{
+		&testEvent{wasmInstruction: nil},
+		&testEvent{wasmInstruction: strPtr("")},
+	}
+	refs, err := CrossReferenceEvents(wasm, events)
+	if err != nil {
+		t.Fatalf("CrossReferenceEvents: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Errorf("expected 0 refs for nil/empty instructions, got %d", len(refs))
+	}
+}
+
+func TestCrossReferenceEvents_UnresolvableOffset(t *testing.T) {
+	wasm := buildMinimalWasm([]byte{0x01}) // nop
+	// Offset 9999 won't exist in this tiny module.
+	events := []DiagnosticEventSource{
+		&testEvent{wasmInstruction: strPtr("9999")},
+	}
+	refs, err := CrossReferenceEvents(wasm, events)
+	if err != nil {
+		t.Fatalf("CrossReferenceEvents: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 ref, got %d", len(refs))
+	}
+	if refs[0].Instruction != nil {
+		t.Error("expected nil instruction for unresolvable offset")
+	}
+	if refs[0].Offset != 9999 {
+		t.Errorf("expected offset 9999, got %d", refs[0].Offset)
+	}
+}
+
+func TestCrossReferenceEvents_InvalidWasm(t *testing.T) {
+	_, err := CrossReferenceEvents([]byte{0xFF, 0xFF}, []DiagnosticEventSource{})
+	if err == nil {
+		t.Error("expected error for invalid WASM")
+	}
+}
+
+func TestCrossReferenceEvents_MultipleEvents(t *testing.T) {
+	body := []byte{0x41, 0x01, 0x6a, 0x1a} // i32.const 1, i32.add, drop
+	wasm := buildMinimalWasm(body)
+
+	d := NewDisassembler(wasm)
+	instructions, err := d.DecodeAll()
+	if err != nil {
+		t.Fatalf("DecodeAll: %v", err)
+	}
+
+	// Collect offsets for i32.add and drop.
+	offsets := map[string]uint64{}
+	for _, inst := range instructions {
+		if inst.Mnemonic == "i32.add" || inst.Mnemonic == "drop" {
+			offsets[inst.Mnemonic] = inst.Offset
+		}
+	}
+
+	events := []DiagnosticEventSource{
+		&testEvent{wasmInstruction: nil}, // skipped
+		&testEvent{wasmInstruction: strPtr(strconv.FormatUint(offsets["i32.add"], 10))},
+		&testEvent{wasmInstruction: strPtr(strconv.FormatUint(offsets["drop"], 10))},
+	}
+
+	refs, err := CrossReferenceEvents(wasm, events)
+	if err != nil {
+		t.Fatalf("CrossReferenceEvents: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 refs, got %d", len(refs))
+	}
+	if refs[0].EventIndex != 1 {
+		t.Errorf("expected EventIndex 1, got %d", refs[0].EventIndex)
+	}
+	if refs[0].Instruction == nil || refs[0].Instruction.Mnemonic != "i32.add" {
+		t.Errorf("expected 'i32.add' for first ref")
+	}
+	if refs[1].EventIndex != 2 {
+		t.Errorf("expected EventIndex 2, got %d", refs[1].EventIndex)
+	}
+	if refs[1].Instruction == nil || refs[1].Instruction.Mnemonic != "drop" {
+		t.Errorf("expected 'drop' for second ref")
+	}
+}
+
+func TestCrossReferenceEvents_UnparsableOffset(t *testing.T) {
+	wasm := buildMinimalWasm([]byte{0x01})
+	events := []DiagnosticEventSource{
+		&testEvent{wasmInstruction: strPtr("not-a-number")},
+	}
+	refs, err := CrossReferenceEvents(wasm, events)
+	if err != nil {
+		t.Fatalf("CrossReferenceEvents: %v", err)
+	}
+	// Should still produce a ref with zero offset and nil instruction.
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 ref, got %d", len(refs))
+	}
+	if refs[0].Instruction != nil {
+		t.Error("expected nil instruction for unparsable offset")
 	}
 }

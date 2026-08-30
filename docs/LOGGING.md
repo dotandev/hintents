@@ -180,6 +180,19 @@ level=INFO msg="Simulation completed" tx_hash=abc123 status=success duration_ms=
 
 ## Best Practices
 
+### Security
+
+**HSM PIN Redaction**: The logging system automatically redacts HSM PIN values from all log output to prevent sensitive credentials from appearing in logs. Any occurrence of `ERST_PKCS11_PIN` followed by a value will be replaced with `ERST_PKCS11_PIN=*****`. This applies to both text and JSON log formats.
+
+Example:
+```
+# Before redaction
+ERST_PKCS11_PIN=1234
+
+# After redaction
+ERST_PKCS11_PIN=*****
+```
+
 ### Development
 
 Use `debug` or `trace` level during development:
@@ -333,6 +346,9 @@ logger.Logger.Error("error message", "key", "value")
 
 // Get Rust-compatible log level
 rustLevel := logger.GetRustLogLevel() // Returns "debug", "info", etc.
+
+// Redact sensitive PIN values from strings
+redacted := logger.RedactPIN("ERST_PKCS11_PIN=1234") // Returns "ERST_PKCS11_PIN=*****"
 ```
 
 ### Rust Logger (env_logger)

@@ -12,8 +12,8 @@ import (
 	"github.com/dotandev/hintents/internal/audit"
 )
 
-// FromAuditDump converts a raw AuditDump into a Report for HTML/PDF rendering.
-func FromAuditDump(dump *audit.AuditDump) *Report {
+// FromDump converts a raw Dump into a Report for HTML/PDF rendering.
+func FromDump(dump *audit.Dump) *Report {
 	r := NewReport("Audit Report")
 
 	ts, err := parseTimestamp(dump.Timestamp)
@@ -34,9 +34,9 @@ func FromAuditDump(dump *audit.AuditDump) *Report {
 	return r
 }
 
-// FromSignedAuditDump converts a SignedAuditDump into a Report, including integrity metadata.
-func FromSignedAuditDump(dump *audit.SignedAuditDump) *Report {
-	r := FromAuditDump(&dump.Trace)
+// FromSignedDump converts a SignedDump into a Report, including integrity metadata.
+func FromSignedDump(dump *audit.SignedDump) *Report {
+	r := FromDump(&dump.Trace)
 	r.Title = "Signed Audit Report"
 
 	r.Metadata.DataSource = fmt.Sprintf("signed-audit-dump (signer: %s)", dump.Signer.Provider)
@@ -51,18 +51,18 @@ func FromSignedAuditDump(dump *audit.SignedAuditDump) *Report {
 	return r
 }
 
-// ParseAuditDump deserialises raw JSON into an AuditDump.
-func ParseAuditDump(data []byte) (*audit.AuditDump, error) {
-	return audit.ParseAuditDump(data)
+// ParseDump deserialises raw JSON into an Dump.
+func ParseDump(data []byte) (*audit.Dump, error) {
+	return audit.ParseDump(data)
 }
 
-// ParseSignedAuditDump deserialises raw JSON into a SignedAuditDump.
-func ParseSignedAuditDump(data []byte) (*audit.SignedAuditDump, error) {
-	return audit.ParseSignedAuditDump(data)
+// ParseSignedDump deserialises raw JSON into a SignedDump.
+func ParseSignedDump(data []byte) (*audit.SignedDump, error) {
+	return audit.ParseSignedDump(data)
 }
 
-// RenderAuditDumpHTML is a convenience function: parse JSON bytes and render directly to HTML.
-func RenderAuditDumpHTML(data []byte) ([]byte, error) {
+// RenderDumpHTML is a convenience function: parse JSON bytes and render directly to HTML.
+func RenderDumpHTML(data []byte) ([]byte, error) {
 	// Try signed first (it has additional top-level fields).
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(data, &probe); err != nil {
@@ -71,24 +71,24 @@ func RenderAuditDumpHTML(data []byte) ([]byte, error) {
 
 	var report *Report
 	if _, ok := probe["trace"]; ok {
-		dump, err := ParseSignedAuditDump(data)
+		dump, err := ParseSignedDump(data)
 		if err != nil {
 			return nil, err
 		}
-		report = FromSignedAuditDump(dump)
+		report = FromSignedDump(dump)
 	} else {
-		dump, err := ParseAuditDump(data)
+		dump, err := ParseDump(data)
 		if err != nil {
 			return nil, err
 		}
-		report = FromAuditDump(dump)
+		report = FromDump(dump)
 	}
 
 	return NewHTMLRenderer().Render(report)
 }
 
 // dumpToSteps converts the input, state, and events into ExecutionSteps for the report.
-func dumpToSteps(dump *audit.AuditDump) []ExecutionStep {
+func dumpToSteps(dump *audit.Dump) []ExecutionStep {
 	var steps []ExecutionStep
 	idx := 0
 

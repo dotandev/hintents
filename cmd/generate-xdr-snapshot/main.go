@@ -55,7 +55,7 @@ func (eg *EntryGenerator) GenerateRandomKey(index int64) string {
 
 	// Fill rest with pseudo-random data
 	randRestBytes := make([]byte, 16)
-	rand.Read(randRestBytes)
+	_, _ = rand.Read(randRestBytes)
 	copy(keyBytes[16:], randRestBytes)
 
 	return base64.StdEncoding.EncodeToString(keyBytes)
@@ -85,7 +85,7 @@ func (eg *EntryGenerator) GenerateRandomValue() string {
 // pseudoRand32 generates a pseudo-random 32-bit number for simplicity
 func (eg *EntryGenerator) pseudoRand32() uint32 {
 	b := make([]byte, 4)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
 }
 

@@ -168,6 +168,28 @@ func TestLogLevelValidator_InvalidLevel(t *testing.T) {
 	}
 }
 
+// --- MaxTraceDepthValidator ---
+
+func TestMaxTraceDepthValidator_Valid(t *testing.T) {
+	v := MaxTraceDepthValidator{}
+	for _, depth := range []int{1, 50, 500, 1000} {
+		cfg := &Config{MaxTraceDepth: depth}
+		if err := v.Validate(cfg); err != nil {
+			t.Errorf("max_trace_depth %d should be valid: %v", depth, err)
+		}
+	}
+}
+
+func TestMaxTraceDepthValidator_Invalid(t *testing.T) {
+	v := MaxTraceDepthValidator{}
+	for _, depth := range []int{0, -1, 1001, 2000} {
+		cfg := &Config{MaxTraceDepth: depth}
+		if err := v.Validate(cfg); err == nil {
+			t.Errorf("max_trace_depth %d should be invalid", depth)
+		}
+	}
+}
+
 // --- MergeDefaults ---
 
 func TestMergeDefaults_FillsEmptyFields(t *testing.T) {
@@ -210,12 +232,18 @@ func TestMergeDefaults_PreservesExistingValues(t *testing.T) {
 // --- Validate integration (delegates to validators) ---
 
 func TestValidate_Delegates(t *testing.T) {
-	cfg := &Config{RpcUrl: "https://test.com", Network: NetworkTestnet, LogLevel: "info", RequestTimeout: 15}
+	cfg := &Config{
+		RpcUrl:         "https://test.com",
+		Network:        NetworkTestnet,
+		LogLevel:       "info",
+		RequestTimeout: 15,
+		MaxTraceDepth:  50,
+	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("valid config should pass Validate: %v", err)
 	}
 
-	cfg2 := &Config{RpcUrl: "", Network: NetworkTestnet, RequestTimeout: 15}
+	cfg2 := &Config{RpcUrl: "", Network: NetworkTestnet, RequestTimeout: 15, MaxTraceDepth: 50}
 	if err := cfg2.Validate(); err == nil {
 		t.Error("expected Validate to reject empty rpc_url")
 	}

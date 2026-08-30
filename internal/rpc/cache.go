@@ -112,12 +112,12 @@ func ensureDB() (*sql.DB, error) {
 
 	// WAL mode for better concurrent read performance
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to set WAL mode: %w", err)
 	}
 
 	if _, err := db.Exec(cacheSchema); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to initialize cache schema: %w", err)
 	}
 

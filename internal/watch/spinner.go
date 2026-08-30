@@ -5,6 +5,8 @@ package watch
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"sync"
 	"time"
 )
@@ -15,12 +17,18 @@ type Spinner struct {
 	done      chan struct{}
 	mu        sync.Mutex
 	isRunning bool
+	out       io.Writer
 }
 
 func NewSpinner() *Spinner {
+	return NewSpinnerWithWriter(os.Stdout)
+}
+
+func NewSpinnerWithWriter(w io.Writer) *Spinner {
 	return &Spinner{
 		frames: []string{"|", "/", "-", "\\"},
 		done:   make(chan struct{}),
+		out:    w,
 	}
 }
 
@@ -40,11 +48,11 @@ func (s *Spinner) Start(message string) {
 		for {
 			select {
 			case <-s.done:
-				fmt.Print("\r\033[K")
+				_, _ = fmt.Fprint(s.out, "\r\033[K")
 				return
 			case <-ticker.C:
 				s.mu.Lock()
-				fmt.Printf("\r%s %s", s.frames[s.current], message)
+				_, _ = fmt.Fprintf(s.out, "\r%s %s", s.frames[s.current], message)
 				s.current = (s.current + 1) % len(s.frames)
 				s.mu.Unlock()
 			}
@@ -61,20 +69,25 @@ func (s *Spinner) Stop() {
 	s.isRunning = false
 	s.mu.Unlock()
 
+	// Signal the goroutine to exit.
 	select {
 	case s.done <- struct{}{}:
 	default:
+		// If the channel is full, someone already signaled it
+		// or the goroutine already exited.
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	// Give the goroutine a moment to receive and clear the line.
+	// In a real implementation, we might want a sync.WaitGroup here.
+	time.Sleep(20 * time.Millisecond)
 }
 
 func (s *Spinner) StopWithMessage(message string) {
 	s.Stop()
-	fmt.Printf("\r[OK] %s\n", message)
+	_, _ = fmt.Fprintf(s.out, "\r[OK] %s\n", message)
 }
 
 func (s *Spinner) StopWithError(message string) {
 	s.Stop()
-	fmt.Printf("\r[ERROR] %s\n", message)
+	_, _ = fmt.Fprintf(s.out, "\r[ERROR] %s\n", message)
 }

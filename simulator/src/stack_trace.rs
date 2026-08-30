@@ -8,21 +8,21 @@
 
 #![allow(dead_code)]
 
+use crate::source_mapper::{SourceLocation, SourceMapper};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::Serialize;
 
 /// A single frame in a WASM call stack.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct StackFrame {
-    /// Index within the call stack (0 = innermost/trap site).
     pub index: usize,
-    /// Function index in the WASM module, if known.
     pub func_index: Option<u32>,
-    /// Demangled or raw function name, if available.
     pub func_name: Option<String>,
-    /// Byte offset within the WASM module where the trap occurred.
     pub wasm_offset: Option<u64>,
-    /// Module name, if the WASM has an embedded name section.
     pub module: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_location: Option<SourceLocation>,
 }
 
 /// Categorised trap reason extracted from a raw error string.
@@ -44,24 +44,46 @@ pub enum TrapKind {
 /// Structured stack trace emitted on a WASM trap.
 #[derive(Debug, Clone, Serialize)]
 pub struct WasmStackTrace {
-    /// Categorised trap reason.
     pub trap_kind: TrapKind,
-    /// Raw error message from the host/runtime.
     pub raw_message: String,
-    /// Ordered call stack frames (index 0 = trap site).
     pub frames: Vec<StackFrame>,
-    /// Whether the Host error was unwound through Soroban abstractions.
     pub soroban_wrapped: bool,
 }
 
+// ---------------------------------------------------------------------------
+// Compiled regexes (initialised once)
+// ---------------------------------------------------------------------------
+
+/// Matches a numbered frame line, e.g.:
+///   `  0: func[42] @ 0xa3c`
+///   `  #1: some::symbol @ 0xb20`
+///   `  2: func[7]`
+static RE_NUMBERED_FRAME: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?x)
+        ^\s*\#?(?P<idx>\d+)\s*:\s*   # leading index
+        (?P<body>[^\r\n]+?)           # frame body
+        \s*$",
+    )
+    .unwrap()
+});
+
+/// Matches `func[N]` inside a frame body.
+static RE_FUNC_INDEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^func\[(?P<idx>\d+)\]$").unwrap());
+
+/// Matches a hex or decimal offset after ` @ `.
+static RE_OFFSET: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"@\s*(?:0x(?P<hex>[0-9a-fA-F]+)|(?P<dec>\d+))\s*$").unwrap());
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 impl WasmStackTrace {
     /// Build a stack trace by parsing a raw HostError debug representation.
-    ///
-    /// This extracts trap kind, function names, and offsets from the
-    /// stringified error that Wasmi/Soroban produces.
-    pub fn from_host_error(error_debug: &str) -> Self {
+    pub fn from_host_error(error_debug: &str, mapper: Option<&SourceMapper>) -> Self {
         let trap_kind = classify_trap(error_debug);
-        let frames = extract_frames(error_debug);
+        let frames = extract_frames(error_debug, mapper);
         let soroban_wrapped = error_debug.contains("HostError")
             || error_debug.contains("ScError")
             || error_debug.contains("Error(WasmVm");
@@ -84,10 +106,20 @@ impl WasmStackTrace {
         }
     }
 
+    /// Populate `source_location` on each frame using the provided `SourceMapper`.
+    pub fn resolve_sources(&mut self, mapper: &SourceMapper) {
+        for frame in &mut self.frames {
+            if frame.source_location.is_none() {
+                if let Some(offset) = frame.wasm_offset {
+                    frame.source_location = mapper.map_wasm_offset_to_source(offset);
+                }
+            }
+        }
+    }
+
     /// Format the trace as a human-readable string.
     pub fn display(&self) -> String {
         let mut out = String::new();
-
         out.push_str(&format!("Trap: {}\n", self.trap_kind_label()));
 
         if self.soroban_wrapped {
@@ -100,6 +132,7 @@ impl WasmStackTrace {
             out.push_str("  Call stack (most recent call last):\n");
             for frame in &self.frames {
                 out.push_str(&format!("    #{}: ", frame.index));
+
                 if let Some(ref name) = frame.func_name {
                     out.push_str(name);
                 } else if let Some(idx) = frame.func_index {
@@ -107,15 +140,21 @@ impl WasmStackTrace {
                 } else {
                     out.push_str("<unknown>");
                 }
-                if let Some(offset) = frame.wasm_offset {
-                    out.push_str(&format!(" @ 0x{:x}", offset));
-                }
+
                 if let Some(ref module) = frame.module {
                     out.push_str(&format!(" in {}", module));
                 }
+
+                if let Some(ref loc) = frame.source_location {
+                    out.push_str(&format!(" ({}:{})", loc.file, loc.line));
+                } else if let Some(offset) = frame.wasm_offset {
+                    out.push_str(&format!(" @ 0x{:x}", offset));
+                }
+
                 out.push('\n');
             }
         }
+
         out
     }
 
@@ -140,6 +179,10 @@ impl WasmStackTrace {
         self.frames.first().and_then(|f| f.wasm_offset)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Trap classification
+// ---------------------------------------------------------------------------
 
 /// Classify a raw error string into a known trap kind.
 fn classify_trap(msg: &str) -> TrapKind {
@@ -170,29 +213,24 @@ fn classify_trap(msg: &str) -> TrapKind {
     }
 }
 
-/// Extract call stack frames from the stringified Wasmi/HostError output.
-///
-/// Wasmi and Soroban format trap backtraces as lines like:
-///   `  0: func[42] @ 0xa3c`
-///   `  1: <module_name>::function_name @ 0xb20`
-///
-/// We parse these into structured `StackFrame` values.
-fn extract_frames(error_debug: &str) -> Vec<StackFrame> {
+// ---------------------------------------------------------------------------
+// Frame extraction  regex-based, replaces brittle string splitting
+// ---------------------------------------------------------------------------
+
+/// Extract call stack frames from a Wasmi/Soroban error string using
+/// anchored regex patterns instead of fragile line-splitting heuristics.
+fn extract_frames(error_debug: &str, mapper: Option<&SourceMapper>) -> Vec<StackFrame> {
     let mut frames = Vec::new();
 
     for line in error_debug.lines() {
-        let trimmed = line.trim();
-
-        // Match patterns like "0: func[42] @ 0xa3c" or "#0 func_name"
-        if let Some(frame) = try_parse_numbered_frame(trimmed) {
+        if let Some(frame) = try_parse_numbered_frame(line, mapper) {
             frames.push(frame);
-            continue;
-        }
-
-        // Match Wasmi-style "wasm backtrace:" header followed by frames
-        if trimmed.starts_with("func[") || trimmed.starts_with("<") {
-            if let Some(frame) = try_parse_bare_frame(trimmed, frames.len()) {
-                frames.push(frame);
+        } else {
+            let trimmed = line.trim();
+            if trimmed.starts_with("func[") || trimmed.starts_with('<') {
+                if let Some(frame) = try_parse_bare_frame(trimmed, frames.len(), mapper) {
+                    frames.push(frame);
+                }
             }
         }
     }
@@ -200,14 +238,15 @@ fn extract_frames(error_debug: &str) -> Vec<StackFrame> {
     frames
 }
 
-/// Attempt to parse a frame line with a leading index like "0: func[42] @ 0xa3c".
-fn try_parse_numbered_frame(line: &str) -> Option<StackFrame> {
-    // Try "N: <rest>" pattern
-    let (index_str, rest) = line.split_once(':')?;
-    let index: usize = index_str.trim().trim_start_matches('#').parse().ok()?;
-    let rest = rest.trim();
+/// Parse a frame line that begins with an index: `0: func[42] @ 0xa3c`.
+fn try_parse_numbered_frame(line: &str, mapper: Option<&SourceMapper>) -> Option<StackFrame> {
+    let caps = RE_NUMBERED_FRAME.captures(line)?;
+    let index: usize = caps["idx"].parse().ok()?;
+    let body = caps["body"].trim();
 
-    let (func_name, func_index, wasm_offset) = parse_frame_body(rest);
+    let (func_name, func_index, wasm_offset) = parse_frame_body(body);
+    let source_location =
+        wasm_offset.and_then(|o| mapper.and_then(|m| m.map_wasm_offset_to_source(o)));
 
     Some(StackFrame {
         index,
@@ -215,76 +254,81 @@ fn try_parse_numbered_frame(line: &str) -> Option<StackFrame> {
         func_name,
         wasm_offset,
         module: None,
+        source_location,
     })
 }
 
-/// Attempt to parse a bare frame without a leading index.
-fn try_parse_bare_frame(line: &str, index: usize) -> Option<StackFrame> {
+/// Parse a bare frame line without a leading index.
+fn try_parse_bare_frame(
+    line: &str,
+    index: usize,
+    mapper: Option<&SourceMapper>,
+) -> Option<StackFrame> {
     let (func_name, func_index, wasm_offset) = parse_frame_body(line);
 
     if func_name.is_some() || func_index.is_some() {
+        let source_location =
+            wasm_offset.and_then(|o| mapper.and_then(|m| m.map_wasm_offset_to_source(o)));
+
         Some(StackFrame {
             index,
             func_index,
             func_name,
             wasm_offset,
             module: None,
+            source_location,
         })
     } else {
         None
     }
 }
 
-/// Parse the body of a frame line, extracting function name/index and offset.
+/// Parse the body of a frame line into (func_name, func_index, wasm_offset).
 ///
-/// Recognised patterns:
-///   - `func[42]`
-///   - `func[42] @ 0xa3c`
-///   - `some_function_name @ 0xb20`
-///   - `<module>::path::function`
-fn parse_frame_body(body: &str) -> (Option<String>, Option<u32>, Option<u64>) {
-    let mut func_name: Option<String> = None;
-    let mut func_index: Option<u32> = None;
-    let mut wasm_offset: Option<u64> = None;
+/// Uses compiled regexes instead of manual string splitting.
+pub fn parse_frame_body(body: &str) -> (Option<String>, Option<u32>, Option<u64>) {
+    if body.is_empty() {
+        return (None, None, None);
+    }
 
-    // Split on " @ " to separate name from offset
-    let (name_part, offset_part) = if let Some(idx) = body.find(" @ ") {
-        (&body[..idx], Some(&body[idx + 3..]))
+    // Extract offset with regex  handles both `@ 0xABC` and `@ 1234`.
+    let wasm_offset = RE_OFFSET.captures(body).and_then(|c| {
+        if let Some(hex) = c.name("hex") {
+            u64::from_str_radix(hex.as_str(), 16).ok()
+        } else {
+            c.name("dec").and_then(|d| d.as_str().parse().ok())
+        }
+    });
+
+    // Strip the offset portion to get the name part.
+    let name_part = if let Some(at) = body.find(" @ ") {
+        body[..at].trim()
     } else {
-        (body, None)
+        body.trim()
     };
 
-    // Parse offset
-    if let Some(off) = offset_part {
-        let off = off.trim();
-        if let Some(hex) = off.strip_prefix("0x") {
-            wasm_offset = u64::from_str_radix(hex, 16).ok();
-        } else {
-            wasm_offset = off.parse().ok();
+    // Detect `func[N]` pattern with regex.
+    if let Some(caps) = RE_FUNC_INDEX.captures(name_part) {
+        if let Ok(idx) = caps["idx"].parse::<u32>() {
+            return (None, Some(idx), wasm_offset);
         }
+        // Parse failure: fall through and treat the body as a symbol name.
     }
 
-    // Parse function name/index
-    let name_trimmed = name_part.trim();
-    if name_trimmed.starts_with("func[") {
-        // func[42]
-        if let Some(inner) = name_trimmed.strip_prefix("func[") {
-            if let Some(idx_str) = inner.strip_suffix(']') {
-                func_index = idx_str.parse().ok();
-            }
-        }
-    } else if !name_trimmed.is_empty() {
-        func_name = Some(name_trimmed.to_string());
-    }
+    // Otherwise treat the name part as a symbol name.
+    let func_name = if name_part.is_empty() {
+        None
+    } else {
+        Some(name_part.to_string())
+    };
 
-    (func_name, func_index, wasm_offset)
+    (func_name, None, wasm_offset)
 }
 
-/// Public helper: decode a raw error string into a human-readable description
-/// that includes the trap kind. Used by `main.rs` for backward compatibility.
+/// Decode a raw error string into a human-readable description.
 #[allow(dead_code)]
 pub fn decode_error(msg: &str) -> String {
-    let trace = WasmStackTrace::from_host_error(msg);
+    let trace = WasmStackTrace::from_host_error(msg, None);
     let label = trace.trap_kind_label();
 
     if label != "unknown trap" {
@@ -346,14 +390,11 @@ mod tests {
     #[test]
     fn test_extract_numbered_frames() {
         let input = "wasm backtrace:\n  0: func[42] @ 0xa3c\n  1: func[7] @ 0xb20";
-        let frames = extract_frames(input);
-
+        let frames = extract_frames(input, None);
         assert_eq!(frames.len(), 2);
-
         assert_eq!(frames[0].index, 0);
         assert_eq!(frames[0].func_index, Some(42));
         assert_eq!(frames[0].wasm_offset, Some(0xa3c));
-
         assert_eq!(frames[1].index, 1);
         assert_eq!(frames[1].func_index, Some(7));
         assert_eq!(frames[1].wasm_offset, Some(0xb20));
@@ -363,8 +404,7 @@ mod tests {
     fn test_extract_named_frames() {
         let input =
             "trace:\n  0: soroban_token::transfer @ 0x100\n  1: soroban_sdk::invoke @ 0x200";
-        let frames = extract_frames(input);
-
+        let frames = extract_frames(input, None);
         assert_eq!(frames.len(), 2);
         assert_eq!(
             frames[0].func_name,
@@ -376,7 +416,7 @@ mod tests {
     #[test]
     fn test_extract_no_frames() {
         let input = "simple error message without any stack frames";
-        let frames = extract_frames(input);
+        let frames = extract_frames(input, None);
         assert!(frames.is_empty());
     }
 
@@ -384,6 +424,7 @@ mod tests {
     fn test_from_host_error_soroban_wrapped() {
         let trace = WasmStackTrace::from_host_error(
             "HostError: Error(WasmVm, InternalError)\n  0: func[5] @ 0x42",
+            None,
         );
         assert!(trace.soroban_wrapped);
         assert_eq!(trace.frames.len(), 1);
@@ -392,7 +433,7 @@ mod tests {
 
     #[test]
     fn test_from_host_error_not_soroban_wrapped() {
-        let trace = WasmStackTrace::from_host_error("wasm trap: unreachable\n  0: func[10]");
+        let trace = WasmStackTrace::from_host_error("wasm trap: unreachable\n  0: func[10]", None);
         assert!(!trace.soroban_wrapped);
         assert_eq!(trace.trap_kind, TrapKind::Unreachable);
     }
@@ -417,6 +458,7 @@ mod tests {
                     func_name: None,
                     wasm_offset: Some(0xa3c),
                     module: None,
+                    source_location: None,
                 },
                 StackFrame {
                     index: 1,
@@ -424,11 +466,11 @@ mod tests {
                     func_name: Some("my_contract::transfer".to_string()),
                     wasm_offset: Some(0xb20),
                     module: Some("token".to_string()),
+                    source_location: None,
                 },
             ],
             soroban_wrapped: false,
         };
-
         let output = trace.display();
         assert!(output.contains("out of bounds memory access"));
         assert!(output.contains("func[42]"));
@@ -446,7 +488,7 @@ mod tests {
 
     #[test]
     fn test_display_soroban_wrapped() {
-        let trace = WasmStackTrace::from_host_error("HostError: something");
+        let trace = WasmStackTrace::from_host_error("HostError: something", None);
         let output = trace.display();
         assert!(output.contains("Soroban Host layer"));
     }
@@ -466,7 +508,7 @@ mod tests {
     #[test]
     fn test_frame_with_offset_no_hex_prefix() {
         let input = "  0: func[1] @ 1234";
-        let frames = extract_frames(input);
+        let frames = extract_frames(input, None);
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].wasm_offset, Some(1234));
     }
@@ -500,5 +542,43 @@ mod tests {
         assert_eq!(capitalise_first("hello"), "Hello");
         assert_eq!(capitalise_first(""), "");
         assert_eq!(capitalise_first("a"), "A");
+    }
+
+    // --- new property-based style tests for the regex engine ---
+
+    #[test]
+    fn test_regex_tolerates_extra_whitespace() {
+        let input = "   0  :  func[99]  @  0xff  ";
+        let frames = extract_frames(input, None);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].func_index, Some(99));
+        assert_eq!(frames[0].wasm_offset, Some(0xff));
+    }
+
+    #[test]
+    fn test_regex_hash_prefix_index() {
+        let input = "  #3: func[2] @ 0x10";
+        let frames = extract_frames(input, None);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].index, 3);
+    }
+
+    #[test]
+    fn test_regex_named_frame_no_offset() {
+        let input = "  0: my_contract::do_thing";
+        let frames = extract_frames(input, None);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(
+            frames[0].func_name.as_deref(),
+            Some("my_contract::do_thing")
+        );
+        assert!(frames[0].wasm_offset.is_none());
+    }
+
+    #[test]
+    fn test_regex_garbage_lines_skipped() {
+        let input = "random noise\n  0: func[1] @ 0x1\nmore noise";
+        let frames = extract_frames(input, None);
+        assert_eq!(frames.len(), 1);
     }
 }

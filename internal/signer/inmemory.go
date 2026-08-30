@@ -5,7 +5,9 @@ package signer
 
 import (
 	"crypto/ed25519"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 )
 
@@ -23,11 +25,11 @@ type InMemorySigner struct {
 func NewInMemorySigner(privateKeyHex string) (*InMemorySigner, error) {
 	raw, err := hex.DecodeString(privateKeyHex)
 	if err != nil {
-		return nil, &SignerError{Op: "inmemory", Msg: "invalid private key hex", Err: err}
+		return nil, &Error{Op: "inmemory", Msg: "invalid private key hex", Err: err}
 	}
 
 	if len(raw) != ed25519.PrivateKeySize && len(raw) != ed25519.SeedSize {
-		return nil, &SignerError{
+		return nil, &Error{
 			Op:  "inmemory",
 			Msg: fmt.Sprintf("invalid private key length: %d", len(raw)),
 		}
@@ -49,6 +51,27 @@ func NewInMemorySignerFromKey(key ed25519.PrivateKey) *InMemorySigner {
 	return &InMemorySigner{privateKey: key}
 }
 
+// NewInMemorySignerFromPEM creates an InMemorySigner from a PEM-encoded
+// Ed25519 private key. It supports PKCS#8 PEM private keys.
+func NewInMemorySignerFromPEM(pemData string) (*InMemorySigner, error) {
+	block, _ := pem.Decode([]byte(pemData))
+	if block == nil {
+		return nil, &Error{Op: "inmemory", Msg: "invalid PEM private key"}
+	}
+
+	privKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, &Error{Op: "inmemory", Msg: "invalid PKCS#8 private key", Err: err}
+	}
+
+	edPriv, ok := privKey.(ed25519.PrivateKey)
+	if !ok {
+		return nil, &Error{Op: "inmemory", Msg: "PEM does not contain an Ed25519 private key"}
+	}
+
+	return &InMemorySigner{privateKey: edPriv}, nil
+}
+
 // Sign produces an Ed25519 signature over the provided data.
 func (s *InMemorySigner) Sign(data []byte) ([]byte, error) {
 	return ed25519.Sign(s.privateKey, data), nil
@@ -58,7 +81,7 @@ func (s *InMemorySigner) Sign(data []byte) ([]byte, error) {
 func (s *InMemorySigner) PublicKey() ([]byte, error) {
 	pub, ok := s.privateKey.Public().(ed25519.PublicKey)
 	if !ok {
-		return nil, &SignerError{Op: "inmemory", Msg: "failed to derive public key"}
+		return nil, &Error{Op: "inmemory", Msg: "failed to derive public key"}
 	}
 	return []byte(pub), nil
 }

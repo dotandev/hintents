@@ -25,16 +25,18 @@ import (
 // ─── flags specific to the compare command ────────────────────────────────────
 
 var (
-	cmpNetworkFlag   string
-	cmpRPCURLFlag    string
-	cmpRPCTokenFlag  string
-	cmpLocalWasmFlag string
-	cmpOptimizeFlag  bool
-	cmpArgsFlag      []string
-	cmpVerboseFlag   bool
-	cmpSimPathFlag   string
-	cmpThemeFlag     string
-	cmpProtoFlag     uint32
+	cmpNetworkFlag     string
+	cmpRPCURLFlag      string
+	cmpRPCTokenFlag    string
+	cmpLocalWasmFlag   string
+	cmpBridgeWasm      []string
+	cmpOptimizeFlag    bool
+	cmpArgsFlag        []string
+	cmpVerboseFlag     bool
+	cmpSimPathFlag     string
+	cmpThemeFlag       string
+	cmpProtoFlag       uint32
+	cmpAssetSafetyFlag bool
 )
 
 // compareCmd implements `erst compare`.
@@ -62,6 +64,9 @@ Examples:
   # Compare on testnet with verbose output
   erst compare <tx-hash> --wasm ./contract.wasm --network testnet --verbose
 
+  # Bridge external contract calls to local builds during replay
+  erst compare <tx-hash> --wasm ./root.wasm --bridge-wasm CABC...=./deps/token.wasm
+
   # Override the protocol version used for both passes
   erst compare <tx-hash> --wasm ./contract.wasm --protocol-version 22`,
 	Args: cobra.ExactArgs(1),
@@ -71,6 +76,9 @@ Examples:
 		}
 		if _, statErr := os.Stat(cmpLocalWasmFlag); os.IsNotExist(statErr) {
 			return errors.WrapValidationError(fmt.Sprintf("WASM file not found: %s", cmpLocalWasmFlag))
+		}
+		if _, err := parseContractWasmOverrideSpecs(cmpBridgeWasm); err != nil {
+			return errors.WrapValidationError(err.Error())
 		}
 		if validateErr := rpc.ValidateTransactionHash(args[0]); validateErr != nil {
 			return errors.WrapValidationError(fmt.Sprintf("invalid transaction hash: %v", validateErr))
@@ -95,6 +103,8 @@ func init() {
 		"RPC authentication token (or ERST_RPC_TOKEN env var)")
 	compareCmd.Flags().StringVar(&cmpLocalWasmFlag, "wasm", "",
 		"Path to local WASM file (required)")
+	compareCmd.Flags().StringSliceVar(&cmpBridgeWasm, "bridge-wasm", nil,
+		"Repeatable external contract override in the form <contract-id>=<path>")
 	compareCmd.Flags().BoolVar(&cmpOptimizeFlag, "optimize", false,
 		"Run dead-code elimination on local WASM before simulation")
 	compareCmd.Flags().StringSliceVar(&cmpArgsFlag, "args", []string{},
@@ -107,6 +117,8 @@ func init() {
 		"Colour theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
 	compareCmd.Flags().Uint32Var(&cmpProtoFlag, "protocol-version", 0,
 		"Override protocol version for both simulation passes (20, 21, 22, …)")
+	compareCmd.Flags().BoolVar(&cmpAssetSafetyFlag, "asset-safety", false,
+		"Enable Move-level Asset Safety tracing (opt-in for compare)")
 	_ = compareCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
 	_ = compareCmd.RegisterFlagCompletionFunc("theme", completeThemeFlag)
 	rootCmd.AddCommand(compareCmd)
@@ -174,6 +186,12 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 			} else if cfg.RpcUrl != "" {
 				clientOpts = append(clientOpts, rpc.WithHorizonURL(cfg.RpcUrl))
 			}
+			if cfg.FailureThreshold > 0 {
+				clientOpts = append(clientOpts, rpc.WithCircuitBreakerThreshold(cfg.FailureThreshold))
+			}
+			if cfg.RetryTimeout > 0 {
+				clientOpts = append(clientOpts, rpc.WithCircuitBreakerTimeout(cfg.RetryTimeout))
+			}
 		}
 	}
 
@@ -211,12 +229,32 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 		return errors.WrapSimulatorNotFound(err.Error())
 	}
 
+	overridePaths, err := parseContractWasmOverrideSpecs(cmpBridgeWasm)
+	if err != nil {
+		return errors.WrapValidationError(err.Error())
+	}
+	targetContractID, err := getContractIDFromEnvelope(txResp.EnvelopeXdr)
+	if err != nil {
+		return errors.WrapSimulationLogicError(fmt.Sprintf("failed to identify contract from transaction: %v", err))
+	}
+	overridePaths[fmt.Sprintf("%x", *targetContractID)] = localWasmPath
+
+	replayLedgerEntries, err := prepareReplayLedgerEntries(ctx, client, ledgerEntries, overridePaths)
+	if err != nil {
+		return errors.WrapSimulationLogicError(fmt.Sprintf("failed to prepare replay state: %v", err))
+	}
+
+	localLedgerEntries, err := applyReplayLedgerEntryOverrides(replayLedgerEntries, overridePaths)
+	if err != nil {
+		return errors.WrapSimulationLogicError(fmt.Sprintf("failed to prepare replay overrides: %v", err))
+	}
+
 	// ── Run two simulation passes in parallel ────────────────────────────────
 	fmt.Printf("%s Running two simulation passes in parallel...\n", visualizer.Symbol("play"))
 	fmt.Printf("   Pass A – local WASM  : %s\n", localWasmPath)
 	fmt.Printf("   Pass B – on-chain WASM: (using network ledger state)\n\n")
 
-	localResult, onChainResult, runErr := runBothPasses(ctx, runner, txResp, ledgerEntries, localWasmPath)
+	localResult, onChainResult, runErr := runBothPasses(ctx, runner, txResp, localLedgerEntries, replayLedgerEntries, localWasmPath)
 	if runErr != nil {
 		return runErr
 	}
@@ -238,6 +276,7 @@ func runBothPasses(
 	ctx context.Context,
 	runner *simulator.Runner,
 	txResp *rpc.TransactionResponse,
+	localLedgerEntries map[string]string,
 	ledgerEntries map[string]string,
 	localWasmPath string,
 ) (localResult, onChainResult *simulator.SimulationResponse, err error) {
@@ -249,7 +288,7 @@ func runBothPasses(
 	// Pass A – local WASM
 	go func() {
 		defer wg.Done()
-		req := buildSimRequest(txResp, ledgerEntries, &localWasmPath, cmpArgsFlag)
+		req := buildSimRequest(txResp, localLedgerEntries, &localWasmPath, cmpArgsFlag)
 		localResult, localErr = runner.Run(ctx, req)
 	}()
 
@@ -279,9 +318,10 @@ func buildSimRequest(
 	mockArgs []string,
 ) *simulator.SimulationRequest {
 	req := &simulator.SimulationRequest{
-		EnvelopeXdr:   txResp.EnvelopeXdr,
-		ResultMetaXdr: txResp.ResultMetaXdr,
-		LedgerEntries: ledgerEntries,
+		EnvelopeXdr:       txResp.EnvelopeXdr,
+		ResultMetaXdr:     txResp.ResultMetaXdr,
+		LedgerEntries:     ledgerEntries,
+		EnableAssetSafety: cmpAssetSafetyFlag,
 	}
 	if wasmPath != nil && *wasmPath != "" {
 		req.WasmPath = wasmPath
@@ -318,6 +358,82 @@ func printVerboseResponse(label string, resp *simulator.SimulationResponse) {
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
+
+func parseContractWasmOverrideSpecs(specs []string) (map[string]string, error) {
+	overrides := make(map[string]string, len(specs))
+	for _, spec := range specs {
+		parts := strings.SplitN(spec, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid --bridge-wasm value %q: expected <contract-id>=<path>", spec)
+		}
+
+		contractID := strings.TrimSpace(parts[0])
+		wasmPath := strings.TrimSpace(parts[1])
+		if contractID == "" || wasmPath == "" {
+			return nil, fmt.Errorf("invalid --bridge-wasm value %q: contract id and path are required", spec)
+		}
+		if _, err := os.Stat(wasmPath); err != nil {
+			return nil, fmt.Errorf("bridge WASM file not found for %s: %w", contractID, err)
+		}
+
+		overrides[contractID] = wasmPath
+	}
+	return overrides, nil
+}
+
+func prepareReplayLedgerEntries(
+	ctx context.Context,
+	client *rpc.Client,
+	baseEntries map[string]string,
+	overridePaths map[string]string,
+) (map[string]string, error) {
+	entries := cloneStringMap(baseEntries)
+	if len(overridePaths) == 0 {
+		return entries, nil
+	}
+
+	contractIDs := make([]string, 0, len(overridePaths))
+	for contractID := range overridePaths {
+		contractIDs = append(contractIDs, contractID)
+	}
+
+	var err error
+	entries, err = rpc.FetchBytecodeForTraceContractCalls(ctx, client, contractIDs, entries)
+	if err != nil {
+		return nil, err
+	}
+
+	return entries, nil
+}
+
+func applyReplayLedgerEntryOverrides(
+	baseEntries map[string]string,
+	overridePaths map[string]string,
+) (map[string]string, error) {
+	entries := cloneStringMap(baseEntries)
+	for contractID, wasmPath := range overridePaths {
+		wasmBytes, readErr := os.ReadFile(wasmPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read %s: %w", wasmPath, readErr)
+		}
+		if _, applyErr := rpc.ApplyWasmOverrideToLedgerEntries(entries, contractID, wasmBytes); applyErr != nil {
+			return nil, fmt.Errorf("apply override for %s: %w", contractID, applyErr)
+		}
+	}
+
+	return entries, nil
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
 
 func splitTrimmed(s string) []string {
 	parts := strings.Split(s, ",")

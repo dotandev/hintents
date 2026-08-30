@@ -94,12 +94,12 @@ func (r *Registry) FindAndDecode(eventType string, data []byte) (json.RawMessage
 }
 
 // ListPlugins returns information about all loaded plugins
-func (r *Registry) ListPlugins() []PluginMetadata {
+func (r *Registry) ListPlugins() []Metadata {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	names := r.loader.List()
-	metadata := make([]PluginMetadata, 0, len(names))
+	metadata := make([]Metadata, 0, len(names))
 
 	for _, name := range names {
 		if p, ok := r.loader.Get(name); ok {

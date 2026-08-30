@@ -15,8 +15,8 @@ import (
 	"github.com/dotandev/hintents/internal/report"
 )
 
-func auditDumpFixture() *audit.AuditDump {
-	return &audit.AuditDump{
+func auditDumpFixture() *audit.Dump {
+	return &audit.Dump{
 		Input: map[string]interface{}{
 			"amount":   100,
 			"currency": "USD",
@@ -31,8 +31,8 @@ func auditDumpFixture() *audit.AuditDump {
 	}
 }
 
-func signedAuditDumpFixture() *audit.SignedAuditDump {
-	return &audit.SignedAuditDump{
+func signedDumpFixture() *audit.SignedDump {
+	return &audit.SignedDump{
 		Trace:     *auditDumpFixture(),
 		Hash:      "abc123deadbeef",
 		Signature: "sig0011223344",
@@ -44,9 +44,9 @@ func signedAuditDumpFixture() *audit.SignedAuditDump {
 	}
 }
 
-func TestFromAuditDump_BasicFields(t *testing.T) {
+func TestFromDump_BasicFields(t *testing.T) {
 	dump := auditDumpFixture()
-	r := report.FromAuditDump(dump)
+	r := report.FromDump(dump)
 
 	assert.Equal(t, "Audit Report", r.Title)
 	assert.NotNil(t, r.Summary)
@@ -54,9 +54,9 @@ func TestFromAuditDump_BasicFields(t *testing.T) {
 	assert.Equal(t, "complete", r.Summary.Status)
 }
 
-func TestFromAuditDump_ExecutionSteps(t *testing.T) {
+func TestFromDump_ExecutionSteps(t *testing.T) {
 	dump := auditDumpFixture()
-	r := report.FromAuditDump(dump)
+	r := report.FromDump(dump)
 
 	require.NotNil(t, r.Execution)
 	// Expect: 1 input step + 3 event steps + 1 state-snapshot step = 5
@@ -66,9 +66,9 @@ func TestFromAuditDump_ExecutionSteps(t *testing.T) {
 	assert.Equal(t, "state-snapshot", r.Execution.Steps[4].Operation)
 }
 
-func TestFromAuditDump_EventDistribution(t *testing.T) {
+func TestFromDump_EventDistribution(t *testing.T) {
 	dump := auditDumpFixture()
-	r := report.FromAuditDump(dump)
+	r := report.FromDump(dump)
 
 	require.NotNil(t, r.Analytics)
 	dist := r.Analytics.EventDistribution
@@ -77,36 +77,36 @@ func TestFromAuditDump_EventDistribution(t *testing.T) {
 	assert.Equal(t, 1, dist["FEE_CALC"])
 }
 
-func TestFromAuditDump_Timestamp(t *testing.T) {
+func TestFromDump_Timestamp(t *testing.T) {
 	dump := auditDumpFixture()
-	r := report.FromAuditDump(dump)
+	r := report.FromDump(dump)
 
 	assert.Equal(t, 2026, r.GeneratedAt.Year())
 	assert.Equal(t, 2, int(r.GeneratedAt.Month()))
 	assert.Equal(t, 24, r.GeneratedAt.Day())
 }
 
-func TestFromAuditDump_EmptyEvents(t *testing.T) {
-	dump := &audit.AuditDump{
+func TestFromDump_EmptyEvents(t *testing.T) {
+	dump := &audit.Dump{
 		Input:     map[string]interface{}{"x": 1},
 		State:     map[string]interface{}{},
 		Events:    []interface{}{},
 		Timestamp: "2026-02-24T00:00:00Z",
 	}
-	r := report.FromAuditDump(dump)
+	r := report.FromDump(dump)
 	assert.Equal(t, 0, r.Summary.TotalEvents)
 }
 
-func TestFromSignedAuditDump_Title(t *testing.T) {
-	dump := signedAuditDumpFixture()
-	r := report.FromSignedAuditDump(dump)
+func TestFromSignedDump_Title(t *testing.T) {
+	dump := signedDumpFixture()
+	r := report.FromSignedDump(dump)
 
 	assert.Equal(t, "Signed Audit Report", r.Title)
 }
 
-func TestFromSignedAuditDump_Tags(t *testing.T) {
-	dump := signedAuditDumpFixture()
-	r := report.FromSignedAuditDump(dump)
+func TestFromSignedDump_Tags(t *testing.T) {
+	dump := signedDumpFixture()
+	r := report.FromSignedDump(dump)
 
 	require.NotNil(t, r.Metadata.Tags)
 	assert.Equal(t, "Ed25519+SHA256", r.Metadata.Tags["algorithm"])
@@ -114,24 +114,24 @@ func TestFromSignedAuditDump_Tags(t *testing.T) {
 	assert.Equal(t, "mock", r.Metadata.Tags["signer"])
 }
 
-func TestParseAuditDump_ValidJSON(t *testing.T) {
+func TestParseDump_ValidJSON(t *testing.T) {
 	raw := `{
 		"input":  {"amount": 50},
 		"state":  {"ok": true},
 		"events": ["E1", "E2"],
 		"timestamp": "2026-01-01T00:00:00Z"
 	}`
-	dump, err := report.ParseAuditDump([]byte(raw))
+	dump, err := report.ParseDump([]byte(raw))
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(dump.Events))
 }
 
-func TestParseAuditDump_InvalidJSON(t *testing.T) {
-	_, err := report.ParseAuditDump([]byte("not json"))
+func TestParseDump_InvalidJSON(t *testing.T) {
+	_, err := report.ParseDump([]byte("not json"))
 	assert.Error(t, err)
 }
 
-func TestParseSignedAuditDump_ValidJSON(t *testing.T) {
+func TestParseSignedDump_ValidJSON(t *testing.T) {
 	inner := auditDumpFixture()
 	data, err := json.Marshal(map[string]interface{}{
 		"trace":     inner,
@@ -143,27 +143,27 @@ func TestParseSignedAuditDump_ValidJSON(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	dump, err := report.ParseSignedAuditDump(data)
+	dump, err := report.ParseSignedDump(data)
 	require.NoError(t, err)
 	assert.Equal(t, "Ed25519+SHA256", dump.Algorithm)
 	assert.Equal(t, "software", dump.Signer.Provider)
 }
 
-func TestRenderAuditDumpHTML_RawTrace(t *testing.T) {
+func TestRenderDumpHTML_RawTrace(t *testing.T) {
 	raw := `{
 		"input":  {"amount": 100, "currency": "USD"},
 		"state":  {"balance": 400},
 		"events": ["INIT", "COMPLETE"],
 		"timestamp": "2026-02-24T00:00:00Z"
 	}`
-	html, err := report.RenderAuditDumpHTML([]byte(raw))
+	html, err := report.RenderDumpHTML([]byte(raw))
 	require.NoError(t, err)
 	body := string(html)
 	assert.True(t, strings.Contains(body, "<!DOCTYPE html>"))
 	assert.True(t, strings.Contains(body, "Audit Report"))
 }
 
-func TestRenderAuditDumpHTML_SignedTrace(t *testing.T) {
+func TestRenderDumpHTML_SignedTrace(t *testing.T) {
 	inner := auditDumpFixture()
 	data, err := json.Marshal(map[string]interface{}{
 		"trace":     inner,
@@ -175,14 +175,14 @@ func TestRenderAuditDumpHTML_SignedTrace(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	html, err := report.RenderAuditDumpHTML(data)
+	html, err := report.RenderDumpHTML(data)
 	require.NoError(t, err)
 	body := string(html)
 	assert.True(t, strings.Contains(body, "<!DOCTYPE html>"))
 	assert.True(t, strings.Contains(body, "Signed Audit Report"))
 }
 
-func TestRenderAuditDumpHTML_InvalidJSON(t *testing.T) {
-	_, err := report.RenderAuditDumpHTML([]byte("bad"))
+func TestRenderDumpHTML_InvalidJSON(t *testing.T) {
+	_, err := report.RenderDumpHTML([]byte("bad"))
 	assert.Error(t, err)
 }

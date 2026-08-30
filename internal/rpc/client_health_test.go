@@ -37,7 +37,7 @@ func TestGetHealth_Success(t *testing.T) {
 				LedgerRetentionWindow: 99,
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -66,7 +66,7 @@ func TestGetHealth_Error(t *testing.T) {
 				Message: "Method not found",
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -100,7 +100,7 @@ func TestGetHealth_Failover(t *testing.T) {
 				Status: "healthy",
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server2.Close()
 

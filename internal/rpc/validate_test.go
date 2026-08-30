@@ -158,7 +158,7 @@ func BenchmarkValidateNetworkConfig(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ValidateNetworkConfig(config)
+		_ = ValidateNetworkConfig(config)
 	}
 }
 
@@ -166,6 +166,6 @@ func BenchmarkIsValidURL(b *testing.B) {
 	url := "https://horizon-testnet.stellar.org"
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		isValidURL(url)
+		_ = isValidURL(url)
 	}
 }

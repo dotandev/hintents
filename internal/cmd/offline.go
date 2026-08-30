@@ -11,6 +11,7 @@ import (
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/offline"
 	"github.com/dotandev/hintents/internal/rpc"
+	"github.com/dotandev/hintents/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -89,7 +90,7 @@ func runOfflineGenerate(_ *cobra.Command, args []string) error {
 	meta := offline.EnvelopeMetadata{
 		Description: offlineDescFlag,
 		SourceAddr:  offlineSourceFlag,
-		ErstVersion: Version,
+		ErstVersion: version.Version,
 	}
 
 	ef := offline.NewEnvelopeFile(offlineNetworkFlag, passphrase, envelopeXDR, meta)

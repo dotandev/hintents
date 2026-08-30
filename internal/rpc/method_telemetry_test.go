@@ -82,7 +82,7 @@ func TestWithMethodTelemetry(t *testing.T) {
 func TestGetTransaction_ReportsMethodTelemetry(t *testing.T) {
 	rec := &recordingMethodTelemetry{}
 	mock := &mockHorizonClient{
-		TransactionDetailFunc: func(hash string) (tx hProtocol.Transaction, err error) {
+		TransactionDetailFunc: func(_ string) (tx hProtocol.Transaction, err error) {
 			return hProtocol.Transaction{
 				EnvelopeXdr:   "env",
 				ResultXdr:     "res",
@@ -113,7 +113,7 @@ func TestSimulateTransaction_ReportsMethodTelemetryOnError(t *testing.T) {
 	rec := &recordingMethodTelemetry{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
-		w.Write([]byte("too large"))
+		_, _ = w.Write([]byte("too large"))
 	}))
 	defer server.Close()
 

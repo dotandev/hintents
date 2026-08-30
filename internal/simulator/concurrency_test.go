@@ -198,9 +198,9 @@ func TestConcurrentBuilderReadOnlyAccess(t *testing.T) {
 	req, err := NewSimulationRequestBuilder().
 		WithEnvelopeXDR("envelope_xdr_data").
 		WithResultMetaXDR("result_meta_xdr_data").
-		WithLedgerEntry("key1", "value1").
-		WithLedgerEntry("key2", "value2").
-		WithLedgerEntry("key3", "value3").
+		WithLedgerEntry("a2V5MQ==", "dmFsdWUx").
+		WithLedgerEntry("a2V5Mg==", "dmFsdWUy").
+		WithLedgerEntry("a2V5Mw==", "dmFsdWUz").
 		Build()
 	if err != nil {
 		t.Fatalf("builder error: %v", err)

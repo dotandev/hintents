@@ -5,10 +5,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"runtime/debug"
 
@@ -16,16 +14,24 @@ import (
 	"github.com/dotandev/hintents/internal/cmd"
 	"github.com/dotandev/hintents/internal/config"
 	"github.com/dotandev/hintents/internal/crashreport"
+	"github.com/dotandev/hintents/internal/version"
 )
 
 // Build-time variables injected via -ldflags.
 var (
-	version   = "dev"
-	commitSHA = "unknown"
+	buildVersion   = "dev"
+	buildCommitSHA = "unknown"
 )
+
+func init() {
+	// Set version from build-time variables
+	version.Version = buildVersion
+	version.CommitSHA = buildCommitSHA
+}
 
 // ─── Example RPC handler ──────────────────────────────────────────────────────
 
+/*
 func rpcHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -39,6 +45,7 @@ func healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "ok")
 }
+*/
 
 func main() {
 	ctx := context.Background()
@@ -54,8 +61,8 @@ func main() {
 		Enabled:   cfg.CrashReporting,
 		SentryDSN: cfg.CrashSentryDSN,
 		Endpoint:  cfg.CrashEndpoint,
-		Version:   version,
-		CommitSHA: commitSHA,
+		Version:   buildVersion,
+		CommitSHA: buildCommitSHA,
 	})
 
 	// Catch any unrecovered panic, report it, then re-panic.
@@ -77,10 +84,10 @@ func main() {
 func run(execute func() error, stderr io.Writer) int {
 	if err := execute(); err != nil {
 		if cmd.IsInterrupted(err) {
-			fmt.Fprintln(stderr, "Interrupted. Shutting down...")
+			_, _ = fmt.Fprintln(stderr, "Interrupted. Shutting down...")
 			return cmd.InterruptExitCode
 		}
-		fmt.Fprintf(stderr, "Error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 1
 	}
 	return 0

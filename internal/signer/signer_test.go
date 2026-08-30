@@ -5,7 +5,9 @@ package signer
 
 import (
 	"crypto/ed25519"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"testing"
 )
 
@@ -85,16 +87,16 @@ func TestInMemorySignerWrongKeyLength(t *testing.T) {
 	}
 }
 
-func TestSignerErrorFormat(t *testing.T) {
-	e := &SignerError{Op: "test", Msg: "something failed"}
+func TestErrorFormat(t *testing.T) {
+	e := &Error{Op: "test", Msg: "something failed"}
 	if e.Error() != "test: something failed" {
 		t.Fatalf("unexpected error string: %s", e.Error())
 	}
 }
 
-func TestSignerErrorUnwrap(t *testing.T) {
-	inner := &SignerError{Op: "inner", Msg: "root cause"}
-	outer := &SignerError{Op: "outer", Msg: "wrapping", Err: inner}
+func TestErrorUnwrap(t *testing.T) {
+	inner := &Error{Op: "inner", Msg: "root cause"}
+	outer := &Error{Op: "outer", Msg: "wrapping", Err: inner}
 	if outer.Unwrap() != inner {
 		t.Fatal("Unwrap did not return inner error")
 	}
@@ -106,6 +108,42 @@ func TestSignerInterfaceSatisfied(t *testing.T) {
 
 	if s.Algorithm() != "ed25519" {
 		t.Fatalf("interface method returned unexpected algorithm: %s", s.Algorithm())
+	}
+}
+
+func TestNewInMemorySignerFromPEM(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	pemBytes, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatalf("failed to marshal PKCS#8 private key: %v", err)
+	}
+
+	pemData := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pemBytes})
+	s, err := NewInMemorySignerFromPEM(string(pemData))
+	if err != nil {
+		t.Fatalf("NewInMemorySignerFromPEM failed: %v", err)
+	}
+
+	message := []byte("test payload")
+	sig, err := s.Sign(message)
+	if err != nil {
+		t.Fatalf("Sign failed: %v", err)
+	}
+
+	pub, err := s.PublicKey()
+	if err != nil {
+		t.Fatalf("PublicKey failed: %v", err)
+	}
+
+	if !ed25519.Verify(ed25519.PublicKey(pub), message, sig) {
+		t.Fatal("signature verification failed")
+	}
+}
+
+func TestNewInMemorySignerFromPEM_InvalidPEM(t *testing.T) {
+	_, err := NewInMemorySignerFromPEM("not-a-pem")
+	if err == nil {
+		t.Fatal("expected error for invalid PEM")
 	}
 }
 

@@ -49,6 +49,9 @@ replacements = {
     "🧬": "[GEN]",
     "🧪": "[TEST]",
     "🌡️": "[METRIC]",
+    "⏳": "[TIME-TRAVEL]",
+    "🧠": "[NEW]",
+    "🏙️": "[SANDBOX]",
 }
 
 def clean_file(filepath, check_only=False):

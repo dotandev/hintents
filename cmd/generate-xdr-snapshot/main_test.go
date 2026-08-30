@@ -25,6 +25,7 @@ func TestGeneratorCreation(t *testing.T) {
 	gen := NewEntryGenerator(config)
 	if gen == nil {
 		t.Fatal("Generator should not be nil")
+		return
 	}
 
 	if gen.config.Count != 1000 {
@@ -139,6 +140,7 @@ func TestSnapshotGeneration(t *testing.T) {
 
 	if snap == nil {
 		t.Fatal("Snapshot should not be nil")
+		return
 	}
 
 	if len(snap.LedgerEntries) != 500 {
@@ -201,7 +203,7 @@ func TestSnapshotSaveAndLoad(t *testing.T) {
 	}
 
 	// Cleanup
-	os.Remove(outputPath)
+	_ = os.Remove(outputPath)
 }
 
 // TestDeterministicGeneration tests that different instances produce different results
@@ -281,7 +283,7 @@ func TestLargeSnapshot(t *testing.T) {
 		t.Logf("Average entry size: %d bytes (may be outside typical range)", avgSize)
 	}
 
-	os.Remove(outputPath)
+	_ = os.Remove(outputPath)
 }
 
 // BenchmarkKeyGeneration benchmarks key generation
@@ -358,7 +360,7 @@ func BenchmarkSnapshotGeneration(b *testing.B) {
 				snap := gen.GenerateSnapshot()
 
 				_ = snapshot.Save(outputPath, snap)
-				os.Remove(outputPath)
+				_ = os.Remove(outputPath)
 			}
 		})
 	}
@@ -396,7 +398,7 @@ func TestSnapshotFormat(t *testing.T) {
 		t.Error("Snapshot missing array notation")
 	}
 
-	os.Remove(outputPath)
+	_ = os.Remove(outputPath)
 }
 
 // Helper function to check if string contains substring

@@ -20,20 +20,20 @@ type Signer interface {
 	Algorithm() string
 }
 
-// SignerError represents an error originating from a signing operation.
-type SignerError struct {
+// Error represents an error originating from a signing operation.
+type Error struct {
 	Op  string
 	Msg string
 	Err error
 }
 
-func (e *SignerError) Error() string {
+func (e *Error) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("%s: %s: %v", e.Op, e.Msg, e.Err)
 	}
 	return fmt.Sprintf("%s: %s", e.Op, e.Msg)
 }
 
-func (e *SignerError) Unwrap() error {
+func (e *Error) Unwrap() error {
 	return e.Err
 }

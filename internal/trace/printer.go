@@ -135,17 +135,17 @@ func PrintExecutionTrace(t *ExecutionTrace, opts PrintOptions) {
 	sep := strings.Repeat("─", maxW)
 
 	// ── header ───────────────────────────────────────────────────────────────
-	fmt.Fprintln(out)
-	p.header.Fprintln(out, " Transaction Execution Trace")
-	fmt.Fprintf(out, " Hash  : %s\n", truncateHash(t.TransactionHash, maxW-10))
+	_, _ = fmt.Fprintln(out)
+	_, _ = p.header.Fprintln(out, " Transaction Execution Trace")
+	_, _ = fmt.Fprintf(out, " Hash  : %s\n", truncateHash(t.TransactionHash, maxW-10))
 	if !t.StartTime.IsZero() {
-		fmt.Fprintf(out, " Start : %s\n", t.StartTime.UTC().Format(time.RFC3339))
+		_, _ = fmt.Fprintf(out, " Start : %s\n", t.StartTime.UTC().Format(time.RFC3339))
 	}
-	fmt.Fprintf(out, " Steps : %d\n", len(t.States))
-	p.separator.Fprintln(out, sep)
+	_, _ = fmt.Fprintf(out, " Steps : %d\n", len(t.States))
+	_, _ = p.separator.Fprintln(out, sep)
 
 	// ── root node ────────────────────────────────────────────────────────────
-	p.txRoot.Fprintf(out, "▸ TX  %s\n", truncateHash(t.TransactionHash, maxW-6))
+	_, _ = p.txRoot.Fprintf(out, "▸ TX  %s\n", truncateHash(t.TransactionHash, maxW-6))
 
 	// ── state nodes ──────────────────────────────────────────────────────────
 	total := len(t.States)
@@ -189,7 +189,7 @@ func PrintExecutionTrace(t *ExecutionTrace, opts PrintOptions) {
 			returnPart = "  → " + p.returnVal.Sprint(rv)
 		}
 
-		fmt.Fprintf(out, "%s%s %s%s%s%s%s\n",
+		_, _ = fmt.Fprintf(out, "%s%s %s%s%s%s%s\n",
 			connector,
 			p.stepNum.Sprintf("[%d]", state.Step),
 			p.opLabel.Sprint(icon+" "+opName),
@@ -205,13 +205,13 @@ func PrintExecutionTrace(t *ExecutionTrace, opts PrintOptions) {
 			errLine := wrapText(state.Error, maxW-len(continuation)-6)
 			for j, line := range strings.Split(errLine, "\n") {
 				if j == 0 {
-					fmt.Fprintf(out, "%s  %s %s\n",
+					_, _ = fmt.Fprintf(out, "%s  %s %s\n",
 						continuation,
 						p.errorFn.Sprint("[FAIL]"),
 						p.errorMsg.Sprint(line),
 					)
 				} else {
-					fmt.Fprintf(out, "%s    %s\n", continuation, p.errorMsg.Sprint(line))
+					_, _ = fmt.Fprintf(out, "%s    %s\n", continuation, p.errorMsg.Sprint(line))
 				}
 			}
 		}
@@ -225,9 +225,9 @@ func PrintExecutionTrace(t *ExecutionTrace, opts PrintOptions) {
 	}
 
 	// ── footer ───────────────────────────────────────────────────────────────
-	p.separator.Fprintln(out, sep)
+	_, _ = p.separator.Fprintln(out, sep)
 	printSummaryLine(out, p, total, errorCount, finalStatus)
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 }
 
 // PrintTraceTree renders a rich, colour-coded ASCII tree from a TraceNode
@@ -246,18 +246,18 @@ func PrintTraceTree(root *TraceNode, opts PrintOptions) {
 	sep := strings.Repeat("─", maxW)
 
 	// ── header ───────────────────────────────────────────────────────────────
-	fmt.Fprintln(out)
-	p.header.Fprintln(out, " Transaction Execution Trace")
-	p.separator.Fprintln(out, sep)
+	_, _ = fmt.Fprintln(out)
+	_, _ = p.header.Fprintln(out, " Transaction Execution Trace")
+	_, _ = p.separator.Fprintln(out, sep)
 
 	// ── recursive tree print ─────────────────────────────────────────────────
 	stats := &treeStats{}
 	printTreeNode(out, p, root, "", true, maxW, stats)
 
 	// ── footer ───────────────────────────────────────────────────────────────
-	p.separator.Fprintln(out, sep)
+	_, _ = p.separator.Fprintln(out, sep)
 	printSummaryLine(out, p, stats.total, stats.errors, "")
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -325,20 +325,20 @@ func printTreeNode(out io.Writer, p palette, node *TraceNode, prefix string, isL
 		sb.WriteString(p.returnVal.Sprint("→ " + ev))
 	}
 
-	fmt.Fprintf(out, "%s%s%s\n", prefix, connector, sb.String())
+	_, _ = fmt.Fprintf(out, "%s%s%s\n", prefix, connector, sb.String())
 
 	// ── error sub-line ────────────────────────────────────────────────────────
 	if node.Error != "" {
 		errLine := wrapText(node.Error, maxW-len(childPrefix)-6)
 		for j, line := range strings.Split(errLine, "\n") {
 			if j == 0 {
-				fmt.Fprintf(out, "%s  %s %s\n",
+				_, _ = fmt.Fprintf(out, "%s  %s %s\n",
 					childPrefix,
 					p.errorFn.Sprint("[FAIL]"),
 					p.errorMsg.Sprint(line),
 				)
 			} else {
-				fmt.Fprintf(out, "%s    %s\n", childPrefix, p.errorMsg.Sprint(line))
+				_, _ = fmt.Fprintf(out, "%s    %s\n", childPrefix, p.errorMsg.Sprint(line))
 			}
 		}
 	}
@@ -359,7 +359,7 @@ func printTreeNode(out io.Writer, p palette, node *TraceNode, prefix string, isL
 			budget.WriteString(p.budgetLabel.Sprint("MEM: "))
 			budget.WriteString(p.budgetVal.Sprint(formatBytes(*node.MemoryDelta)))
 		}
-		fmt.Fprintln(out, budget.String())
+		_, _ = fmt.Fprintln(out, budget.String())
 	}
 
 	// ── children ──────────────────────────────────────────────────────────────
@@ -370,7 +370,7 @@ func printTreeNode(out io.Writer, p palette, node *TraceNode, prefix string, isL
 		}
 	} else if len(node.Children) > 0 {
 		// collapsed indicator
-		fmt.Fprintf(out, "%s  %s\n",
+		_, _ = fmt.Fprintf(out, "%s  %s\n",
 			childPrefix,
 			p.dimmed.Sprintf("… %d children collapsed", len(node.Children)),
 		)
@@ -396,7 +396,7 @@ func printSummaryLine(out io.Writer, p palette, total, errorCount int, status st
 		}
 		parts = append(parts, p.summaryKey.Sprint("Status: ")+valColor.Sprint(status))
 	}
-	fmt.Fprintln(out, " "+strings.Join(parts, p.dimmed.Sprint("  │  ")))
+	_, _ = fmt.Fprintln(out, " "+strings.Join(parts, p.dimmed.Sprint("  │  ")))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/dotandev/hintents/internal/endpoints"
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 )
@@ -95,11 +96,11 @@ func SubmitSignedEnvelope(ctx context.Context, sorobanURL, envelopeXDR string) (
 func SorobanURLForNetwork(network string) (string, error) {
 	switch network {
 	case "testnet":
-		return "https://soroban-testnet.stellar.org", nil
+		return endpoints.SorobanTestnet, nil
 	case "mainnet":
-		return "https://mainnet.stellar.validationcloud.io/v1/soroban-rpc-demo", nil
+		return endpoints.ValidationCloudMainnet, nil
 	case "futurenet":
-		return "https://rpc-futurenet.stellar.org", nil
+		return endpoints.FuturenetAlt, nil
 	default:
 		return "", errors.WrapInvalidNetwork(fmt.Sprintf("%s (expected testnet, mainnet, or futurenet)", network))
 	}

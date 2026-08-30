@@ -139,7 +139,7 @@ func (p *Publisher) PublishIPFS(ctx context.Context, payload []byte) (Result, er
 	if err != nil {
 		return Result{}, fmt.Errorf("decenstorage: IPFS request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return Result{}, fmt.Errorf("decenstorage: IPFS node returned %d", resp.StatusCode)
@@ -246,7 +246,7 @@ func (p *Publisher) PublishArweave(ctx context.Context, payload []byte) (Result,
 	if err != nil {
 		return Result{}, fmt.Errorf("decenstorage: Arweave request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)

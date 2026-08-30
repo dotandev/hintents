@@ -58,6 +58,14 @@ type TxStatus struct {
 	Status string // one of TxStatus{Pending,Success,Failed,NotFound}
 	Ledger int64
 	Error  string
+
+	// XDR payload fields — populated only on SUCCESS or FAILED terminal states.
+	EnvelopeXdr      string
+	ResultXdr        string
+	ResultMetaXdr    string
+	ApplicationOrder int64
+	LatestLedger     int64
+	CreatedAt        int64
 }
 
 // IsFinal reports whether this status is a terminal state (no further
@@ -88,11 +96,76 @@ func NewTxStreamer(c *Client) TxStreamer {
 		defer cancel()
 		if probeWebSocket(probeCtx, wsURL, c.token) {
 			logger.Logger.Info("WebSocket streaming enabled", "url", wsURL)
-			return &wsStreamer{client: c, wsURL: wsURL}
+			return &autoFallbackStreamer{
+				client:          c,
+				wsURL:           wsURL,
+				pollingFallback: &pollingStreamer{client: c},
+			}
 		}
 	}
 	logger.Logger.Info("WebSocket not supported, using JSON-RPC polling", "url", c.SorobanURL)
 	return &pollingStreamer{client: c}
+}
+
+// autoFallbackStreamer prefers WebSockets but switches to JSON-RPC polling if
+// the WebSocket stream cannot be established or ends before a terminal status.
+type autoFallbackStreamer struct {
+	client          *Client
+	wsURL           string
+	pollingFallback *pollingStreamer
+}
+
+// Stream implements TxStreamer.
+func (s *autoFallbackStreamer) Stream(ctx context.Context, hash string) (<-chan TxStatus, error) {
+	ws := &wsStreamer{client: s.client, wsURL: s.wsURL}
+	wsCh, err := ws.Stream(ctx, hash)
+	if err != nil {
+		logger.Logger.Warn("WebSocket stream setup failed, falling back to JSON-RPC polling", "hash", hash, "error", err)
+		return s.pollingFallback.Stream(ctx, hash)
+	}
+
+	out := make(chan TxStatus, 8)
+	go func() {
+		defer close(out)
+
+		for status := range wsCh {
+			if !forwardTxStatus(ctx, out, status) {
+				return
+			}
+			if status.IsFinal() {
+				return
+			}
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		logger.Logger.Warn("WebSocket stream ended before a final transaction status, falling back to JSON-RPC polling", "hash", hash)
+
+		pollCh, err := s.pollingFallback.Stream(ctx, hash)
+		if err != nil {
+			logger.Logger.Error("Polling fallback failed to start", "hash", hash, "error", err)
+			return
+		}
+
+		for status := range pollCh {
+			if !forwardTxStatus(ctx, out, status) {
+				return
+			}
+		}
+	}()
+
+	return out, nil
+}
+
+func forwardTxStatus(ctx context.Context, out chan<- TxStatus, status TxStatus) bool {
+	select {
+	case out <- status:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -168,17 +241,17 @@ func (s *wsStreamer) poll(ctx context.Context, conn *wsConn, hash string, id int
 		return true
 	}
 
-	conn.raw.SetWriteDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck
+	_ = conn.raw.SetWriteDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck // Best-effort write deadline for WebSocket frame
 	if err := wsWriteFrame(conn.raw, reqBytes); err != nil {
 		logger.Logger.Warn("ws streamer: write frame", "error", err)
 		return true
 	}
 
-	conn.raw.SetReadDeadline(time.Now().Add(15 * time.Second)) //nolint:errcheck
-	data, err := wsReadFrame(conn.br)
-	conn.raw.SetDeadline(time.Time{}) //nolint:errcheck
+	_ = conn.raw.SetReadDeadline(time.Now().Add(15 * time.Second)) //nolint:errcheck
+	data, err := wsReadMessage(conn.br)
+	_ = conn.raw.SetDeadline(time.Time{}) //nolint:errcheck
 	if err != nil {
-		logger.Logger.Warn("ws streamer: read frame", "error", err)
+		logger.Logger.Warn("ws streamer: read message", "error", err)
 		return true
 	}
 
@@ -188,14 +261,7 @@ func (s *wsStreamer) poll(ctx context.Context, conn *wsConn, hash string, id int
 		return false // malformed message — try again next tick
 	}
 
-	status := TxStatus{Hash: hash}
-	if resp.Error != nil {
-		status.Status = TxStatusNotFound
-		status.Error = resp.Error.Message
-	} else {
-		status.Status = resp.Result.Status
-		status.Ledger = resp.Result.Ledger
-	}
+	status := decodeTxStatus(hash, &resp)
 
 	select {
 	case ch <- status:
@@ -298,7 +364,7 @@ func (s *pollingStreamer) queryTxStatus(ctx context.Context, hash string) (TxSta
 	if err != nil {
 		return TxStatus{}, fmt.Errorf("poll: http: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	respBytes, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -310,15 +376,7 @@ func (s *pollingStreamer) queryTxStatus(ctx context.Context, hash string) (TxSta
 		return TxStatus{}, fmt.Errorf("poll: unmarshal: %w", err)
 	}
 
-	if rpcResp.Error != nil {
-		return TxStatus{Hash: hash, Status: TxStatusNotFound, Error: rpcResp.Error.Message}, nil
-	}
-
-	return TxStatus{
-		Hash:   hash,
-		Status: rpcResp.Result.Status,
-		Ledger: rpcResp.Result.Ledger,
-	}, nil
+	return decodeTxStatus(hash, &rpcResp), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -368,9 +426,9 @@ type wsConn struct {
 
 func (c *wsConn) close() {
 	// Send a close frame before closing the underlying connection.
-	c.raw.SetWriteDeadline(time.Now().Add(1 * time.Second)) //nolint:errcheck
-	wsWriteFrame(c.raw, nil)                                //nolint:errcheck — best-effort
-	c.raw.Close()
+	_ = c.raw.SetWriteDeadline(time.Now().Add(1 * time.Second)) //nolint:errcheck
+	_ = wsWriteFrame(c.raw, nil)                                // best-effort
+	_ = c.raw.Close()
 }
 
 // ---------------------------------------------------------------------------
@@ -418,7 +476,7 @@ func wsDialUpgrade(ctx context.Context, wsURL, token string) (*wsConn, error) {
 	reqSB.WriteString("\r\n")
 
 	if _, err := io.WriteString(raw, reqSB.String()); err != nil {
-		raw.Close()
+		_ = raw.Close()
 		return nil, fmt.Errorf("ws: send upgrade request: %w", err)
 	}
 
@@ -427,11 +485,11 @@ func wsDialUpgrade(ctx context.Context, wsURL, token string) (*wsConn, error) {
 	// Read status line.
 	statusLine, err := br.ReadString('\n')
 	if err != nil {
-		raw.Close()
+		_ = raw.Close()
 		return nil, fmt.Errorf("ws: read status line: %w", err)
 	}
 	if !strings.Contains(statusLine, "101") {
-		raw.Close()
+		_ = raw.Close()
 		return nil, fmt.Errorf("ws: expected 101 Switching Protocols, got: %s", strings.TrimSpace(statusLine))
 	}
 
@@ -440,7 +498,7 @@ func wsDialUpgrade(ctx context.Context, wsURL, token string) (*wsConn, error) {
 	for {
 		line, err := br.ReadString('\n')
 		if err != nil {
-			raw.Close()
+			_ = raw.Close()
 			return nil, fmt.Errorf("ws: read upgrade headers: %w", err)
 		}
 		line = strings.TrimRight(line, "\r\n")
@@ -453,7 +511,7 @@ func wsDialUpgrade(ctx context.Context, wsURL, token string) (*wsConn, error) {
 	}
 
 	if want := wsAcceptKey(key); gotAccept != want {
-		raw.Close()
+		_ = raw.Close()
 		return nil, fmt.Errorf("ws: accept key mismatch: got %q, want %q", gotAccept, want)
 	}
 
@@ -521,47 +579,48 @@ func wsWriteFrame(w io.Writer, payload []byte) error {
 	return nil
 }
 
-// wsReadFrame reads one data frame from r. Control frames (ping, pong) are
-// handled silently. A close frame is returned as io.EOF.
-func wsReadFrame(r *bufio.Reader) ([]byte, error) {
-	b0, err := r.ReadByte()
-	if err != nil {
-		return nil, fmt.Errorf("ws: read header[0]: %w", err)
+// wsReadRawFrame reads one RFC 6455 frame from r and returns its components.
+// It does not interpret the opcode — callers must dispatch accordingly.
+func wsReadRawFrame(r *bufio.Reader) (fin bool, opcode byte, payload []byte, err error) {
+	b0, e := r.ReadByte()
+	if e != nil {
+		return false, 0, nil, fmt.Errorf("ws: read header[0]: %w", e)
 	}
-	b1, err := r.ReadByte()
-	if err != nil {
-		return nil, fmt.Errorf("ws: read header[1]: %w", err)
+	b1, e := r.ReadByte()
+	if e != nil {
+		return false, 0, nil, fmt.Errorf("ws: read header[1]: %w", e)
 	}
 
-	opcode := b0 & 0x0F
+	fin = (b0 & 0x80) != 0
+	opcode = b0 & 0x0F
 	masked := (b1 & 0x80) != 0
 
 	rawLen := int64(b1 & 0x7F)
 	switch rawLen {
 	case 126:
 		var ext [2]byte
-		if _, err := io.ReadFull(r, ext[:]); err != nil {
-			return nil, fmt.Errorf("ws: read 16-bit length: %w", err)
+		if _, e := io.ReadFull(r, ext[:]); e != nil {
+			return false, 0, nil, fmt.Errorf("ws: read 16-bit length: %w", e)
 		}
 		rawLen = int64(binary.BigEndian.Uint16(ext[:]))
 	case 127:
 		var ext [8]byte
-		if _, err := io.ReadFull(r, ext[:]); err != nil {
-			return nil, fmt.Errorf("ws: read 64-bit length: %w", err)
+		if _, e := io.ReadFull(r, ext[:]); e != nil {
+			return false, 0, nil, fmt.Errorf("ws: read 64-bit length: %w", e)
 		}
 		rawLen = int64(binary.BigEndian.Uint64(ext[:]))
 	}
 
 	var maskKey [4]byte
 	if masked {
-		if _, err := io.ReadFull(r, maskKey[:]); err != nil {
-			return nil, fmt.Errorf("ws: read mask key: %w", err)
+		if _, e := io.ReadFull(r, maskKey[:]); e != nil {
+			return false, 0, nil, fmt.Errorf("ws: read mask key: %w", e)
 		}
 	}
 
-	payload := make([]byte, rawLen)
-	if _, err := io.ReadFull(r, payload); err != nil {
-		return nil, fmt.Errorf("ws: read payload: %w", err)
+	payload = make([]byte, rawLen)
+	if _, e := io.ReadFull(r, payload); e != nil {
+		return false, 0, nil, fmt.Errorf("ws: read payload: %w", e)
 	}
 
 	if masked {
@@ -570,15 +629,54 @@ func wsReadFrame(r *bufio.Reader) ([]byte, error) {
 		}
 	}
 
-	switch opcode {
-	case 0x8: // close
-		return nil, io.EOF
-	case 0x9, 0xA: // ping or pong — discard and recurse
-		return wsReadFrame(r)
-	case 0x0, 0x1, 0x2: // continuation, text, binary — all valid data frames
-		return payload, nil
-	default:
-		return nil, fmt.Errorf("ws: unexpected opcode 0x%x", opcode)
+	return fin, opcode, payload, nil
+}
+
+// wsReadFrame reads one complete (non-fragmented) data frame from r.
+// Control frames (ping, pong) are discarded silently. A close frame
+// returns io.EOF. For fragmented messages use wsReadMessage instead.
+func wsReadFrame(r *bufio.Reader) ([]byte, error) {
+	for {
+		_, opcode, payload, err := wsReadRawFrame(r)
+		if err != nil {
+			return nil, err
+		}
+		switch opcode {
+		case 0x8: // close
+			return nil, io.EOF
+		case 0x9, 0xA: // ping or pong — discard
+			continue
+		case 0x0, 0x1, 0x2: // continuation, text, binary
+			return payload, nil
+		default:
+			return nil, fmt.Errorf("ws: unexpected opcode 0x%x", opcode)
+		}
+	}
+}
+
+// wsReadMessage reassembles a (possibly fragmented) WebSocket message per
+// RFC 6455 §5.4. Control frames interleaved with fragments are handled
+// silently. A close frame returns io.EOF.
+func wsReadMessage(r *bufio.Reader) ([]byte, error) {
+	var buf bytes.Buffer
+	for {
+		fin, opcode, payload, err := wsReadRawFrame(r)
+		if err != nil {
+			return nil, err
+		}
+		switch opcode {
+		case 0x8: // close
+			return nil, io.EOF
+		case 0x9, 0xA: // ping/pong interleaved with fragments — discard
+			continue
+		case 0x0, 0x1, 0x2: // continuation, text, binary
+			buf.Write(payload)
+			if fin {
+				return buf.Bytes(), nil
+			}
+		default:
+			return nil, fmt.Errorf("ws: unexpected opcode 0x%x", opcode)
+		}
 	}
 }
 
@@ -602,7 +700,7 @@ func wsGenKey() string {
 // client key per RFC 6455 §4.2.2 step 5.4.
 func wsAcceptKey(clientKey string) string {
 	h := sha1.New()
-	io.WriteString(h, clientKey+wsGUID) //nolint:errcheck — sha1.Write never fails
+	_, _ = io.WriteString(h, clientKey+wsGUID) // sha1.Write never fails
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
@@ -668,15 +766,46 @@ type rpcGetTxParams struct {
 	Hash string `json:"hash"`
 }
 
+// sorobanGetTxResult maps the full Soroban RPC getTransaction result object.
+type sorobanGetTxResult struct {
+	Status           string `json:"status"`
+	Ledger           int64  `json:"ledger,omitempty"`
+	EnvelopeXdr      string `json:"envelopeXdr,omitempty"`
+	ResultXdr        string `json:"resultXdr,omitempty"`
+	ResultMetaXdr    string `json:"resultMetaXdr,omitempty"`
+	ApplicationOrder int64  `json:"applicationOrder,omitempty"`
+	LatestLedger     int64  `json:"latestLedger,omitempty"`
+	CreatedAt        int64  `json:"createdAt,omitempty"`
+}
+
 type jsonrpcResponse struct {
-	Jsonrpc string `json:"jsonrpc"`
-	ID      int64  `json:"id"`
-	Result  struct {
-		Status string `json:"status"`
-		Ledger int64  `json:"ledger,omitempty"`
-	} `json:"result"`
-	Error *struct {
+	Jsonrpc string              `json:"jsonrpc"`
+	ID      int64               `json:"id"`
+	Result  *sorobanGetTxResult `json:"result,omitempty"`
+	Error   *struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+// decodeTxStatus converts a JSON-RPC getTransaction response into a TxStatus,
+// mapping RPC errors to NOT_FOUND and propagating all XDR fields on success.
+func decodeTxStatus(hash string, resp *jsonrpcResponse) TxStatus {
+	if resp.Error != nil {
+		return TxStatus{Hash: hash, Status: TxStatusNotFound, Error: resp.Error.Message}
+	}
+	if resp.Result == nil {
+		return TxStatus{Hash: hash, Status: TxStatusNotFound}
+	}
+	return TxStatus{
+		Hash:             hash,
+		Status:           resp.Result.Status,
+		Ledger:           resp.Result.Ledger,
+		EnvelopeXdr:      resp.Result.EnvelopeXdr,
+		ResultXdr:        resp.Result.ResultXdr,
+		ResultMetaXdr:    resp.Result.ResultMetaXdr,
+		ApplicationOrder: resp.Result.ApplicationOrder,
+		LatestLedger:     resp.Result.LatestLedger,
+		CreatedAt:        resp.Result.CreatedAt,
+	}
 }

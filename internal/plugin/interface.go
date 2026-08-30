@@ -23,11 +23,11 @@ type DecoderPlugin interface {
 	Decode(data []byte) (json.RawMessage, error)
 
 	// Metadata returns plugin capabilities and requirements
-	Metadata() PluginMetadata
+	Metadata() Metadata
 }
 
-// PluginMetadata describes plugin capabilities
-type PluginMetadata struct {
+// Metadata describes plugin capabilities
+type Metadata struct {
 	Name        string   `json:"name"`
 	Version     string   `json:"version"`
 	APIVersion  string   `json:"api_version"`
@@ -35,8 +35,8 @@ type PluginMetadata struct {
 	Description string   `json:"description"`
 }
 
-// PluginFactory creates a plugin instance
-type PluginFactory interface {
+// Factory creates a plugin instance
+type Factory interface {
 	Create() (DecoderPlugin, error)
 }
 

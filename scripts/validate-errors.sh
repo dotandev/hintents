@@ -1,30 +1,17 @@
-# Copyright (c) Hintents Authors.
-# SPDX-License-Identifier: Apache-2.0
-
-
 #!/bin/bash
 # Copyright 2026 Erst Users
 # SPDX-License-Identifier: Apache-2.0
 
-#!/bin/bash
-# Copyright (c) Hintents Authors.
-# SPDX-License-Identifier: Apache-2.0
-
-#!/bin/bash
-
-# Copyright (c) 2026 dotandev
-# SPDX-License-Identifier: MIT OR Apache-2.0
-
->>>>>>> Stashed changes
-
 # Validate error standardization implementation
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-cd "${REPO_ROOT}"
+# Ensure we are in the project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." &>/dev/null && pwd)"
+cd "${REPO_ROOT}" || { echo "Failed to change directory to project root: ${REPO_ROOT}"; exit 1; }
 
 echo "Validating error standardization..."
+echo "Project root: ${REPO_ROOT}"
 
 # Check if errors package exists
 if [ ! -f "internal/errors/errors.go" ]; then
@@ -94,8 +81,3 @@ else
 fi
 
 echo "All validation checks passed!"
-echo "Error standardization complete:"
-echo "   - Sentinel errors defined for comparison with errors.Is"
-echo "   - Wrap functions follow Go error wrapping best practices"
-echo "   - All packages refactored to use standardized errors"
-echo "   - Tests updated to use standardized error constants"

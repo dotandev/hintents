@@ -13,6 +13,7 @@ import (
 	"log"
 
 	"github.com/dotandev/hintents/internal/cmd"
+	"github.com/dotandev/hintents/internal/signer"
 )
 
 // This example demonstrates how canonical JSON serialization ensures
@@ -30,13 +31,14 @@ func main() {
 
 	// Example 1: Generate audit log
 	fmt.Println("1. Generating audit log with canonical JSON...")
-	auditLog, err := cmd.Generate(
+	s, _ := signer.NewInMemorySigner(privateKeyHex)
+	auditLog, err := cmd.GenerateWithSigner(
 		"tx-hash-12345",
 		"envelope-xdr-data",
 		"result-meta-xdr-data",
 		[]string{"event1", "event2", "event3"},
 		[]string{"log1", "log2"},
-		privateKeyHex,
+		s,
 		nil,
 	)
 	if err != nil {
@@ -61,15 +63,17 @@ func main() {
 	fmt.Println("3. Demonstrating deterministic hashing...")
 	fmt.Println("   Generating the same payload 5 times...")
 
+	s, _ = signer.NewInMemorySigner(privateKeyHex)
 	hashes := make([]string, 5)
 	for i := 0; i < 5; i++ {
-		genLog, err := cmd.Generate(
+		var genLog *cmd.AuditLog
+		genLog, err = cmd.GenerateWithSigner(
 			"tx-hash-12345",
 			"envelope-xdr-data",
 			"result-meta-xdr-data",
 			[]string{"event1", "event2", "event3"},
 			[]string{"log1", "log2"},
-			privateKeyHex,
+			s,
 			nil,
 		)
 		if err != nil {
@@ -147,8 +151,9 @@ func main() {
 	// Example 8: Cross-platform hash consistency
 	fmt.Println("8. Cross-platform consistency guarantee...")
 
-	log1, _ := cmd.Generate("tx1", "envelope", "result", []string{"e1"}, []string{"l1"}, privateKeyHex, nil)
-	log2, _ := cmd.Generate("tx1", "envelope", "result", []string{"e1"}, []string{"l1"}, privateKeyHex, nil)
+	s, _ = signer.NewInMemorySigner(privateKeyHex)
+	log1, _ := cmd.GenerateWithSigner("tx1", "envelope", "result", []string{"e1"}, []string{"l1"}, s, nil)
+	log2, _ := cmd.GenerateWithSigner("tx1", "envelope", "result", []string{"e1"}, []string{"l1"}, s, nil)
 
 	if log1.TraceHash == log2.TraceHash {
 		fmt.Println("   [OK] Same data produces same hash regardless of field order")

@@ -46,7 +46,7 @@ func LoadSourceContext(ref SourceRef, radius int) (*SourceContext, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot open %s: %w", ref.File, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var all []string
 	sc := bufio.NewScanner(f)
@@ -104,7 +104,7 @@ func DefaultSplitPane() *SplitPane {
 func (p *SplitPane) Render(w io.Writer, node *TraceNode, src *SourceContext) {
 	width := p.resolveWidth()
 	bw := bufio.NewWriter(w)
-	defer bw.Flush() //nolint:errcheck
+	defer func() { _ = bw.Flush() }() //nolint:errcheck // Best-effort buffer flush on exit
 
 	p.renderTracePane(bw, node, width)
 	p.renderDivider(bw, width, src)

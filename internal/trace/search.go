@@ -7,12 +7,12 @@ package trace
 type SearchEngine struct {
 	query         string
 	caseSensitive bool
-	matches       []TraceNodeMatch
+	matches       []NodeMatch
 	currentIndex  int
 }
 
-// TraceNodeMatch represents a search match in the trace
-type TraceNodeMatch struct {
+// NodeMatch represents a search match in the trace
+type NodeMatch struct {
 	NodeID      string       // Unique identifier for the node
 	NodeIndex   int          // Position in flat trace list
 	MatchRanges []MatchRange // Multiple matches within same node
@@ -47,12 +47,12 @@ func (s *SearchEngine) GetQuery() string {
 }
 
 // Search performs the search across all trace nodes
-func (s *SearchEngine) Search(nodes []*TraceNode) []TraceNodeMatch {
+func (s *SearchEngine) Search(nodes []*TraceNode) []NodeMatch {
 	if s.query == "" {
 		return nil
 	}
 
-	s.matches = []TraceNodeMatch{}
+	s.matches = []NodeMatch{}
 
 	for i, node := range nodes {
 		match := s.searchNode(node, i)
@@ -69,8 +69,8 @@ func (s *SearchEngine) Search(nodes []*TraceNode) []TraceNodeMatch {
 }
 
 // searchNode searches within a single trace node
-func (s *SearchEngine) searchNode(node *TraceNode, index int) TraceNodeMatch {
-	match := TraceNodeMatch{
+func (s *SearchEngine) searchNode(node *TraceNode, index int) NodeMatch {
+	match := NodeMatch{
 		NodeID:      node.ID,
 		NodeIndex:   index,
 		NodeData:    node,
@@ -128,7 +128,7 @@ func (s *SearchEngine) findInString(text, field string) []MatchRange {
 }
 
 // NextMatch moves to the next search match
-func (s *SearchEngine) NextMatch() *TraceNodeMatch {
+func (s *SearchEngine) NextMatch() *NodeMatch {
 	if len(s.matches) == 0 {
 		return nil
 	}
@@ -138,7 +138,7 @@ func (s *SearchEngine) NextMatch() *TraceNodeMatch {
 }
 
 // PreviousMatch moves to the previous search match
-func (s *SearchEngine) PreviousMatch() *TraceNodeMatch {
+func (s *SearchEngine) PreviousMatch() *NodeMatch {
 	if len(s.matches) == 0 {
 		return nil
 	}
@@ -152,7 +152,7 @@ func (s *SearchEngine) PreviousMatch() *TraceNodeMatch {
 }
 
 // CurrentMatch returns the current match
-func (s *SearchEngine) CurrentMatch() *TraceNodeMatch {
+func (s *SearchEngine) CurrentMatch() *NodeMatch {
 	if len(s.matches) == 0 || s.currentIndex < 0 {
 		return nil
 	}

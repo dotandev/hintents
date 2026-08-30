@@ -28,7 +28,7 @@ pub fn enforce_soroban_compatibility(wasm: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn is_float_op(op: &Operator) -> bool {
+fn is_float_op<'a>(op: &Operator<'a>) -> bool {
     // Many of the `Operator` variants are prefixed with `F32` or `F64` when
     // they perform floating-point operations. To avoid having to keep an
     // exhaustive list in sync with whatever version of `wasmparser` is pulled

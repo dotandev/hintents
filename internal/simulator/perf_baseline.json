@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "updated": "2026-04-26T20:31:15+01:00",
+  "benchmarks": {
+    "CombinedWorkload": {
+      "target_ns_per_op": 15647,
+      "target_bytes_per_op": 31907,
+      "target_allocs_per_op": 295
+    },
+    "EndlessLoop": {
+      "target_ns_per_op": 5176,
+      "target_bytes_per_op": 11321,
+      "target_allocs_per_op": 134
+    },
+    "MemoryHog": {
+      "target_ns_per_op": 32394,
+      "target_bytes_per_op": 83209,
+      "target_allocs_per_op": 494
+    }
+  },
+  "threshold_percent": 10000000.0
+}

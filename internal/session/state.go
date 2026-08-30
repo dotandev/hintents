@@ -22,17 +22,17 @@ type Dispatcher func(action Action)
 // Middleware wraps a Dispatcher to allow custom logic injection
 type Middleware func(next Dispatcher) Dispatcher
 
-// SessionStore manages the session state with injectable middleware
-type SessionStore struct {
+// StateStore manages the session state with injectable middleware
+type StateStore struct {
 	mu         sync.RWMutex
 	state      State
 	dispatch   Dispatcher
 	middleware []Middleware
 }
 
-// NewSessionStore initializes the store [Issue #589]
-func NewSessionStore() *SessionStore {
-	s := &SessionStore{
+// NewStateStore initializes the store [Issue #589]
+func NewStateStore() *StateStore {
+	s := &StateStore{
 		state: make(State),
 	}
 	// The base dispatcher updates the actual state map
@@ -41,7 +41,7 @@ func NewSessionStore() *SessionStore {
 }
 
 // Use injects custom middleware into the state management pipeline
-func (s *SessionStore) Use(mw Middleware) {
+func (s *StateStore) Use(mw Middleware) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.middleware = append(s.middleware, mw)
@@ -55,19 +55,19 @@ func (s *SessionStore) Use(mw Middleware) {
 	s.dispatch = composed
 }
 
-func (s *SessionStore) baseDispatch(action Action) {
+func (s *StateStore) baseDispatch(action Action) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state[action.Type] = action.Payload
 }
 
 // Dispatch triggers a state change through the middleware chain
-func (s *SessionStore) Dispatch(action Action) {
+func (s *StateStore) Dispatch(action Action) {
 	s.dispatch(action)
 }
 
 // Get safely retrieves session data
-func (s *SessionStore) Get(key string) (interface{}, bool) {
+func (s *StateStore) Get(key string) (interface{}, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	val, ok := s.state[key]

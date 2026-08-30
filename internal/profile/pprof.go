@@ -8,7 +8,7 @@ import (
 	"io"
 
 	"github.com/dotandev/hintents/internal/trace"
-	"github.com/google/pprof/profile"
+	goprofile "github.com/google/pprof/profile"
 )
 
 const (
@@ -21,26 +21,26 @@ const (
 // TraceToPprof synthesizes an execution trace into a pprof-compliant profile
 // that maps gas consumption to functions. The result can be viewed with
 // go tool pprof.
-func TraceToPprof(execTrace *trace.ExecutionTrace) (*profile.Profile, error) {
+func TraceToPprof(execTrace *trace.ExecutionTrace) (*goprofile.Profile, error) {
 	if execTrace == nil {
 		return nil, fmt.Errorf("execution trace is nil")
 	}
 
-	p := &profile.Profile{
-		SampleType: []*profile.ValueType{
+	p := &goprofile.Profile{
+		SampleType: []*goprofile.ValueType{
 			{Type: SampleTypeGas, Unit: SampleUnitCount},
 		},
 		DefaultSampleType: SampleTypeGas,
-		Mapping: []*profile.Mapping{
+		Mapping: []*goprofile.Mapping{
 			{ID: 1, Start: 0, Limit: 0, File: "soroban", HasFunctions: true},
 		},
-		Function: make([]*profile.Function, 0),
-		Location: make([]*profile.Location, 0),
-		Sample:   make([]*profile.Sample, 0),
+		Function: make([]*goprofile.Function, 0),
+		Location: make([]*goprofile.Location, 0),
+		Sample:   make([]*goprofile.Sample, 0),
 	}
 
-	funcByKey := make(map[string]*profile.Function)
-	locByKey := make(map[string]*profile.Location)
+	funcByKey := make(map[string]*goprofile.Function)
+	locByKey := make(map[string]*goprofile.Location)
 	mapping := p.Mapping[0]
 	var funcID, locID uint64
 
@@ -73,26 +73,26 @@ func TraceToPprof(execTrace *trace.ExecutionTrace) (*profile.Profile, error) {
 		if !ok {
 			fn, ok := funcByKey[key]
 			if !ok {
-				fn = &profile.Function{
+				fn = &goprofile.Function{
 					ID:   nextFuncID(),
 					Name: name,
 				}
 				p.Function = append(p.Function, fn)
 				funcByKey[key] = fn
 			}
-			loc = &profile.Location{
+			loc = &goprofile.Location{
 				ID:      nextLocID(),
 				Mapping: mapping,
 				Address: uint64(state.Step),
-				Line:    []profile.Line{{Function: fn, Line: int64(state.Step)}},
+				Line:    []goprofile.Line{{Function: fn, Line: int64(state.Step)}},
 			}
 			p.Location = append(p.Location, loc)
 			locByKey[key] = loc
 		}
 
 		if gas > 0 {
-			p.Sample = append(p.Sample, &profile.Sample{
-				Location: []*profile.Location{loc},
+			p.Sample = append(p.Sample, &goprofile.Sample{
+				Location: []*goprofile.Location{loc},
 				Value:    []int64{gas},
 			})
 		}

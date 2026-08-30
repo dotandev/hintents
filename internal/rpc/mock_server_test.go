@@ -202,7 +202,7 @@ func TestMockServer_CallCounting(t *testing.T) {
 		resp, err := http.Get(server.URL() + "/transactions/abc123")
 		assert.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 
 	// Verify call count
@@ -211,7 +211,7 @@ func TestMockServer_CallCounting(t *testing.T) {
 	// Make request to another endpoint
 	resp, err := http.Get(server.URL() + "/notfound")
 	assert.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Verify separate count
 	assert.Equal(t, 1, server.CallCount("/notfound"))
@@ -229,7 +229,7 @@ func TestMockServer_ResetCallCounts(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		resp, err := http.Get(server.URL() + "/transactions/abc123")
 		assert.NoError(t, err)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 
 	assert.Equal(t, 3, server.CallCount("/transactions/abc123"))
@@ -289,31 +289,31 @@ func TestMockServer_MultipleEndpoints(t *testing.T) {
 	resp, err := http.Get(server.URL() + "/transactions/abc123")
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Test account endpoint
 	resp, err = http.Get(server.URL() + "/accounts/gtest")
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Test rate limit
 	resp, err = http.Get(server.URL() + "/transactions/limited")
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Test server error
 	resp, err = http.Get(server.URL() + "/transactions/error")
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Test 404
 	resp, err = http.Get(server.URL() + "/unknown")
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 func TestMockServer_ClientUsage(t *testing.T) {

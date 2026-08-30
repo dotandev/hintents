@@ -36,8 +36,8 @@ func (m *mockDecoder) Decode(data []byte) (json.RawMessage, error) {
 	return json.RawMessage(`{"decoded": true}`), nil
 }
 
-func (m *mockDecoder) Metadata() PluginMetadata {
-	return PluginMetadata{
+func (m *mockDecoder) Metadata() Metadata {
+	return Metadata{
 		Name:       m.name,
 		Version:    m.version,
 		APIVersion: Version,

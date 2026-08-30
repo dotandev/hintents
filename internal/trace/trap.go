@@ -238,7 +238,7 @@ func (td *TrapDetector) extractLocalVars(sp *dwarf.SubprogramInfo) []LocalVarInf
 //     displayed function name reflects where the fault occurred, not the caller.
 //
 // If no inlined frames are found the trap is left unchanged.
-func (td *TrapDetector) resolveInlinedChain(trap *TrapInfo, addr uint64, sp *dwarf.SubprogramInfo) {
+func (td *TrapDetector) resolveInlinedChain(trap *TrapInfo, addr uint64, _ *dwarf.SubprogramInfo) {
 	if td.dwarfParser == nil {
 		return
 	}
@@ -346,7 +346,7 @@ func FormatTrapInfo(trap *TrapInfo) string {
 			sb.WriteString(trap.SourceLocation.File)
 			sb.WriteString(":")
 		}
-		sb.WriteString(fmt.Sprintf("%d", trap.SourceLocation.Line))
+		fmt.Fprintf(&sb, "%d", trap.SourceLocation.Line)
 		sb.WriteString("\n")
 	}
 
@@ -364,14 +364,14 @@ func FormatTrapInfo(trap *TrapInfo) string {
 	if len(trap.InlinedChain) > 0 {
 		sb.WriteString("\n" + visualizer.Symbol("list") + " Inlined Call Chain (outermost to fault site):\n")
 		for i, frame := range trap.InlinedChain {
-			sb.WriteString(fmt.Sprintf("  %d: %s", i, frame.Function))
+			fmt.Fprintf(&sb, "  %d: %s", i, frame.Function)
 			// Show where inside the caller the inlining was requested.
 			if frame.CallSite.File != "" || frame.CallSite.Line != 0 {
-				sb.WriteString(fmt.Sprintf(" (called from %s:%d)", frame.CallSite.File, frame.CallSite.Line))
+				fmt.Fprintf(&sb, " (called from %s:%d)", frame.CallSite.File, frame.CallSite.Line)
 			}
 			// Show the inlined body's own fault location.
 			if frame.InlinedAt.File != "" || frame.InlinedAt.Line != 0 {
-				sb.WriteString(fmt.Sprintf(" [inlined at %s:%d]", frame.InlinedAt.File, frame.InlinedAt.Line))
+				fmt.Fprintf(&sb, " [inlined at %s:%d]", frame.InlinedAt.File, frame.InlinedAt.Line)
 			}
 			sb.WriteString("\n")
 		}
@@ -402,7 +402,7 @@ func FormatTrapInfo(trap *TrapInfo) string {
 		sb.WriteString("\n" + visualizer.Symbol("list") + " Call Stack:\n")
 		for i, frame := range trap.CallStack {
 			sb.WriteString("  ")
-			sb.WriteString(fmt.Sprintf("%d", i))
+			fmt.Fprintf(&sb, "%d", i)
 			sb.WriteString(": ")
 			sb.WriteString(frame)
 			sb.WriteString("\n")

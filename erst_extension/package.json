@@ -1,7 +1,8 @@
 {
+  "publisher": "hintents",
   "name": "erst-vscode",
   "displayName": "ERST Tracer",
-  "description": "",
+  "description": "Soroban smart contract simulator and debugger for VS Code",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.90.0"
@@ -27,12 +28,42 @@
         "command": "erst.exportTraceTree",
         "title": "ERST: Export Trace Tree (JSON/HTML)",
         "category": "ERST"
+      },
+      {
+        "command": "erst.showXdr",
+        "title": "ERST: Show XDR",
+        "category": "ERST"
+      },
+      {
+        "command": "erst.showStateDiff",
+        "title": "ERST: Show State Diff",
+        "category": "ERST"
+      },
+      {
+        "command": "erst.nextTraceStep",
+        "title": "ERST: Next Trace Step",
+        "category": "ERST"
+      },
+      {
+        "command": "erst.prevTraceStep",
+        "title": "ERST: Previous Trace Step",
+        "category": "ERST"
       }
     ],
     "keybindings": [
       {
         "command": "erst.exportTraceTree",
         "key": "e",
+        "when": "view == erst-traces && listFocus"
+      },
+      {
+        "command": "erst.nextTraceStep",
+        "key": "f10",
+        "when": "view == erst-traces && listFocus"
+      },
+      {
+        "command": "erst.prevTraceStep",
+        "key": "shift+f10",
         "when": "view == erst-traces && listFocus"
       }
     ],
@@ -45,57 +76,92 @@
         }
       ]
     },
-    "categories": [
-        "Debuggers"
-    ],
-    "activationEvents": [],
-    "main": "./out/extension.js",
-    "contributes": {
-        "commands": [
-            {
-                "command": "erst.triggerDebug",
-                "title": "ERST: Trigger Debug",
-                "category": "ERST"
-            }
-        ],
-        "viewsContainers": {
-            "activitybar": [
-                {
-                    "id": "erst-explorer",
-                    "title": "ERST",
-                    "icon": "$(debug-console)"
-                }
-            ]
-        },
-        "views": {
-            "erst-explorer": [
-                {
-                    "id": "erst-traces",
-                    "name": "Traces"
-                }
-            ]
+    "views": {
+      "erst-explorer": [
+        {
+          "id": "erst-traces",
+          "name": "Traces"
         }
-    },
-    "scripts": {
-        "vscode:prepublish": "npm run compile",
-        "compile": "tsc -p ./",
-        "watch": "tsc -watch -p ./",
-        "pretest": "npm run compile && npm run lint",
-        "lint": "eslint src --ext ts",
-        "test": "node ./out/test/runTest.js"
-    },
-    "dependencies": {
-        "vscode-jsonrpc": "^8.2.1"
-    },
-    "devDependencies": {
-        "@types/vscode": "^1.90.0",
-        "@types/node": "^20.0.0",
-        "@typescript-eslint/eslint-plugin": "^7.0.0",
-        "@typescript-eslint/parser": "^7.0.0",
-        "eslint": "^8.0.0",
-        "typescript": "^5.4.0",
-        "@vscode/test-electron": "^2.4.0"
+      ]
     }
+    },
+    "debuggers": [
+      {
+        "type": "erst",
+        "label": "ERST Debugger",
+        "languages": ["wasm", "rust"],
+        "enableBreakpointsFor": {
+          "languageIds": ["wasm", "rust"]
+        },
+        "configurationAttributes": {
+          "launch": {
+            "required": ["transactionHash"],
+            "properties": {
+              "transactionHash": {
+                "type": "string",
+                "description": "The Soroban transaction hash to debug",
+                "default": ""
+              },
+              "host": {
+                "type": "string",
+                "description": "ERST simulator host address",
+                "default": "127.0.0.1"
+              },
+              "port": {
+                "type": "number",
+                "description": "ERST simulator IPC port",
+                "default": 8080
+              }
+            }
+          },
+          "attach": {
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "ERST simulator host address",
+                "default": "127.0.0.1"
+              },
+              "port": {
+                "type": "number",
+                "description": "ERST simulator IPC port",
+                "default": 8080
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "erst",
+            "request": "launch",
+            "name": "ERST: Debug Transaction",
+            "transactionHash": "",
+            "host": "127.0.0.1",
+            "port": 8080
+          },
+          {
+            "type": "erst",
+            "request": "attach",
+            "name": "ERST: Attach to Simulator",
+            "host": "127.0.0.1",
+            "port": 8080
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "ERST: Debug Transaction",
+            "description": "Debug a Soroban smart contract execution trace",
+            "body": {
+              "type": "erst",
+              "request": "launch",
+              "name": "ERST: Debug Transaction",
+              "transactionHash": "${1:transaction_hash}",
+              "host": "127.0.0.1",
+              "port": 8080
+            }
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -110,12 +176,15 @@
     "vscode-jsonrpc": "^8.2.1"
   },
   "devDependencies": {
+    "@vscode/debugprotocol": "^1.73.0",
     "@types/vscode": "^1.90.0",
     "@types/node": "^20.0.0",
+    "@types/mocha": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.0.0",
     "typescript": "^5.4.0",
+    "mocha": "^10.4.0",
     "@vscode/test-electron": "^2.4.0"
   }
 }

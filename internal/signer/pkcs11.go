@@ -14,20 +14,20 @@ import (
 
 // PKCS#11 constants matching the Cryptoki specification.
 const (
-	ckfSerialSession = 0x04
-	ckuUser          = 1
+	ckfSerialSession = 0x04 //nolint:unused // PKCS#11 constant reserved for future implementation
+	ckuUser          = 1    //nolint:unused // PKCS#11 constant reserved for future implementation
 
-	ckoPrivateKey = 0x03
-	ckoPublicKey  = 0x02
+	ckoPrivateKey = 0x03 //nolint:unused // PKCS#11 constant reserved for future implementation
+	ckoPublicKey  = 0x02 //nolint:unused // PKCS#11 constant reserved for future implementation
 
-	ckaClass   = 0x00
-	ckaKeyType = 0x100
-	ckaLabel   = 0x03
-	ckaID      = 0x102
-	ckaECPoint = 0x181
+	ckaClass   = 0x00  //nolint:unused // PKCS#11 constant reserved for future implementation
+	ckaKeyType = 0x100 //nolint:unused // PKCS#11 constant reserved for future implementation
+	ckaLabel   = 0x03  //nolint:unused // PKCS#11 constant reserved for future implementation
+	ckaID      = 0x102 //nolint:unused // PKCS#11 constant reserved for future implementation
+	ckaECPoint = 0x181 //nolint:unused // PKCS#11 constant reserved for future implementation
 
 	ckmEDDSA = 0x1050
-	ckkEDDSA = 0x42
+	ckkEDDSA = 0x42 //nolint:unused // PKCS#11 constant reserved for future implementation
 
 	ckrOK = 0x00
 )
@@ -60,11 +60,11 @@ type Pkcs11Config struct {
 func Pkcs11ConfigFromEnv() (*Pkcs11Config, error) {
 	modulePath := os.Getenv("ERST_PKCS11_MODULE")
 	if modulePath == "" {
-		return nil, &SignerError{Op: "pkcs11", Msg: "ERST_PKCS11_MODULE is required"}
+		return nil, &Error{Op: "pkcs11", Msg: "ERST_PKCS11_MODULE is required"}
 	}
 	pin := os.Getenv("ERST_PKCS11_PIN")
 	if pin == "" {
-		return nil, &SignerError{Op: "pkcs11", Msg: "ERST_PKCS11_PIN is required"}
+		return nil, &Error{Op: "pkcs11", Msg: "ERST_PKCS11_PIN is required"}
 	}
 
 	return &Pkcs11Config{
@@ -77,7 +77,7 @@ func Pkcs11ConfigFromEnv() (*Pkcs11Config, error) {
 }
 
 // pkcs11Attribute mirrors CK_ATTRIBUTE.
-type pkcs11Attribute struct {
+type pkcs11Attribute struct { //nolint:unused // Reserved for future PKCS#11 implementation
 	typ    uint64
 	pValue unsafe.Pointer
 	ulLen  uint64
@@ -102,19 +102,19 @@ type Pkcs11Signer struct {
 	pubKey    []byte
 
 	// C_* function pointers resolved from the loaded library.
-	fnInitialize      func(unsafe.Pointer) uint64
-	fnFinalize        func(unsafe.Pointer) uint64
-	fnGetSlotList     func(bool, unsafe.Pointer, *uint64) uint64
-	fnGetTokenInfo    func(uint64, unsafe.Pointer) uint64
-	fnOpenSession     func(uint64, uint64, unsafe.Pointer, unsafe.Pointer, *uint64) uint64
+	fnInitialize      func(unsafe.Pointer) uint64                                          //nolint:unused // PKCS#11 function pointer reserved for future implementation
+	fnGetSlotList     func(bool, unsafe.Pointer, *uint64) uint64                           //nolint:unused // PKCS#11 function pointer reserved for future implementation
+	fnGetTokenInfo    func(uint64, unsafe.Pointer) uint64                                  //nolint:unused // PKCS#11 function pointer reserved for future implementation
+	fnOpenSession     func(uint64, uint64, unsafe.Pointer, unsafe.Pointer, *uint64) uint64 //nolint:unused // PKCS#11 function pointer reserved for future implementation
 	fnCloseSession    func(uint64) uint64
-	fnLogin           func(uint64, uint64, unsafe.Pointer, uint64) uint64
-	fnFindObjectsInit func(uint64, unsafe.Pointer, uint64) uint64
-	fnFindObjects     func(uint64, *uint64, uint64, *uint64) uint64
-	fnFindObjectsFin  func(uint64) uint64
+	fnLogin           func(uint64, uint64, unsafe.Pointer, uint64) uint64 //nolint:unused // PKCS#11 function pointer reserved for future implementation
+	fnFindObjectsInit func(uint64, unsafe.Pointer, uint64) uint64         //nolint:unused // PKCS#11 function pointer reserved for future implementation
+	fnFindObjects     func(uint64, *uint64, uint64, *uint64) uint64       //nolint:unused // PKCS#11 function pointer reserved for future implementation
+	fnFindObjectsFin  func(uint64) uint64                                 //nolint:unused // PKCS#11 function pointer reserved for future implementation
 	fnSignInit        func(uint64, unsafe.Pointer, uint64) uint64
 	fnSign            func(uint64, unsafe.Pointer, uint64, unsafe.Pointer, *uint64) uint64
-	fnGetAttrValue    func(uint64, uint64, unsafe.Pointer, uint64) uint64
+	fnGetAttrValue    func(uint64, uint64, unsafe.Pointer, uint64) uint64 //nolint:unused // PKCS#11 function pointer reserved for future implementation
+	fnFinalize        func(unsafe.Pointer) uint64
 }
 
 // NewPkcs11Signer opens a PKCS#11 session using the provided config,
@@ -128,7 +128,7 @@ type Pkcs11Signer struct {
 func NewPkcs11Signer(cfg Pkcs11Config) (*Pkcs11Signer, error) {
 	lib, err := plugin.Open(cfg.ModulePath)
 	if err != nil {
-		return nil, &SignerError{Op: "pkcs11", Msg: "failed to load PKCS#11 module", Err: err}
+		return nil, &Error{Op: "pkcs11", Msg: "failed to load PKCS#11 module", Err: err}
 	}
 
 	s := &Pkcs11Signer{
@@ -154,7 +154,7 @@ func (s *Pkcs11Signer) resolveFunctions() error {
 	lookup := func(name string) (plugin.Symbol, error) {
 		sym, err := s.lib.Lookup(name)
 		if err != nil {
-			return nil, &SignerError{Op: "pkcs11", Msg: fmt.Sprintf("symbol %s not found", name), Err: err}
+			return nil, &Error{Op: "pkcs11", Msg: fmt.Sprintf("symbol %s not found", name), Err: err}
 		}
 		return sym, nil
 	}
@@ -198,13 +198,13 @@ func (s *Pkcs11Signer) Sign(data []byte) ([]byte, error) {
 	defer s.mu.Unlock()
 
 	if s.fnSignInit == nil || s.fnSign == nil {
-		return nil, &SignerError{Op: "pkcs11", Msg: "PKCS#11 session not initialized"}
+		return nil, &Error{Op: "pkcs11", Msg: "PKCS#11 session not initialized"}
 	}
 
 	mech := pkcs11Mechanism{mechanism: ckmEDDSA}
 	rv := s.fnSignInit(s.session, unsafe.Pointer(&mech), s.keyHandle)
 	if rv != ckrOK {
-		return nil, &SignerError{Op: "pkcs11", Msg: fmt.Sprintf("C_SignInit failed: 0x%x", rv)}
+		return nil, &Error{Op: "pkcs11", Msg: fmt.Sprintf("C_SignInit failed: 0x%x", rv)}
 	}
 
 	sigLen := uint64(64) // Ed25519 signatures are 64 bytes
@@ -215,7 +215,7 @@ func (s *Pkcs11Signer) Sign(data []byte) ([]byte, error) {
 		unsafe.Pointer(&sig[0]), &sigLen,
 	)
 	if rv != ckrOK {
-		return nil, &SignerError{Op: "pkcs11", Msg: fmt.Sprintf("C_Sign failed: 0x%x", rv)}
+		return nil, &Error{Op: "pkcs11", Msg: fmt.Sprintf("C_Sign failed: 0x%x", rv)}
 	}
 
 	return sig[:sigLen], nil
@@ -225,7 +225,7 @@ func (s *Pkcs11Signer) Sign(data []byte) ([]byte, error) {
 // initialization.
 func (s *Pkcs11Signer) PublicKey() ([]byte, error) {
 	if len(s.pubKey) == 0 {
-		return nil, &SignerError{Op: "pkcs11", Msg: "public key not available"}
+		return nil, &Error{Op: "pkcs11", Msg: "public key not available"}
 	}
 	out := make([]byte, len(s.pubKey))
 	copy(out, s.pubKey)
@@ -253,7 +253,7 @@ func (s *Pkcs11Signer) Close() error {
 }
 
 // buildKeyTemplate constructs PKCS#11 search attributes from the config.
-func (s *Pkcs11Signer) buildKeyTemplate() ([]pkcs11Attribute, error) {
+func (s *Pkcs11Signer) buildKeyTemplate() ([]pkcs11Attribute, error) { //nolint:unused // Reserved for future PKCS#11 implementation
 	classVal := uint64(ckoPrivateKey)
 	keyTypeVal := uint64(ckkEDDSA)
 
@@ -274,7 +274,7 @@ func (s *Pkcs11Signer) buildKeyTemplate() ([]pkcs11Attribute, error) {
 	if s.config.KeyIDHex != "" {
 		idBytes, err := hex.DecodeString(s.config.KeyIDHex)
 		if err != nil {
-			return nil, &SignerError{Op: "pkcs11", Msg: "invalid key ID hex", Err: err}
+			return nil, &Error{Op: "pkcs11", Msg: "invalid key ID hex", Err: err}
 		}
 		attrs = append(attrs, pkcs11Attribute{
 			typ:    ckaID,

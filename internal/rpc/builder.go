@@ -5,7 +5,6 @@ package rpc
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 
@@ -16,27 +15,32 @@ import (
 type ClientOption func(*clientBuilder) error
 
 type clientBuilder struct {
-	network         Network
-	token           string
-	horizonURL      string
-	sorobanURL      string
-	altURLs         []string
-	cacheEnabled    bool
-	methodTelemetry MethodTelemetry
-	config          *NetworkConfig
-	httpClient      *http.Client
-	requestTimeout  time.Duration
-	middlewares     []Middleware
+	network          Network
+	token            string
+	horizonURL       string
+	sorobanURL       string
+	altURLs          []string
+	cacheEnabled     bool
+	methodTelemetry  MethodTelemetry
+	config           *NetworkConfig
+	httpClient       HTTPClient
+	requestTimeout   time.Duration
+	middlewares      []Middleware
+	loggingEnabled   bool
+	failureThreshold int
+	retryTimeout     int
 }
 
 const defaultHTTPTimeout = 15 * time.Second
 
 func newBuilder() *clientBuilder {
 	return &clientBuilder{
-		network:         Mainnet,
-		cacheEnabled:    true,
-		methodTelemetry: defaultMethodTelemetry(),
-		requestTimeout:  defaultHTTPTimeout,
+		network:          Mainnet,
+		cacheEnabled:     true,
+		methodTelemetry:  defaultMethodTelemetry(),
+		requestTimeout:   defaultHTTPTimeout,
+		failureThreshold: 5,
+		retryTimeout:     60,
 	}
 }
 
@@ -127,7 +131,7 @@ func WithRequestTimeout(d time.Duration) ClientOption {
 	}
 }
 
-func WithHTTPClient(client *http.Client) ClientOption {
+func WithHTTPClient(client HTTPClient) ClientOption {
 	return func(b *clientBuilder) error {
 		b.httpClient = client
 		return nil
@@ -149,6 +153,37 @@ func WithMethodTelemetry(telemetry MethodTelemetry) ClientOption {
 func WithMiddleware(middlewares ...Middleware) ClientOption {
 	return func(b *clientBuilder) error {
 		b.middlewares = append(b.middlewares, middlewares...)
+		return nil
+	}
+}
+
+// WithLoggingEnabled enables or disables the built-in LoggingMiddleware.
+// When enabled, every outbound HTTP request is logged at INFO level with its
+// method, URL, response status, and round-trip latency. The logging middleware
+// is always placed outermost so it observes the full logical request duration.
+func WithLoggingEnabled(enabled bool) ClientOption {
+	return func(b *clientBuilder) error {
+		b.loggingEnabled = enabled
+		return nil
+	}
+}
+
+// WithCircuitBreakerThreshold sets the number of failures before the circuit breaker opens.
+func WithCircuitBreakerThreshold(threshold int) ClientOption {
+	return func(b *clientBuilder) error {
+		if threshold > 0 {
+			b.failureThreshold = threshold
+		}
+		return nil
+	}
+}
+
+// WithCircuitBreakerTimeout sets the duration in seconds to wait before retrying a failed endpoint.
+func WithCircuitBreakerTimeout(timeout int) ClientOption {
+	return func(b *clientBuilder) error {
+		if timeout > 0 {
+			b.retryTimeout = timeout
+		}
 		return nil
 	}
 }
@@ -228,14 +263,6 @@ func (b *clientBuilder) build() (*Client, error) {
 		b.config = &cfg
 	}
 
-	if b.httpClient == nil {
-		b.httpClient = createHTTPClient(b.token, b.requestTimeout, b.middlewares...)
-	}
-
-	if len(b.altURLs) == 0 && b.horizonURL != "" {
-		b.altURLs = []string{b.horizonURL}
-	}
-
 	if b.horizonURL == "" {
 		b.horizonURL = b.config.HorizonURL
 	}
@@ -244,22 +271,35 @@ func (b *clientBuilder) build() (*Client, error) {
 		b.altURLs = []string{b.horizonURL}
 	}
 
+	if b.httpClient == nil {
+		mws := b.middlewares
+		if b.loggingEnabled {
+			// Prepend so the logging middleware is outermost in the chain,
+			// ensuring it captures the full round-trip including all user middlewares.
+			mws = append([]Middleware{NewLoggingMiddleware()}, mws...)
+		}
+		b.httpClient = createHTTPClient(b.token, b.requestTimeout, mws...)
+	}
+
 	return &Client{
 		HorizonURL: b.horizonURL,
 		Horizon: &horizonclient.Client{
 			HorizonURL: b.horizonURL,
 			HTTP:       b.httpClient,
 		},
-		Network:         b.network,
-		SorobanURL:      b.sorobanURL,
-		AltURLs:         b.altURLs,
-		httpClient:      b.httpClient,
-		token:           b.token,
-		Config:          *b.config,
-		CacheEnabled:    b.cacheEnabled,
-		methodTelemetry: b.methodTelemetry,
-		failures:        make(map[string]int),
-		lastFailure:     make(map[string]time.Time),
-		middlewares:     b.middlewares,
+		Network:          b.network,
+		SorobanURL:       b.sorobanURL,
+		AltURLs:          b.altURLs,
+		httpClient:       b.httpClient,
+		token:            b.token,
+		Config:           *b.config,
+		CacheEnabled:     b.cacheEnabled,
+		methodTelemetry:  b.methodTelemetry,
+		failures:         make(map[string]int),
+		lastFailure:      make(map[string]time.Time),
+		FailureThreshold: b.failureThreshold,
+		RetryTimeout:     b.retryTimeout,
+		middlewares:      b.middlewares,
+		healthCollector:  NewHealthCollector(),
 	}, nil
 }

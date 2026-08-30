@@ -5,7 +5,10 @@ package simulator
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -55,7 +58,7 @@ func TestRegressionTestSuite(t *testing.T) {
 
 		for i := 0; i < 5; i++ {
 			result := RegressionTestResult{
-				TransactionHash: "tx-" + string(rune(i)),
+				TransactionHash: fmt.Sprintf("tx-%d", i),
 				Status:          "pass",
 			}
 			suite.addResult(result)
@@ -102,12 +105,20 @@ func TestNewRegressionHarness(t *testing.T) {
 
 		assert.Equal(t, mockRunner, harness.Runner)
 		assert.Equal(t, 4, harness.MaxWorkers) // Default worker count
+		assert.Equal(t, DefaultTransactionTimeout, harness.TransactionTimeout)
 		assert.False(t, harness.Verbose)
 	})
 
 	t.Run("respects custom worker count", func(t *testing.T) {
 		harness := NewRegressionHarness(&MockRunner{}, nil, 8)
 		assert.Equal(t, 8, harness.MaxWorkers)
+		assert.Equal(t, DefaultTransactionTimeout, harness.TransactionTimeout)
+	})
+
+	t.Run("can set custom transaction timeout", func(t *testing.T) {
+		harness := NewRegressionHarness(&MockRunner{}, nil, 4)
+		harness.TransactionTimeout = 5 * time.Second
+		assert.Equal(t, 5*time.Second, harness.TransactionTimeout)
 	})
 }
 
@@ -174,21 +185,28 @@ func TestRegressionTestSuite_ConcurrentAddition(t *testing.T) {
 	}
 
 	// Simulate concurrent additions
-	done := make(chan bool, 100)
+	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
+		wg.Add(1)
 		go func(idx int) {
+			defer wg.Done()
+
 			result := RegressionTestResult{
-				TransactionHash: "tx-" + string(rune(idx)),
+				TransactionHash: fmt.Sprintf("tx-%d", idx),
 				Status:          "pass",
 			}
 			suite.addResult(result)
-			done <- true
 		}(i)
 	}
 
-	for i := 0; i < 100; i++ {
-		<-done
-	}
+	wg.Wait()
 
 	assert.Equal(t, 100, len(suite.Results))
+
+	seen := make(map[string]struct{}, len(suite.Results))
+	for _, result := range suite.Results {
+		seen[result.TransactionHash] = struct{}{}
+	}
+
+	assert.Equal(t, 100, len(seen))
 }
