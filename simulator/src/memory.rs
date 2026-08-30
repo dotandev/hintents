@@ -28,14 +28,18 @@ pub fn check_memory_limit(consumed: u64, limit: u64) {
 /// This function checks that the consumed memory does not exceed the limit,
 /// panicking if the limit would be surpassed. It is intended to be called
 /// per WASM page allocation to prevent rogue contracts from allocating
-//! beyond simulated limits before being caught.
+/// beyond simulated limits before being caught.
 ///
 /// # Panics
 ///
-/// Panics with a diagnostic message when `consumed > limit`.
+/// Panics with a diagnostic message when `consumed > limit` or `page_size` is zero.
 pub fn enforce_memory_limit_per_page(consumed: u64, limit: u64, page_size: u64) {
-    // Check if adding another page would exceed the limit
-    let current_pages = consumed / page_size;
+    if page_size == 0 {
+        panic!("ERR_MEMORY_LIMIT_EXCEEDED: page_size cannot be zero");
+    }
+    // Use ceiling division so that consumed > limit always panics,
+    // even when both values floor to the same number of pages.
+    let current_pages = (consumed + page_size - 1) / page_size;
     let max_pages = limit / page_size;
     if current_pages > max_pages {
         let exceeded_bytes = (current_pages - max_pages) * page_size;

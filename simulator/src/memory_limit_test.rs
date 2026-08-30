@@ -16,6 +16,7 @@
 #[cfg(test)]
 mod tests {
     use crate::host::AllocTracker;
+    use crate::memory;
     use crate::runner::SimHost;
 
     #[test]
