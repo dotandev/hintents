@@ -13,22 +13,27 @@
 //
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
+use once_cell::sync::Lazy;
 use serde_json::Value;
+
+/// The schema is embedded at compile time and parsed+compiled exactly once,
+/// on first use, instead of on every incoming request.
+static COMPILED_SCHEMA: Lazy<jsonschema::Validator> = Lazy::new(|| {
+    let schema_json = include_str!("../../../docs/schema/simulation-request.schema.json");
+    let schema: Value = serde_json::from_str(schema_json)
+        .unwrap_or_else(|e| panic!("invalid embedded schema JSON: {e}"));
+    jsonschema::validator_for(&schema)
+        .unwrap_or_else(|e| panic!("schema compilation failed: {e}"))
+});
 
 /// Validates JSON input against the simulation-request.schema.json
 #[allow(dead_code)]
 pub fn validate_request(input: &str) -> Result<Value, String> {
-    // include the schema at compile-time
-    let schema_json = include_str!("../../../docs/schema/simulation-request.schema.json");
-    let schema: Value =
-        serde_json::from_str(schema_json).map_err(|e| format!("invalid schema JSON: {}", e))?;
-    let compiled = jsonschema::validator_for(&schema)
-        .map_err(|e| format!("schema compilation failed: {}", e))?;
-
     // parse the incoming JSON
     let instance: Value = serde_json::from_str(input).map_err(|e| e.to_string())?;
 
-    // validate against the schema
+    // validate against the globally compiled schema (compiled once, lazily)
+    let compiled = &*COMPILED_SCHEMA;
     let errors: Vec<String> = compiled
         .iter_errors(&instance)
         .map(|e| e.to_string())
