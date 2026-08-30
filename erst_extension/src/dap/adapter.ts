@@ -42,7 +42,8 @@
 
 import * as vscode from 'vscode';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { ERSTClient, Trace, TraceStep } from '../erstClient';
+import { ERSTClient, Trace, TraceStep, WasmLocal } from '../erstClient';
+import { WasmLocalsExtractor } from './wasmLocalsExtractor';
 
 // ---------------------------------------------------------------------------
 // Variable Reference Registry
@@ -109,9 +110,17 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
     private stepBreakpoints: Set<number> = new Set();
     private isTerminated: boolean = false;
     private varRefs = new VariableRefRegistry();
+    private wasmLocalsExtractor: WasmLocalsExtractor = new WasmLocalsExtractor();
 
     constructor() {
         this.client = new ERSTClient('127.0.0.1', 8080);
+    }
+
+    /**
+     * Disposes the debug session resources.
+     */
+    dispose(): void {
+        this.cleanup();
     }
 
     // ------------------------------------------------------------------
@@ -724,6 +733,19 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
             presentationHint: 'locals',
         });
 
+        // WASM Locals scope - contains local variables from WASM debug info
+        const wasmLocalsData = this.extractWasmLocals(step);
+        if (wasmLocalsData && wasmLocalsData.length > 0) {
+            scopes.push({
+                name: 'WASM Locals',
+                variablesReference: this.varRefs.register(fid, 'wasmLocals', () => wasmLocalsData),
+                namedVariables: wasmLocalsData.length,
+                indexedVariables: 0,
+                expensive: false,
+                presentationHint: 'locals',
+            });
+        }
+
         // Arguments scope - contains function call arguments
         if (step.arguments !== undefined) {
             scopes.push({
@@ -950,6 +972,20 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
     // closures registered with `VariableRefRegistry` in `handleScopes`.
 
     /**
+     * Extracts WASM locals from the current trace step.
+     * Returns a formatted object suitable for display in the debugger.
+     */
+    private extractWasmLocals(step: TraceStep): WasmLocal[] | null {
+        if (!step.wasm_locals || step.wasm_locals.length === 0) {
+            // Try to extract locals using the WasmLocalsExtractor
+            const extractedLocals = this.wasmLocalsExtractor.extractLocalsFromStepData(step);
+            return extractedLocals.length > 0 ? extractedLocals : null;
+        }
+
+        return step.wasm_locals;
+    }
+
+    /**
      * Returns child variables for a nested object/array at the given reference.
      * Each child value that is itself an object/array gets a new variable reference
      * registered with the `varRefs` registry so it can be expanded further.
@@ -967,16 +1003,34 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
         if (Array.isArray(parentValue)) {
             for (let i = 0; i < parentValue.length; i++) {
                 const item = parentValue[i];
-                const childRef =
-                    item !== null && typeof item === 'object'
-                        ? this.varRefs.register(this.currentStepIndex, `array[${i}]`, () => item)
-                        : 0;
-                variables.push({
-                    name: `[${i}]`,
-                    value: this.formatValue(item),
-                    type: typeof item === 'object' && item !== null ? 'object' : typeof item,
-                    variablesReference: childRef,
-                });
+                
+                // Special handling for WasmLocal objects
+                if (item && typeof item === 'object' && 'name' in item && 'type' in item) {
+                    // This is a WasmLocal - display it with type information
+                    const wasmLocal = item as WasmLocal;
+                    const childRef =
+                        wasmLocal.value !== null && typeof wasmLocal.value === 'object'
+                            ? this.varRefs.register(this.currentStepIndex, `wasmLocal[${i}].value`, () => wasmLocal.value)
+                            : 0;
+                    variables.push({
+                        name: wasmLocal.name,
+                        value: this.formatValue(wasmLocal.value ?? wasmLocal.type),
+                        type: wasmLocal.type,
+                        variablesReference: childRef,
+                    });
+                } else {
+                    // Regular array item
+                    const childRef =
+                        item !== null && typeof item === 'object'
+                            ? this.varRefs.register(this.currentStepIndex, `array[${i}]`, () => item)
+                            : 0;
+                    variables.push({
+                        name: `[${i}]`,
+                        value: this.formatValue(item),
+                        type: typeof item === 'object' && item !== null ? 'object' : typeof item,
+                        variablesReference: childRef,
+                    });
+                }
             }
         } else {
             const entries = Object.entries(parentValue as Record<string, any>);
@@ -1030,8 +1084,18 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
         }
         if (typeof value === 'number') return String(value);
         if (typeof value === 'boolean') return String(value);
-        if (Array.isArray(value)) return `Array(${value.length})`;
+        if (Array.isArray(value)) {
+            // Check if it's an array of WasmLocals
+            if (value.length > 0 && typeof value[0] === 'object' && 'name' in value[0] && 'type' in value[0]) {
+                return `WASM Locals(${value.length})`;
+            }
+            return `Array(${value.length})`;
+        }
         if (typeof value === 'object') {
+            // Check if it's a WasmLocal object
+            if ('name' in value && 'type' in value && 'location' in value) {
+                return `${value.name}: ${value.type}`;
+            }
             const keys = Object.keys(value);
             return `Object(${keys.length})`;
         }
