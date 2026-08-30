@@ -13,6 +13,10 @@
 //! These utilities can be shared across different Soroban tools that need
 //! to reconstruct ledger state for simulation or analysis purposes.
 
+pub mod delta;
+
+pub use delta::{apply_delta, rollback_delta, MemoryChunkDelta, MemoryDelta};
+
 use base64::Engine;
 use bincode::Options;
 use serde::{Deserialize, Serialize};
@@ -232,6 +236,19 @@ impl LedgerSnapshot {
             Some(Some(entry)) => Some(entry), // live delta entry
             Some(None) => None,               // tombstoned in delta
             None => self.base.get(key),       // not overridden; check base
+        }
+    }
+
+    /// Removes an entry from the snapshot by key.
+    ///
+    /// Records a tombstone (`None`) in the delta layer if the key is present in `base`,
+    /// or removes it from `delta` if it was only present in `delta`.
+    #[allow(dead_code)]
+    pub fn remove(&mut self, key: &[u8]) {
+        if self.base.contains_key(key) {
+            self.delta.insert(key.to_vec(), None);
+        } else {
+            self.delta.remove(key);
         }
     }
 }
@@ -521,6 +538,45 @@ mod tests {
 
         let stats_with_failures = LoadStats::new(8, 2, 10);
         assert!(!stats_with_failures.is_complete());
+    }
+
+    #[test]
+    fn test_snapshot_remove_and_delta_isolation() {
+        let mut base_map = HashMap::new();
+        let key1 = vec![1, 2, 3];
+        let key2 = vec![4, 5, 6];
+        let entry1 = create_dummy_ledger_entry();
+        let entry2 = create_dummy_ledger_entry();
+
+        base_map.insert(key1.clone(), entry1.clone());
+        base_map.insert(key2.clone(), entry2.clone());
+
+        let mut snapshot = LedgerSnapshot {
+            base: Arc::new(base_map),
+            delta: HashMap::new(),
+        };
+
+        assert_eq!(snapshot.len(), 2);
+        assert!(snapshot.get(&key1).is_some());
+        assert!(snapshot.get(&key2).is_some());
+
+        // Remove key1 via delta tombstone
+        snapshot.remove(&key1);
+        assert_eq!(snapshot.len(), 1);
+        assert!(snapshot.get(&key1).is_none());
+        assert!(snapshot.get(&key2).is_some());
+
+        // Inserting a new key
+        let key3 = vec![7, 8, 9];
+        let entry3 = create_dummy_ledger_entry();
+        snapshot.insert(key3.clone(), entry3);
+        assert_eq!(snapshot.len(), 2);
+        assert!(snapshot.get(&key3).is_some());
+
+        // Removing key3 (which only exists in delta)
+        snapshot.remove(&key3);
+        assert_eq!(snapshot.len(), 1);
+        assert!(snapshot.get(&key3).is_none());
     }
 
     // Helper function to create a dummy ledger entry for testing
