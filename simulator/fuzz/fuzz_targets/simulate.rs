@@ -34,7 +34,7 @@
 
 use erst_sim::metering::{check_budget, install_fuzz_limits};
 use erst_sim::metering::{MeteringLimits, RunGuard, TrackingAllocator};
-use erst_sim::runner::SimHost;
+use erst_sim::runner::{HostConfig, SimHost};
 use erst_sim::snapshot::{decode_ledger_entry, decode_ledger_key, LedgerSnapshot};
 use libfuzzer_sys::fuzz_target;
 use soroban_env_host::xdr::{FeeBumpTransactionInnerTx, Limits, Operation};
@@ -88,7 +88,10 @@ fn invoke_envelope(payload: &[u8], limits: &MeteringLimits, guard: &RunGuard<'_>
         return;
     };
 
-    let host = SimHost::new(Some(limits.budget_limits()), None, Some(limits.mem_bytes));
+    let config = HostConfig::default()
+        .with_budget_limits(Some(limits.budget_limits()))
+        .with_memory_limit(Some(limits.mem_bytes));
+    let host = SimHost::new(config);
 
     for operation in operations(&envelope) {
         if guard.check().is_err() {

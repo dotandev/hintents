@@ -279,7 +279,7 @@ fn main() {
     };
 
     // Initialize Host
-    let sim_host = runner::SimHost::new(None);
+    let sim_host = runner::SimHost::new(runner::HostConfig::default());
     let host = sim_host.inner;
 
     let mut loaded_entries_count = 0;

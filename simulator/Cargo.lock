@@ -868,7 +868,7 @@ dependencies = [
  "libc",
  "libloading",
  "memmap2",
- "object",
+ "object 0.38.1",
  "once_cell",
  "pem-rfc7468",
  "pprof",

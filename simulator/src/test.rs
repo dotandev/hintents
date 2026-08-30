@@ -492,7 +492,7 @@ mod contract_execution_tests {
 
         // Create empty operations vector
         let operations: VecM<Operation, 100> = VecM::default();
-        let sim_host = crate::runner::SimHost::new(None, None, None);
+        let sim_host = crate::runner::SimHost::new(crate::runner::HostConfig::default());
         let mut coverage = CoverageTracker::default();
 
         // Should succeed with empty operations
