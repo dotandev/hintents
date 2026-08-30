@@ -23,6 +23,29 @@ pub fn check_memory_limit(consumed: u64, limit: u64) {
     }
 }
 
+/// Enforces strict per-page memory limit checking for WASM linear memory growth.
+///
+/// This function checks that the consumed memory does not exceed the limit,
+/// panicking if the limit would be surpassed. It is intended to be called
+/// per WASM page allocation to prevent rogue contracts from allocating
+//! beyond simulated limits before being caught.
+///
+/// # Panics
+///
+/// Panics with a diagnostic message when `consumed > limit`.
+pub fn enforce_memory_limit_per_page(consumed: u64, limit: u64, page_size: u64) {
+    // Check if adding another page would exceed the limit
+    let current_pages = consumed / page_size;
+    let max_pages = limit / page_size;
+    if current_pages > max_pages {
+        let exceeded_bytes = (current_pages - max_pages) * page_size;
+        panic!(
+            "ERR_MEMORY_LIMIT_EXCEEDED: consumed {consumed} bytes ({current_pages} pages), \
+             limit {limit} bytes ({max_pages} pages), exceeded by {exceeded_bytes} bytes"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
