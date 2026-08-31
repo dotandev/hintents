@@ -434,11 +434,12 @@ fn main() {
     tracing::info!(event = "simulator_started", "Simulator initializing...");
 
     let mut pprof_guard = profiler::PprofGuard::start(99);
+    let gas_tracker = profiler::GasTracker::new();
 
     let mut buffer = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut buffer) {
         let pprof_b64 = pprof_guard
-            .stop()
+            .stop_with_gas(&gas_tracker)
             .map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes));
         let res = SimulationResponse {
             status: "error".to_string(),
@@ -474,7 +475,7 @@ fn main() {
         Ok(req) => req,
         Err(e) => {
             let pprof_b64 = pprof_guard
-                .stop()
+                .stop_with_gas(&gas_tracker)
                 .map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes));
             let res = SimulationResponse {
                 status: "error".to_string(),
@@ -697,9 +698,21 @@ fn main() {
         None
     };
 
+    // Attribute the consumed budget to each operation so the profiler output
+    // exposes per-operation gas metrics for contract optimization.
+    if operations.is_empty() {
+        gas_tracker.record("transaction", cpu_insns, mem_bytes);
+    } else {
+        let per_operation_cpu = cpu_insns / operations.len() as u64;
+        let per_operation_mem = mem_bytes / operations.len() as u64;
+        for op in operations.as_slice() {
+            gas_tracker.record(op.body.name(), per_operation_cpu, per_operation_mem);
+        }
+    }
+
     let mut pprof_profile_b64 = None;
     if let Some(ref output_path) = request.pprof_output_path {
-        if let Some(bytes) = pprof_guard.stop() {
+        if let Some(bytes) = pprof_guard.stop_with_gas(&gas_tracker) {
             if let Err(e) = profiler::write_file(&bytes, output_path.as_ref()) {
                 eprintln!("Failed to write pprof file: {e}");
             } else {
