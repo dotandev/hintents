@@ -1,7 +1,7 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-//! Before/After snapshot capture around host function calls.
+//! Before/After snapshot capture and async execution around host function calls.
 //!
 //! Every host function invocation produces a paired snapshot:
 //! - **Before**: the ledger state immediately prior to the call
@@ -9,11 +9,17 @@
 //!
 //! If the host function traps, the After snapshot is still recorded with
 //! `trapped = true` so callers can inspect the state at the point of failure.
+//!
+//! Asynchronous execution helpers and mock latency configurations are provided
+//! to better mock network latency and external contract calls.
 
 #![allow(dead_code)]
 
 use crate::snapshot::LedgerSnapshot;
+use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
+use std::time::Duration;
 
 /// Unique identifier for a snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -55,12 +61,76 @@ pub struct CapturedSnapshot {
     pub trapped: bool,
 }
 
+/// Mock configuration for asynchronous host function execution (e.g. network latency and failures).
+#[derive(Debug, Clone, Default)]
+pub struct AsyncHostConfig {
+    /// Default latency applied to async host function calls if no specific latency is set.
+    pub default_latency: Option<Duration>,
+    /// Per-function latency overrides for simulating network latency on external contract or network calls.
+    pub function_latencies: HashMap<String, Duration>,
+    /// Per-function failure overrides to simulate network / remote host call errors.
+    pub simulated_errors: HashMap<String, String>,
+}
+
+impl AsyncHostConfig {
+    /// Creates a new empty async host configuration.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets default latency for all async host calls.
+    pub fn with_default_latency(mut self, latency: Duration) -> Self {
+        self.default_latency = Some(latency);
+        self
+    }
+
+    /// Sets latency for a specific host function name.
+    pub fn with_function_latency(mut self, host_fn_name: impl Into<String>, latency: Duration) -> Self {
+        self.function_latencies.insert(host_fn_name.into(), latency);
+        self
+    }
+
+    /// Sets simulated error for a specific host function name.
+    pub fn with_simulated_error(
+        mut self,
+        host_fn_name: impl Into<String>,
+        error_msg: impl Into<String>,
+    ) -> Self {
+        self.simulated_errors.insert(host_fn_name.into(), error_msg.into());
+        self
+    }
+
+    /// Returns the latency configured for the given host function name, if any.
+    pub fn get_latency(&self, host_fn_name: &str) -> Option<Duration> {
+        self.function_latencies
+            .get(host_fn_name)
+            .copied()
+            .or(self.default_latency)
+    }
+
+    /// Returns the simulated error configured for the given host function name, if any.
+    pub fn get_simulated_error(&self, host_fn_name: &str) -> Option<&str> {
+        self.simulated_errors.get(host_fn_name).map(String::as_str)
+    }
+}
+
+/// Result of an async host function invocation.
+#[derive(Debug)]
+pub struct AsyncHostCallResult<T, E> {
+    /// The return value or error from the function.
+    pub result: Result<T, E>,
+    /// The captured snapshot pair (before & after).
+    pub snapshot_pair: Option<SnapshotPair>,
+}
+
 /// Manages snapshot capture around host function calls.
 pub struct HostSnapshotTracker {
     next_id: u64,
     pairs: Vec<SnapshotPair>,
     /// Holds the "before" snapshot while a host function is in-flight.
     pending_before: Option<CapturedSnapshot>,
+    /// Configuration for async network mocking and latency.
+    async_config: AsyncHostConfig,
 }
 
 impl HostSnapshotTracker {
@@ -70,7 +140,28 @@ impl HostSnapshotTracker {
             next_id: 0,
             pairs: Vec::new(),
             pending_before: None,
+            async_config: AsyncHostConfig::default(),
         }
+    }
+
+    /// Creates a new tracker with the specified async configuration.
+    pub fn with_async_config(async_config: AsyncHostConfig) -> Self {
+        Self {
+            next_id: 0,
+            pairs: Vec::new(),
+            pending_before: None,
+            async_config,
+        }
+    }
+
+    /// Returns a reference to the tracker's async configuration.
+    pub fn async_config(&self) -> &AsyncHostConfig {
+        &self.async_config
+    }
+
+    /// Returns a mutable reference to the tracker's async configuration.
+    pub fn async_config_mut(&mut self) -> &mut AsyncHostConfig {
+        &mut self.async_config
     }
 
     /// Allocate the next snapshot ID.
@@ -124,6 +215,48 @@ impl HostSnapshotTracker {
         let pair = SnapshotPair { before, after };
         self.pairs.push(pair);
         self.pairs.last()
+    }
+
+    /// Executes an asynchronous host function call with snapshot tracking and optional latency simulation.
+    ///
+    /// This method:
+    /// 1. Takes a "before" snapshot of the ledger state.
+    /// 2. Simulates network latency if configured in `AsyncHostConfig`.
+    /// 3. Awaits the provided async host function future.
+    /// 4. Takes an "after" snapshot using `after_state_fn` (or the initial state if failed and no state provided),
+    ///    marking `trapped = true` if the future resolved to an `Err`.
+    ///
+    /// # Arguments
+    /// * `host_fn_name` - Name of the host function being called.
+    /// * `before_state` - Ledger snapshot before calling the function.
+    /// * `host_fn` - The asynchronous closure returning a future.
+    /// * `after_state_fn` - Closure to extract the resulting `LedgerSnapshot` after completion.
+    pub async fn execute_async<F, Fut, T, E, S>(
+        &mut self,
+        host_fn_name: &str,
+        before_state: LedgerSnapshot,
+        host_fn: F,
+        after_state_fn: S,
+    ) -> AsyncHostCallResult<T, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<T, E>>,
+        S: FnOnce(&Result<T, E>) -> (LedgerSnapshot, bool),
+    {
+        self.take_before_snapshot(host_fn_name, before_state);
+
+        if let Some(latency) = self.async_config.get_latency(host_fn_name) {
+            tokio::time::sleep(latency).await;
+        }
+
+        let result = host_fn().await;
+        let (after_state, trapped) = after_state_fn(&result);
+        let pair = self.take_after_snapshot(after_state, trapped).cloned();
+
+        AsyncHostCallResult {
+            result,
+            snapshot_pair: pair,
+        }
     }
 
     /// Returns all collected snapshot pairs.
@@ -266,4 +399,93 @@ mod tests {
         let id = SnapshotId(42);
         assert_eq!(format!("{}", id), "snap-42");
     }
+
+    #[tokio::test]
+    async fn test_async_host_execution_success() {
+        let mut tracker = HostSnapshotTracker::new();
+
+        let call_res = tracker
+            .execute_async(
+                "call_contract_remote",
+                empty_snapshot(),
+                || async {
+                    // Simulate async work (e.g. network call)
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    Ok::<u32, &'static str>(42)
+                },
+                |res| (empty_snapshot(), res.is_err()),
+            )
+            .await;
+
+        assert_eq!(call_res.result, Ok(42));
+        assert!(call_res.snapshot_pair.is_some());
+        let pair = call_res.snapshot_pair.unwrap();
+        assert_eq!(pair.before.host_fn_name, "call_contract_remote");
+        assert_eq!(pair.after.host_fn_name, "call_contract_remote");
+        assert!(!pair.after.trapped);
+        assert_eq!(tracker.pair_count(), 1);
+        assert!(!tracker.has_pending());
+    }
+
+    #[tokio::test]
+    async fn test_async_host_execution_trap() {
+        let mut tracker = HostSnapshotTracker::new();
+
+        let call_res = tracker
+            .execute_async(
+                "failing_remote_call",
+                empty_snapshot(),
+                || async {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    Err::<u32, &'static str>("network failure")
+                },
+                |res| (empty_snapshot(), res.is_err()),
+            )
+            .await;
+
+        assert_eq!(call_res.result, Err("network failure"));
+        assert!(call_res.snapshot_pair.is_some());
+        let pair = call_res.snapshot_pair.unwrap();
+        assert_eq!(pair.before.host_fn_name, "failing_remote_call");
+        assert!(pair.after.trapped);
+        assert_eq!(tracker.pair_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_async_host_latency_mocking() {
+        let config = AsyncHostConfig::new()
+            .with_default_latency(Duration::from_millis(5))
+            .with_function_latency("slow_external_contract", Duration::from_millis(30))
+            .with_simulated_error("unreachable_contract", "connection timeout");
+
+        let mut tracker = HostSnapshotTracker::with_async_config(config);
+
+        assert_eq!(
+            tracker.async_config().get_latency("slow_external_contract"),
+            Some(Duration::from_millis(30))
+        );
+        assert_eq!(
+            tracker.async_config().get_latency("normal_call"),
+            Some(Duration::from_millis(5))
+        );
+        assert_eq!(
+            tracker.async_config().get_simulated_error("unreachable_contract"),
+            Some("connection timeout")
+        );
+
+        let start = std::time::Instant::now();
+        let call_res = tracker
+            .execute_async(
+                "slow_external_contract",
+                empty_snapshot(),
+                || async { Ok::<&str, &str>("ok") },
+                |res| (empty_snapshot(), res.is_err()),
+            )
+            .await;
+
+        assert!(start.elapsed() >= Duration::from_millis(25));
+        assert_eq!(call_res.result, Ok("ok"));
+        assert_eq!(tracker.pair_count(), 1);
+    }
 }
+
