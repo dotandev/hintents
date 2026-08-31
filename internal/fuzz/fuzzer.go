@@ -4,15 +4,21 @@
 package fuzz
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	crypto_rand "crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"hash/fnv"
 	"math/rand"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dotandev/hintents/internal/logger"
@@ -33,6 +39,37 @@ type CorpusEntry struct {
 	ResultIdx   int
 	NewCoverage bool
 	Timestamp   time.Time
+}
+
+// DeepCopy returns a fully independent copy of the CorpusEntry.
+// Both the entry metadata and the underlying FuzzerInput are copied so that
+// callers cannot mutate internal fuzzer state through the returned value.
+func (ce *CorpusEntry) DeepCopy() *CorpusEntry {
+	cp := &CorpusEntry{
+		ResultIdx:   ce.ResultIdx,
+		NewCoverage: ce.NewCoverage,
+		Timestamp:   ce.Timestamp,
+	}
+
+	if ce.Input != nil {
+		cp.Input = ce.Input.DeepCopy()
+	}
+
+	if ce.Coverage != nil {
+		covCopy := &CoverageMap{
+			totalCoverage: ce.Coverage.totalCoverage,
+			timestamp:     ce.Coverage.timestamp,
+		}
+		if ce.Coverage.coveredLines != nil {
+			covCopy.coveredLines = make(map[string]bool, len(ce.Coverage.coveredLines))
+			for k, v := range ce.Coverage.coveredLines {
+				covCopy.coveredLines[k] = v
+			}
+		}
+		cp.Coverage = covCopy
+	}
+
+	return cp
 }
 
 // CoverageGuidedFuzzer implements a coverage-guided fuzzer for Stellar contracts
@@ -56,30 +93,118 @@ type FuzzerConfig struct {
 	CoverageSampleRate float64 // 0.0-1.0: probability of recording coverage
 	MutationStrategies []MutationStrategy
 	EnableCoverage     bool
+	CoverageParser     CoverageParser
+	Concurrency        int
 	TargetContractID   string
 	Seed               int64
 	VerboseLogging     bool
 }
 
+// CoverageParser parses coverage data returned by the simulator.
+type CoverageParser interface {
+	Parse(report string) *CoverageMap
+}
+
 // MutationStrategy defines how inputs are mutated
-type MutationStrategy string
+type MutationStrategy interface {
+	Mutate(input *simulator.FuzzerInput, rng *rand.Rand)
+}
 
-const (
-	// Bitflip mutations flip random bits
-	StrategyBitflip MutationStrategy = "bitflip"
+// BitflipStrategy flips random bits
+type BitflipStrategy struct{}
 
-	// ByteFlip mutations alter entire bytes
-	StrategyByteFlip MutationStrategy = "byteflip"
+func (s *BitflipStrategy) Mutate(input *simulator.FuzzerInput, rng *rand.Rand) {
+	if len(input.EnvelopeXdr) > 0 {
+		data, _ := hex.DecodeString(input.EnvelopeXdr)
+		if len(data) > 0 {
+			flipCount := 1 + rng.Intn(4)
+			for i := 0; i < flipCount; i++ {
+				pos := rng.Intn(len(data))
+				bit := uint8(1 << (rng.Intn(8)))
+				data[pos] ^= bit
+			}
+			input.EnvelopeXdr = hex.EncodeToString(data)
+		}
+	}
 
-	// Interesting mutations use interesting byte values
-	StrategyInteresting MutationStrategy = "interesting"
+	// Mutate ledger entries
+	for k, v := range input.LedgerEntries {
+		if rng.Float64() < 0.5 {
+			input.LedgerEntries[k] = bitflipHexString(v, rng)
+		}
+	}
+}
 
-	// Dictionary mutations use known keywords
-	StrategyDictionary MutationStrategy = "dictionary"
+func bitflipHexString(hexStr string, rng *rand.Rand) string {
+	data, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return hexStr
+	}
 
-	// Havoc performs random mutations
-	StrategyHavoc MutationStrategy = "havoc"
-)
+	flipCount := 1 + rng.Intn(3)
+	for i := 0; i < flipCount; i++ {
+		if len(data) == 0 {
+			break
+		}
+		pos := rng.Intn(len(data))
+		bit := uint8(1 << (rng.Intn(8)))
+		data[pos] ^= bit
+	}
+
+	return hex.EncodeToString(data)
+}
+
+// ByteflipStrategy flips entire bytes
+type ByteflipStrategy struct{}
+
+func (s *ByteflipStrategy) Mutate(input *simulator.FuzzerInput, rng *rand.Rand) {
+	if len(input.EnvelopeXdr) > 0 {
+		data, _ := hex.DecodeString(input.EnvelopeXdr)
+		if len(data) > 0 {
+			flipCount := 1 + rng.Intn(3)
+			for i := 0; i < flipCount; i++ {
+				pos := rng.Intn(len(data))
+				data[pos] = byte(rng.Intn(256))
+			}
+			input.EnvelopeXdr = hex.EncodeToString(data)
+		}
+	}
+}
+
+// InterestingStrategy uses interesting byte values
+type InterestingStrategy struct{}
+
+func (s *InterestingStrategy) Mutate(input *simulator.FuzzerInput, rng *rand.Rand) {
+	interestingBytes := []byte{
+		0x00, 0x01, 0x7f, 0x80, 0xff, // Common edge cases
+		0x42, 0x43, // Useful for strings
+	}
+
+	if len(input.EnvelopeXdr) > 0 {
+		data, _ := hex.DecodeString(input.EnvelopeXdr)
+		if len(data) > 0 {
+			pos := rng.Intn(len(data))
+			data[pos] = interestingBytes[rng.Intn(len(interestingBytes))]
+			input.EnvelopeXdr = hex.EncodeToString(data)
+		}
+	}
+}
+
+// HavocStrategy applies random mutations using a set of provided strategies
+type HavocStrategy struct {
+	Strategies []MutationStrategy
+}
+
+func (s *HavocStrategy) Mutate(input *simulator.FuzzerInput, rng *rand.Rand) {
+	if len(s.Strategies) == 0 {
+		return
+	}
+	mutationCount := 1 + rng.Intn(5)
+	for i := 0; i < mutationCount; i++ {
+		strategy := s.Strategies[rng.Intn(len(s.Strategies))]
+		strategy.Mutate(input, rng)
+	}
+}
 
 // NewCoverageGuidedFuzzer creates a new coverage-guided fuzzer
 func NewCoverageGuidedFuzzer(runner simulator.RunnerInterface, config FuzzerConfig) *CoverageGuidedFuzzer {
@@ -95,18 +220,34 @@ func NewCoverageGuidedFuzzer(runner simulator.RunnerInterface, config FuzzerConf
 	if config.CoverageSampleRate == 0 {
 		config.CoverageSampleRate = 0.1 // 10% default
 	}
+	if config.Concurrency <= 0 {
+		config.Concurrency = 1
+	}
 	if len(config.MutationStrategies) == 0 {
-		config.MutationStrategies = []MutationStrategy{
-			StrategyBitflip,
-			StrategyByteFlip,
-			StrategyInteresting,
-			StrategyHavoc,
+		baseStrategies := []MutationStrategy{
+			&BitflipStrategy{},
+			&ByteflipStrategy{},
+			&InterestingStrategy{},
 		}
+		config.MutationStrategies = []MutationStrategy{
+			&BitflipStrategy{},
+			&ByteflipStrategy{},
+			&InterestingStrategy{},
+			&HavocStrategy{Strategies: baseStrategies},
+		}
+	}
+	if config.CoverageParser == nil {
+		config.CoverageParser = &LCOVCoverageParser{}
 	}
 
 	seed := config.Seed
 	if seed == 0 {
-		seed = time.Now().UnixNano()
+		var b [8]byte
+		if _, err := crypto_rand.Read(b[:]); err == nil {
+			seed = int64(binary.LittleEndian.Uint64(b[:]))
+		} else {
+			seed = time.Now().UnixNano()
+		}
 	}
 
 	return &CoverageGuidedFuzzer{
@@ -126,6 +267,10 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 		return nil, fmt.Errorf("seed input required for fuzzing")
 	}
 
+	if err := validateSimulatorInput(seedInput); err != nil {
+		return nil, err
+	}
+
 	stats := &FuzzingStats{
 		StartTime: time.Now(),
 	}
@@ -133,44 +278,101 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 	// Add seed input to corpus
 	f.addToCorpus(ctx, seedInput, nil)
 
-	// Main fuzzing loop
-	for i := uint64(0); i < f.config.MaxIterations && ctx.Err() == nil; i++ {
-		// Select corpus entry for mutation (favor entries with recent coverage gains)
-		entry := f.selectCorpusEntry()
-		if entry == nil {
-			break
-		}
+	var wg sync.WaitGroup
+	var crashCount uint64
+	var newCoverageCount uint64
+	errChan := make(chan error, f.config.Concurrency)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-		// Mutate the selected input
-		mutated := f.mutateInput(entry.Input)
+	for i := 0; i < f.config.Concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 
-		// Run the simulator
-		result, coverage := f.executeInput(ctx, &mutated)
+			var workerCoveragePath string
+			if f.config.EnableCoverage {
+				tmpFile, err := os.CreateTemp("", "erst-fuzz-worker-*.lcov")
+				if err == nil {
+					workerCoveragePath = tmpFile.Name()
+					tmpFile.Close()
+					defer os.Remove(workerCoveragePath)
+				}
+			}
 
-		// Track crashes
-		if result.Status == "crash" {
-			f.mu.Lock()
-			f.crashingInputs = append(f.crashingInputs, &mutated)
-			f.mu.Unlock()
-			stats.CrashCount++
-		}
+			for ctx.Err() == nil {
+				currentIt := atomic.AddUint64(&f.executionCount, 1)
+				if currentIt > f.config.MaxIterations {
+					break
+				}
 
-		// Update corpus if new coverage found
-		newCoverage := f.addToCorpus(ctx, &mutated, coverage)
-		if newCoverage {
-			stats.NewCoverageCount++
-			f.lastCoverageGrow = time.Now()
-		}
+				// Select corpus entry for mutation (favor entries with recent coverage gains)
+				entry := f.selectCorpusEntry()
+				if entry == nil {
+					break
+				}
 
-		f.mu.Lock()
-		f.executionCount++
-		f.mu.Unlock()
-		stats.ExecutionCount = f.executionCount
+				if err := validateSimulatorInput(entry.Input); err != nil {
+					select {
+					case errChan <- fmt.Errorf("invalid corpus input: %w", err):
+					default:
+					}
+					cancel()
+					break
+				}
 
-		// Log progress periodically
-		if f.config.VerboseLogging && (i+1)%100 == 0 {
-			f.logProgress(i + 1)
-		}
+				// Mutate the selected input
+				mutated := f.mutateInput(entry.Input)
+				if err := validateSimulatorInput(&mutated); err != nil {
+					select {
+					case errChan <- fmt.Errorf("invalid mutated input: %w", err):
+					default:
+					}
+					cancel()
+					break
+				}
+
+				// Run the simulator
+				result, coverage := f.executeInput(ctx, &mutated, workerCoveragePath)
+
+				// Track crashes
+				if result.Status == "crash" {
+					f.mu.Lock()
+					f.crashingInputs = append(f.crashingInputs, &mutated)
+					f.mu.Unlock()
+					atomic.AddUint64(&crashCount, 1)
+				}
+
+				// Update corpus if new coverage found
+				newCoverage := f.addToCorpus(ctx, &mutated, coverage)
+				if newCoverage {
+					atomic.AddUint64(&newCoverageCount, 1)
+					f.mu.Lock()
+					f.lastCoverageGrow = time.Now()
+					f.mu.Unlock()
+				}
+
+				// Log progress periodically
+				if f.config.VerboseLogging && currentIt%100 == 0 {
+					f.logProgress(currentIt)
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	select {
+	case err := <-errChan:
+		return nil, err
+	default:
+	}
+
+	stats.CrashCount = crashCount
+	stats.NewCoverageCount = newCoverageCount
+	stats.ExecutionCount = atomic.LoadUint64(&f.executionCount)
+	if stats.ExecutionCount > f.config.MaxIterations {
+		stats.ExecutionCount = f.config.MaxIterations
 	}
 
 	stats.EndTime = time.Now()
@@ -179,6 +381,14 @@ func (f *CoverageGuidedFuzzer) Run(ctx context.Context, seedInput *simulator.Fuz
 	stats.UniqueInputsCount = len(f.corpus)
 
 	return stats, nil
+}
+
+func validateSimulatorInput(input *simulator.FuzzerInput) error {
+	if input == nil {
+		return fmt.Errorf("fuzzer input required")
+	}
+
+	return input.Validate()
 }
 
 // addToCorpus adds an input to the corpus if it improves coverage
@@ -291,120 +501,17 @@ func (f *CoverageGuidedFuzzer) mutateInput(base *simulator.FuzzerInput) simulato
 	}
 	copy(mutated.Args, base.Args)
 
-	// Select a random mutation strategy
-	strategy := f.config.MutationStrategies[rng.Intn(len(f.config.MutationStrategies))]
-
 	// Apply mutations
-	switch strategy {
-	case StrategyBitflip:
-		f.applyBitflipMutation(&mutated, rng)
-	case StrategyByteFlip:
-		f.applyByteflipMutation(&mutated, rng)
-	case StrategyInteresting:
-		f.applyInterestingMutation(&mutated, rng)
-	case StrategyHavoc:
-		f.applyHavocMutation(&mutated, rng)
-	default:
-		f.applyBitflipMutation(&mutated, rng)
+	if len(f.config.MutationStrategies) > 0 {
+		strategy := f.config.MutationStrategies[rng.Intn(len(f.config.MutationStrategies))]
+		strategy.Mutate(&mutated, rng)
 	}
 
 	return mutated
 }
 
-// applyBitflipMutation flips random bits in the input
-func (f *CoverageGuidedFuzzer) applyBitflipMutation(input *simulator.FuzzerInput, rng *rand.Rand) {
-	if len(input.EnvelopeXdr) > 0 {
-		data, _ := hex.DecodeString(input.EnvelopeXdr)
-		if len(data) > 0 {
-			flipCount := 1 + rng.Intn(4)
-			for i := 0; i < flipCount; i++ {
-				pos := rng.Intn(len(data))
-				bit := uint8(1 << (rng.Intn(8)))
-				data[pos] ^= bit
-			}
-			input.EnvelopeXdr = hex.EncodeToString(data)
-		}
-	}
-
-	// Mutate ledger entries
-	for k, v := range input.LedgerEntries {
-		if rng.Float64() < 0.5 {
-			input.LedgerEntries[k] = f.bitflipHexString(v, rng)
-		}
-	}
-}
-
-// applyByteflipMutation flips entire bytes in the input
-func (f *CoverageGuidedFuzzer) applyByteflipMutation(input *simulator.FuzzerInput, rng *rand.Rand) {
-	if len(input.EnvelopeXdr) > 0 {
-		data, _ := hex.DecodeString(input.EnvelopeXdr)
-		if len(data) > 0 {
-			flipCount := 1 + rng.Intn(3)
-			for i := 0; i < flipCount; i++ {
-				pos := rng.Intn(len(data))
-				data[pos] = byte(rng.Intn(256))
-			}
-			input.EnvelopeXdr = hex.EncodeToString(data)
-		}
-	}
-}
-
-// applyInterestingMutation uses known interesting byte values
-func (f *CoverageGuidedFuzzer) applyInterestingMutation(input *simulator.FuzzerInput, rng *rand.Rand) {
-	interestingBytes := []byte{
-		0x00, 0x01, 0x7f, 0x80, 0xff, // Common edge cases
-		0x42, 0x43, // Useful for strings
-	}
-
-	if len(input.EnvelopeXdr) > 0 {
-		data, _ := hex.DecodeString(input.EnvelopeXdr)
-		if len(data) > 0 {
-			pos := rng.Intn(len(data))
-			data[pos] = interestingBytes[rng.Intn(len(interestingBytes))]
-			input.EnvelopeXdr = hex.EncodeToString(data)
-		}
-	}
-}
-
-// applyHavocMutation applies random mutations
-func (f *CoverageGuidedFuzzer) applyHavocMutation(input *simulator.FuzzerInput, rng *rand.Rand) {
-	// Apply 1-5 random mutations
-	mutationCount := 1 + rng.Intn(5)
-	for i := 0; i < mutationCount; i++ {
-		choice := rng.Intn(3)
-		switch choice {
-		case 0:
-			f.applyBitflipMutation(input, rng)
-		case 1:
-			f.applyByteflipMutation(input, rng)
-		case 2:
-			f.applyInterestingMutation(input, rng)
-		}
-	}
-}
-
-// bitflipHexString applies bitflip mutations to a hex string
-func (f *CoverageGuidedFuzzer) bitflipHexString(hexStr string, rng *rand.Rand) string {
-	data, err := hex.DecodeString(hexStr)
-	if err != nil {
-		return hexStr
-	}
-
-	flipCount := 1 + rng.Intn(3)
-	for i := 0; i < flipCount; i++ {
-		if len(data) == 0 {
-			break
-		}
-		pos := rng.Intn(len(data))
-		bit := uint8(1 << (rng.Intn(8)))
-		data[pos] ^= bit
-	}
-
-	return hex.EncodeToString(data)
-}
-
 // executeInput runs a single input through the simulator
-func (f *CoverageGuidedFuzzer) executeInput(ctx context.Context, input *simulator.FuzzerInput) (*simulator.FuzzingResult, *CoverageMap) {
+func (f *CoverageGuidedFuzzer) executeInput(ctx context.Context, input *simulator.FuzzerInput, coveragePath string) (*simulator.FuzzingResult, *CoverageMap) {
 	result := &simulator.FuzzingResult{
 		Seed:   input.Seed,
 		Status: "pass",
@@ -420,18 +527,8 @@ func (f *CoverageGuidedFuzzer) executeInput(ctx context.Context, input *simulato
 
 	if f.config.EnableCoverage {
 		simReq.EnableCoverage = true
-		if simReq.CoverageLCOVPath == nil {
-			tmpFile, err := os.CreateTemp("", "erst-fuzz-*.lcov")
-			if err != nil {
-				result.Status = "error"
-				result.ErrorMessage = fmt.Sprintf("failed to create coverage temp file: %v", err)
-				result.ExecutionTimeMs = 0
-				return result, nil
-			}
-			coveragePath := tmpFile.Name()
-			_ = tmpFile.Close()
+		if simReq.CoverageLCOVPath == nil && coveragePath != "" {
 			simReq.CoverageLCOVPath = &coveragePath
-			defer os.Remove(coveragePath)
 		}
 	}
 
@@ -472,8 +569,9 @@ func (f *CoverageGuidedFuzzer) extractCoverage(input *simulator.FuzzerInput) *Co
 	}
 
 	hash := f.computeInputHash(input)
-	coverage.totalCoverage = uint32(len(hash)) * 8
-	coverage.coveredLines[hash] = true
+	hashStr := strconv.FormatUint(hash, 16)
+	coverage.totalCoverage = uint32(len(hashStr)) * 8
+	coverage.coveredLines[hashStr] = true
 
 	return coverage
 }
@@ -485,45 +583,57 @@ func (f *CoverageGuidedFuzzer) extractCoverageFromResponse(resp *simulator.Simul
 	}
 
 	if resp.LCOVReport != "" {
-		return f.parseLCOVReport(resp.LCOVReport)
+		return f.config.CoverageParser.Parse(resp.LCOVReport)
 	}
 
 	if resp.LCOVReportPath != "" {
 		content, err := os.ReadFile(resp.LCOVReportPath)
 		if err == nil {
-			return f.parseLCOVReport(string(content))
+			return f.config.CoverageParser.Parse(string(content))
 		}
 	}
 
 	return &CoverageMap{coveredLines: make(map[string]bool), timestamp: time.Now()}
 }
 
-func (f *CoverageGuidedFuzzer) parseLCOVReport(report string) *CoverageMap {
+// LCOVCoverageParser parses LCOV format coverage reports.
+type LCOVCoverageParser struct{}
+
+func (p *LCOVCoverageParser) Parse(report string) *CoverageMap {
 	coverage := &CoverageMap{
 		coveredLines: make(map[string]bool),
 		timestamp:    time.Now(),
 	}
 
-	for _, line := range strings.Split(report, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "DA:") {
+	scanner := bufio.NewScanner(strings.NewReader(report))
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		// Trim whitespace
+		line = bytes.TrimSpace(line)
+
+		if !bytes.HasPrefix(line, []byte("DA:")) {
 			continue
 		}
 
-		parts := strings.SplitN(line[3:], ",", 2)
-		if len(parts) != 2 {
+		// Get part after DA:
+		rest := line[3:]
+		commaIdx := bytes.IndexByte(rest, ',')
+		if commaIdx == -1 {
 			continue
 		}
 
-		lineNum := strings.TrimSpace(parts[0])
-		countStr := strings.TrimSpace(parts[1])
-		count, err := strconv.Atoi(countStr)
+		// Extract line num part (trim whitespace)
+		lineNumPart := bytes.TrimSpace(rest[:commaIdx])
+		// Extract count part (trim whitespace)
+		countPart := bytes.TrimSpace(rest[commaIdx+1:])
+
+		count, err := strconv.Atoi(string(countPart))
 		if err != nil {
 			continue
 		}
 
 		if count > 0 {
-			coverage.coveredLines[lineNum] = true
+			coverage.coveredLines[string(lineNumPart)] = true
 			coverage.totalCoverage++
 		}
 	}
@@ -531,10 +641,19 @@ func (f *CoverageGuidedFuzzer) parseLCOVReport(report string) *CoverageMap {
 	return coverage
 }
 
-// computeInputHash creates a simple hash of the input
-func (f *CoverageGuidedFuzzer) computeInputHash(input *simulator.FuzzerInput) string {
-	return fmt.Sprintf("%s_%d_%d", input.EnvelopeXdr[:min(32, len(input.EnvelopeXdr))],
-		input.Timestamp, len(input.LedgerEntries))
+// computeInputHash creates a fast non-cryptographic hash of the input
+func (f *CoverageGuidedFuzzer) computeInputHash(input *simulator.FuzzerInput) uint64 {
+	h := fnv.New64a()
+	h.Write([]byte(input.EnvelopeXdr[:min(32, len(input.EnvelopeXdr))]))
+
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], uint64(input.Timestamp))
+	h.Write(buf[:])
+
+	binary.LittleEndian.PutUint64(buf[:], uint64(len(input.LedgerEntries)))
+	h.Write(buf[:])
+
+	return h.Sum64()
 }
 
 // min returns the minimum of two integers
@@ -564,23 +683,29 @@ func (f *CoverageGuidedFuzzer) logProgress(iteration uint64) {
 	)
 }
 
-// GetCrashingInputs returns all inputs that caused crashes
+// GetCrashingInputs returns deep copies of all inputs that caused crashes.
+// Callers may freely mutate the returned values without affecting internal state.
 func (f *CoverageGuidedFuzzer) GetCrashingInputs() []*simulator.FuzzerInput {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
 	result := make([]*simulator.FuzzerInput, len(f.crashingInputs))
-	copy(result, f.crashingInputs)
+	for i, input := range f.crashingInputs {
+		result[i] = input.DeepCopy()
+	}
 	return result
 }
 
-// GetCorpus returns a copy of the current corpus
+// GetCorpus returns deep copies of the current corpus entries.
+// Callers may freely mutate the returned values without affecting internal state.
 func (f *CoverageGuidedFuzzer) GetCorpus() []*CorpusEntry {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
 	result := make([]*CorpusEntry, len(f.corpus))
-	copy(result, f.corpus)
+	for i, entry := range f.corpus {
+		result[i] = entry.DeepCopy()
+	}
 	return result
 }
 
@@ -605,7 +730,7 @@ func (f *CoverageGuidedFuzzer) CoverageStats() CoverageStatistics {
 		CorpusSize:          len(f.corpus),
 		UniqueCoverageCount: len(f.coverageMap),
 		CrashCount:          len(f.crashingInputs),
-		ExecutionCount:      f.executionCount,
+		ExecutionCount:      atomic.LoadUint64(&f.executionCount),
 	}
 
 	// Calculate max coverage

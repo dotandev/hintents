@@ -2,10 +2,13 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": ".",
-    "types": ["jest", "node"]
+    "outDir": "./dist-test",
+    "types": ["jest", "node"],
+    "paths": {}
   },
   "include": [
     "src/**/*",
-    "tests/**/*"
+    "tests/**/*",
+    "erst-ui/src/**/*"
   ]
 }

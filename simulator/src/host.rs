@@ -175,7 +175,18 @@ impl HostSnapshotTracker {
     ///
     /// Takes a snapshot of the current ledger state and stores it as
     /// the pending "before" snapshot.
-    pub fn take_before_snapshot(&mut self, host_fn_name: &str, state: LedgerSnapshot) {
+    ///
+    /// If an [`AllocTracker`] is configured, the current memory consumption
+    /// is recorded as the snapshot baseline.
+    pub fn take_before_snapshot(
+        &mut self,
+        host_fn_name: &str,
+        state: LedgerSnapshot,
+        memory_bytes: Option<u64>,
+    ) {
+        if let (Some(tracker), Some(mem)) = (self.alloc_tracker.as_mut(), memory_bytes) {
+            tracker.snapshot(mem);
+        }
         let id = self.next_snapshot_id();
         self.pending_before = Some(CapturedSnapshot {
             id,
@@ -195,14 +206,23 @@ impl HostSnapshotTracker {
     /// # Arguments
     /// * `state` - The ledger state after the host function returned.
     /// * `trapped` - Whether the host function trapped/failed.
+    /// * `restored_memory_bytes` - If provided and an [`AllocTracker`] is
+    ///   configured, records a rollback with the restored memory consumption.
+    ///   Supply this when the "after" snapshot was produced by a rollback.
     pub fn take_after_snapshot(
         &mut self,
         state: LedgerSnapshot,
         trapped: bool,
+        restored_memory_bytes: Option<u64>,
     ) -> Option<&SnapshotPair> {
         let before = self.pending_before.take()?;
         let before_id = before.id;
         let after_id = self.next_snapshot_id();
+
+        // If this after-snapshot corresponds to a rollback, notify the tracker.
+        if let (Some(tracker), Some(mem)) = (self.alloc_tracker.as_mut(), restored_memory_bytes) {
+            tracker.record_rollback(mem);
+        }
 
         let after = CapturedSnapshot {
             id: after_id,
@@ -280,6 +300,16 @@ impl HostSnapshotTracker {
     pub fn discard_pending(&mut self) -> Option<CapturedSnapshot> {
         self.pending_before.take()
     }
+
+    /// Rewinds the tracker to a specific instruction pointer.
+    pub fn rewind_to(&mut self, instruction_pointer: u32) -> Option<LedgerSnapshot> {
+        for pair in &self.pairs {
+            if pair.before.id.as_u64() == instruction_pointer as u64 {
+                return Some(pair.before.state.clone());
+            }
+        }
+        None
+    }
 }
 
 impl Default for HostSnapshotTracker {
@@ -300,11 +330,11 @@ mod tests {
     fn test_basic_before_after_pair() {
         let mut tracker = HostSnapshotTracker::new();
 
-        tracker.take_before_snapshot("storage_put", empty_snapshot());
+        tracker.take_before_snapshot("storage_put", empty_snapshot(), None);
         assert!(tracker.has_pending());
 
         let pair = tracker
-            .take_after_snapshot(empty_snapshot(), false)
+            .take_after_snapshot(empty_snapshot(), false, None)
             .expect("should produce a pair");
 
         assert_eq!(pair.before.host_fn_name, "storage_put");
@@ -318,9 +348,9 @@ mod tests {
     fn test_trapped_host_function() {
         let mut tracker = HostSnapshotTracker::new();
 
-        tracker.take_before_snapshot("storage_get", empty_snapshot());
+        tracker.take_before_snapshot("storage_get", empty_snapshot(), None);
         let pair = tracker
-            .take_after_snapshot(empty_snapshot(), true)
+            .take_after_snapshot(empty_snapshot(), true, None)
             .expect("should produce a pair");
 
         assert!(pair.after.trapped);
@@ -330,7 +360,7 @@ mod tests {
     #[test]
     fn test_after_without_before_is_noop() {
         let mut tracker = HostSnapshotTracker::new();
-        let result = tracker.take_after_snapshot(empty_snapshot(), false);
+        let result = tracker.take_after_snapshot(empty_snapshot(), false, None);
         assert!(result.is_none());
     }
 
@@ -338,14 +368,14 @@ mod tests {
     fn test_multiple_pairs() {
         let mut tracker = HostSnapshotTracker::new();
 
-        tracker.take_before_snapshot("storage_put", empty_snapshot());
-        tracker.take_after_snapshot(empty_snapshot(), false);
+        tracker.take_before_snapshot("storage_put", empty_snapshot(), None);
+        tracker.take_after_snapshot(empty_snapshot(), false, None);
 
-        tracker.take_before_snapshot("storage_get", empty_snapshot());
-        tracker.take_after_snapshot(empty_snapshot(), false);
+        tracker.take_before_snapshot("storage_get", empty_snapshot(), None);
+        tracker.take_after_snapshot(empty_snapshot(), false, None);
 
-        tracker.take_before_snapshot("storage_del", empty_snapshot());
-        tracker.take_after_snapshot(empty_snapshot(), true);
+        tracker.take_before_snapshot("storage_del", empty_snapshot(), None);
+        tracker.take_after_snapshot(empty_snapshot(), true, None);
 
         assert_eq!(tracker.pair_count(), 3);
 
@@ -360,11 +390,11 @@ mod tests {
     fn test_snapshot_ids_are_unique() {
         let mut tracker = HostSnapshotTracker::new();
 
-        tracker.take_before_snapshot("fn_a", empty_snapshot());
-        tracker.take_after_snapshot(empty_snapshot(), false);
+        tracker.take_before_snapshot("fn_a", empty_snapshot(), None);
+        tracker.take_after_snapshot(empty_snapshot(), false, None);
 
-        tracker.take_before_snapshot("fn_b", empty_snapshot());
-        tracker.take_after_snapshot(empty_snapshot(), false);
+        tracker.take_before_snapshot("fn_b", empty_snapshot(), None);
+        tracker.take_after_snapshot(empty_snapshot(), false, None);
 
         let pairs = tracker.pairs();
         let all_ids: Vec<SnapshotId> = pairs
@@ -384,7 +414,7 @@ mod tests {
     fn test_discard_pending() {
         let mut tracker = HostSnapshotTracker::new();
 
-        tracker.take_before_snapshot("cancelled_fn", empty_snapshot());
+        tracker.take_before_snapshot("cancelled_fn", empty_snapshot(), None);
         assert!(tracker.has_pending());
 
         let discarded = tracker.discard_pending();
@@ -392,6 +422,65 @@ mod tests {
         assert_eq!(discarded.unwrap().host_fn_name, "cancelled_fn");
         assert!(!tracker.has_pending());
         assert_eq!(tracker.pair_count(), 0);
+    }
+
+    #[test]
+    fn test_with_alloc_tracker() {
+        let alloc_tracker = AllocTracker::new();
+        let mut tracker = HostSnapshotTracker::with_alloc_tracker(alloc_tracker);
+
+        assert!(tracker.alloc_tracker().is_some());
+
+        tracker.take_before_snapshot("host_fn", empty_snapshot(), Some(42));
+        assert_eq!(
+            tracker.alloc_tracker().unwrap().snapshotted_memory_bytes(),
+            42
+        );
+        assert_eq!(tracker.alloc_tracker().unwrap().snapshot_count(), 1);
+
+        tracker.take_after_snapshot(empty_snapshot(), false, Some(0));
+        assert!(tracker.alloc_tracker().unwrap().has_rolled_back());
+        assert_eq!(tracker.alloc_tracker().unwrap().rollback_count(), 1);
+    }
+
+    #[test]
+    fn test_alloc_tracker_multiple_cycles() {
+        let alloc_tracker = AllocTracker::new();
+        let mut tracker = HostSnapshotTracker::with_alloc_tracker(alloc_tracker);
+
+        // Cycle 1
+        tracker.take_before_snapshot("fn1", empty_snapshot(), Some(100));
+        tracker.take_after_snapshot(empty_snapshot(), false, Some(0));
+
+        // Cycle 2
+        tracker.take_before_snapshot("fn2", empty_snapshot(), Some(200));
+        tracker.take_after_snapshot(empty_snapshot(), false, Some(0));
+
+        let tracker_ref = tracker.alloc_tracker().unwrap();
+        assert_eq!(tracker_ref.snapshot_count(), 2);
+        assert_eq!(tracker_ref.rollback_count(), 2);
+        assert_eq!(tracker_ref.snapshotted_memory_bytes(), 200);
+    }
+
+    #[test]
+    fn test_tracker_without_memory_records_no_error() {
+        // When no memory_bytes is provided, the alloc tracker should not record
+        let alloc_tracker = AllocTracker::new();
+        let mut tracker = HostSnapshotTracker::with_alloc_tracker(alloc_tracker);
+
+        tracker.take_before_snapshot("fn", empty_snapshot(), None);
+        assert_eq!(
+            tracker.alloc_tracker().unwrap().snapshot_count(),
+            0,
+            "snapshot should not increment when memory_bytes is None"
+        );
+
+        tracker.take_after_snapshot(empty_snapshot(), false, None);
+        assert_eq!(
+            tracker.alloc_tracker().unwrap().rollback_count(),
+            0,
+            "rollback should not increment when restored_memory_bytes is None"
+        );
     }
 
     #[test]

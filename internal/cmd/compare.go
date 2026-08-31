@@ -25,17 +25,18 @@ import (
 // ─── flags specific to the compare command ────────────────────────────────────
 
 var (
-	cmpNetworkFlag   string
-	cmpRPCURLFlag    string
-	cmpRPCTokenFlag  string
-	cmpLocalWasmFlag string
-	cmpBridgeWasm    []string
-	cmpOptimizeFlag  bool
-	cmpArgsFlag      []string
-	cmpVerboseFlag   bool
-	cmpSimPathFlag   string
-	cmpThemeFlag     string
-	cmpProtoFlag     uint32
+	cmpNetworkFlag     string
+	cmpRPCURLFlag      string
+	cmpRPCTokenFlag    string
+	cmpLocalWasmFlag   string
+	cmpBridgeWasm      []string
+	cmpOptimizeFlag    bool
+	cmpArgsFlag        []string
+	cmpVerboseFlag     bool
+	cmpSimPathFlag     string
+	cmpThemeFlag       string
+	cmpProtoFlag       uint32
+	cmpAssetSafetyFlag bool
 )
 
 // compareCmd implements `erst compare`.
@@ -116,6 +117,8 @@ func init() {
 		"Colour theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
 	compareCmd.Flags().Uint32Var(&cmpProtoFlag, "protocol-version", 0,
 		"Override protocol version for both simulation passes (20, 21, 22, …)")
+	compareCmd.Flags().BoolVar(&cmpAssetSafetyFlag, "asset-safety", false,
+		"Enable Move-level Asset Safety tracing (opt-in for compare)")
 	_ = compareCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
 	_ = compareCmd.RegisterFlagCompletionFunc("theme", completeThemeFlag)
 	rootCmd.AddCommand(compareCmd)
@@ -315,9 +318,10 @@ func buildSimRequest(
 	mockArgs []string,
 ) *simulator.SimulationRequest {
 	req := &simulator.SimulationRequest{
-		EnvelopeXdr:   txResp.EnvelopeXdr,
-		ResultMetaXdr: txResp.ResultMetaXdr,
-		LedgerEntries: ledgerEntries,
+		EnvelopeXdr:       txResp.EnvelopeXdr,
+		ResultMetaXdr:     txResp.ResultMetaXdr,
+		LedgerEntries:     ledgerEntries,
+		EnableAssetSafety: cmpAssetSafetyFlag,
 	}
 	if wasmPath != nil && *wasmPath != "" {
 		req.WasmPath = wasmPath

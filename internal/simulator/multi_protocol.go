@@ -237,16 +237,6 @@ func cloneRequest(req *SimulationRequest) *SimulationRequest {
 	return &reqCopy
 }
 
-// estimateGasCost extracts gas cost from simulation response
-// This is a placeholder; actual implementation should parse XDR
-func estimateGasCost(resp *SimulationResponse) uint64 {
-	// Use CPU instructions as a proxy for gas cost
-	if resp.BudgetUsage != nil {
-		return resp.BudgetUsage.CPUInstructions
-	}
-	return 0
-}
-
 // analyzeGasImpact calculates gas cost variance across protocol versions
 func analyzeGasImpact(gasCosts map[uint32]uint64) GasImpact {
 	if len(gasCosts) == 0 {

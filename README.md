@@ -10,6 +10,26 @@
 
 The primary goal of `erst` is to eliminate the opaque "black box" experience of failed Stellar smart contract transactions. By providing local-first, high-fidelity replay and tracing, `erst` maps generic network errors back to human-readable diagnostic events and source code.
 
+## Installation
+
+### Prerequisites
+- **Go** (1.25.0 or later)
+- **Rust** (1.87 or later, with Cargo)
+
+### From Source
+```bash
+# Clone the repository
+git clone https://github.com/dotandev/hintents.git
+cd hintents
+
+# Build the Rust simulator
+cd simulator && cargo build && cd ..
+
+# Build the Go CLI
+go build -o erst ./cmd/erst
+```
+*Note: We will provide pre-compiled binaries via Homebrew and direct downloads in future releases.*
+
 **Core Features (Planned):**
 
 1.  **Transaction Replay**: Fetch a failed transaction's envelope and ledger state from an RPC provider.
@@ -225,7 +245,7 @@ We are building this open-source to help the entire Stellar community. All contr
 4.  Run tests:
     ```bash
     go test ./...
-    cargo test --release -p erst-sim
+    cd simulator && cargo test --verbose
     ```
 
 ## Development
@@ -504,6 +524,12 @@ When reviewing PRs, ensure:
 - **Clear Messages**: Every commit should have a clear, descriptive message
 - **Lint-Free**: Only suppress linting errors if they are objectively false positives. Always explain suppression with `// nolint:rule-name` comments
 - **Assume Bad Faith in Code**: Write code defensively, validate inputs, handle edge cases
+
+## Contributing
+
+We welcome community contributions! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, how to set up your development environment, and the process for submitting pull requests to us.
+
+If you discover a security vulnerability, please refer to our [SECURITY.md](SECURITY.md) for instructions on responsible disclosure.
 
 ## Contributors
 

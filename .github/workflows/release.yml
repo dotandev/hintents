@@ -1,20 +1,114 @@
 name: Release
+
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.2.3)'
+        required: true
+        type: string
+
 jobs:
+  prepare-release:
+    name: Prepare Release (Changelog & Tag)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changelog: ${{ steps.build_changelog.outputs.changelog }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Changelog
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          configurationJson: |
+            {
+              "template": "# {{TAG}}\n\n{{CATEGORIES}}",
+              "categories": [
+                {
+                  "title": "## [DEPLOY] Features",
+                  "labels": ["feat", "feature"],
+                  "commits": ["feat"]
+                },
+                {
+                  "title": "## [BUG] Fixes",
+                  "labels": ["fix", "bug"],
+                  "commits": ["fix"]
+                },
+                {
+                  "title": "## [FIX] Chores & Maintenance",
+                  "labels": ["chore", "maintenance"],
+                  "commits": ["chore"]
+                }
+              ]
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update CHANGELOG.md
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          DATE=$(date +%Y-%m-%d)
+          CONTENT="${{ steps.build_changelog.outputs.changelog }}"
+          
+          # Prepare the new entry (escape newlines for sed if necessary, or just use awk/perl)
+          # A safer way to insert multiline string after a pattern:
+          awk -v content="## [$VERSION] - $DATE\n\n$CONTENT\n\n---" '
+          /## \[Unreleased\]/ {
+            print $0
+            print ""
+            print content
+            next
+          }
+          { print $0 }
+          ' CHANGELOG.md > CHANGELOG_NEW.md && mv CHANGELOG_NEW.md CHANGELOG.md
+
+          if [ -f docs/changelog.md ]; then
+            awk -v content="## [$VERSION] - $DATE\n\n$CONTENT\n\n---" '
+            /# Project Changelog/ {
+              print $0
+              print ""
+              print content
+              next
+            }
+            { print $0 }
+            ' docs/changelog.md > docs/changelog_new.md && mv docs/changelog_new.md docs/changelog.md
+          fi
+
+      - name: Commit, Push and Tag
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add CHANGELOG.md
+          if [ -f docs/changelog.md ]; then git add docs/changelog.md; fi
+          
+          git commit -m "docs: release ${{ github.event.inputs.version }} [skip ci]" || echo "No changes to commit"
+          git push origin main
+          
+          git tag ${{ github.event.inputs.version }}
+          git push origin ${{ github.event.inputs.version }}
+
   publish-crates-io:
     name: Publish to crates.io
+    needs: prepare-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.version }}
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Publish to crates.io
         run: cd simulator && cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+
   build-go-cli:
     name: Build Go CLI
+    needs: prepare-release
     strategy:
       matrix:
         include:
@@ -33,15 +127,11 @@ jobs:
           - os: windows-latest
             goos: windows
             goarch: amd64
-          - os: macos-latest
-            goos: windows
-            goarch: amd64
-          - os: macos-latest
-            goos: windows
-            goarch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.version }}
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -67,49 +157,17 @@ jobs:
         with:
           name: erst-${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.os }}
           path: bin/*
+
   create-github-release:
     name: Create GitHub Release
-    needs: [build-go-cli, publish-crates-io]
+    needs: [prepare-release, build-go-cli, publish-crates-io]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - name: Build Changelog
-        id: build_changelog
-        uses: mikepenz/release-changelog-builder-action@v4
-        with:
-          configurationJson: |
-            {
-              "template": "# {{TAG}}\n\n{{CATEGORIES}}",
-              "categories": [
-                {
-                  "title": "## [DEPLOY] Features",
-                  "filter": {
-                    "pattern": "feat.*",
-                    "target": "commit"
-                  }
-                },
-                {
-                  "title": "## [BUG] Fixes",
-                  "filter": {
-                    "pattern": "fix.*",
-                    "target": "commit"
-                  }
-                },
-                {
-                  "title": "## [FIX] Chores",
-                  "filter": {
-                    "pattern": "chore.*",
-                    "target": "commit"
-                  }
-                }
-              ]
-            }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.event.inputs.version }}
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
@@ -117,7 +175,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          body: ${{steps.build_changelog.outputs.changelog}}
+          tag_name: ${{ github.event.inputs.version }}
+          name: Release ${{ github.event.inputs.version }}
+          body: ${{ needs.prepare-release.outputs.changelog }}
           files: artifacts/**/*
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

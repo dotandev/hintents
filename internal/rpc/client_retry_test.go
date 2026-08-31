@@ -80,7 +80,7 @@ func TestGetLedgerEntriesRetriesOnRateLimit(t *testing.T) {
 			Jsonrpc: "2.0",
 			ID:      1,
 		}
-		validXdr := buildValidEntryB64(validKey)
+		validXdr := buildValidEntryB64(t, validKey)
 		resp.Result.Entries = []LedgerEntryResult{{
 			Key: validKey,
 			Xdr: validXdr,

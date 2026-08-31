@@ -26,6 +26,7 @@ type SimulationRequestBuilder struct {
 	restorePreamble           map[string]interface{}
 	mockBaseFee               *uint32
 	enableOptimizationAdvisor bool
+	enableAssetSafety         bool
 	errors                    []string
 }
 
@@ -126,9 +127,21 @@ func (b *SimulationRequestBuilder) WithOptimizationAdvisor(enable bool) *Simulat
 	return b
 }
 
+// WithAssetSafety enables Move-level asset tracking.
+func (b *SimulationRequestBuilder) WithAssetSafety(enable bool) *SimulationRequestBuilder {
+	b.enableAssetSafety = enable
+	return b
+}
+
 // Build constructs and validates the final SimulationRequest.
 // Returns an error if required fields are missing or validation fails.
-func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
+func (b *SimulationRequestBuilder) Build() (req *SimulationRequest, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in SimulationRequestBuilder.Build: %v", r)
+		}
+	}()
+
 	// Check for any errors collected during building
 	if len(b.errors) > 0 {
 		return nil, errors.WrapValidationError(fmt.Sprintf("%v", b.errors))
@@ -144,15 +157,12 @@ func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 	}
 
 	// Build the request
-	req := &SimulationRequest{
+	req = &SimulationRequest{
 		EnvelopeXdr:   b.envelopeXdr,
 		ResultMetaXdr: b.resultMetaXdr,
 	}
 
-	// Only set ledger entries if there are any
-	if len(b.ledgerEntries) > 0 {
-		req.LedgerEntries = b.ledgerEntries
-	}
+	req.LedgerEntries = b.ledgerEntries
 
 	// Only set restore preamble if present
 	if b.restorePreamble != nil {
@@ -164,6 +174,7 @@ func (b *SimulationRequestBuilder) Build() (*SimulationRequest, error) {
 	}
 
 	req.EnableOptimizationAdvisor = b.enableOptimizationAdvisor
+	req.EnableAssetSafety = b.enableAssetSafety
 
 	return req, nil
 }

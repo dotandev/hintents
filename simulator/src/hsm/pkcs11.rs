@@ -278,7 +278,8 @@ impl Pkcs11Signer {
             }
 
             if let Some(ref token_label) = self.config.token_label {
-                let _label_cstr = CString::new(token_label.as_str()).unwrap();
+                let _label_cstr = CString::new(token_label.as_str())
+                    .map_err(|e| SignerError::Config(format!("Invalid token label: {}", e)))?;
 
                 for &slot in &slots {
                     let mut token_info = CK_TOKEN_INFO {
@@ -342,15 +343,17 @@ impl Pkcs11Signer {
             }];
 
             // Keep these alive for the duration of the function
-            let _label_cstr = self.config.key_label.as_ref().map(|key_label| {
-                let label_cstr = CString::new(key_label.as_str()).unwrap();
+            let mut _label_cstr: Option<CString> = None;
+            if let Some(ref key_label) = self.config.key_label {
+                let label_cstr = CString::new(key_label.as_str())
+                    .map_err(|e| SignerError::Config(format!("Invalid key label: {}", e)))?;
                 template.push(CK_ATTRIBUTE {
                     type_: CKA_LABEL,
                     p_value: label_cstr.as_ptr() as *mut c_void,
                     ul_value_len: key_label.len() as c_ulong,
                 });
-                label_cstr
-            });
+                _label_cstr = Some(label_cstr);
+            }
 
             let _key_id_bytes = if let Some(ref key_id_hex) = self.config.key_id_hex {
                 let key_id_bytes = hex::decode(key_id_hex)
@@ -426,15 +429,17 @@ impl Pkcs11Signer {
             }];
 
             // Keep these alive for the duration of the function
-            let _label_cstr = self.config.key_label.as_ref().map(|key_label| {
-                let label_cstr = CString::new(key_label.as_str()).unwrap();
+            let mut _label_cstr: Option<CString> = None;
+            if let Some(ref key_label) = self.config.key_label {
+                let label_cstr = CString::new(key_label.as_str())
+                    .map_err(|e| SignerError::Config(format!("Invalid key label: {}", e)))?;
                 template.push(CK_ATTRIBUTE {
                     type_: CKA_LABEL,
                     p_value: label_cstr.as_ptr() as *mut c_void,
                     ul_value_len: key_label.len() as c_ulong,
                 });
-                label_cstr
-            });
+                _label_cstr = Some(label_cstr);
+            }
 
             let _key_id_bytes = if let Some(ref key_id_hex) = self.config.key_id_hex {
                 let key_id_bytes = hex::decode(key_id_hex)
@@ -545,7 +550,8 @@ impl Signer for Pkcs11Signer {
             }
 
             // Login
-            let pin_cstr = CString::new(self.config.pin.as_str()).unwrap();
+            let pin_cstr = CString::new(self.config.pin.as_str())
+                .map_err(|e| SignerError::Config(format!("Invalid PIN: {}", e)))?;
             let result = (functions.C_Login)(session, CKU_USER, pin_cstr.as_ptr() as *mut c_char);
             if result != CKR_OK {
                 (functions.C_CloseSession)(session);
@@ -662,7 +668,8 @@ impl Signer for Pkcs11Signer {
             }
 
             // Login
-            let pin_cstr = CString::new(self.config.pin.as_str()).unwrap();
+            let pin_cstr = CString::new(self.config.pin.as_str())
+                .map_err(|e| SignerError::Config(format!("Invalid PIN: {}", e)))?;
             let result = (functions.C_Login)(session, CKU_USER, pin_cstr.as_ptr() as *mut c_char);
             if result != CKR_OK {
                 (functions.C_CloseSession)(session);

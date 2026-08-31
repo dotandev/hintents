@@ -41,6 +41,7 @@ create_phase9.py
 .gemini/
 .idea/
 .vscode/
+.next/
 
 ishus.py
 # Temporary docs/notes
@@ -121,3 +122,11 @@ Resource.rc
 *.msi
 *.msix
 *.cab
+
+# Erst local debugging artifacts
+.erst/cache/
+.erst/snapshots/
+.erst/traces/
+*.trace.json
+*.flamegraph.svg
+*.flamegraph.html

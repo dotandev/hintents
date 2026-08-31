@@ -1,0 +1,11 @@
+# Erst project configuration for local debugging workflows
+# CLI flags and environment variables override these values.
+
+rpc_url = "https://soroban-testnet.stellar.org"
+network = "testnet"
+network_passphrase = "Test SDF Network ; September 2015"
+log_level = "info"
+cache_path = ".erst/cache"
+
+# Optional: point to a locally built simulator binary
+# simulator_path = "./erst-sim"

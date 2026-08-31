@@ -17,26 +17,16 @@ import (
 
 // Config holds OpenTelemetry configuration
 type Config struct {
-	Enabled     bool
-	ExporterURL string
-	ServiceName string
+	Enabled        bool
+	ExporterURL    string
+	ServiceName    string
+	ServiceVersion string
 }
 
-// silentSpanExporter wraps a SpanExporter and swallows all export errors so
-// collector outages never block or log. Core SDK paths must not depend on telemetry.
-type silentSpanExporter struct {
-	delegate trace.SpanExporter
-}
+// noopErrorHandler swallows all errors.
+type noopErrorHandler struct{}
 
-func (s *silentSpanExporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) error {
-	_ = s.delegate.ExportSpans(ctx, spans)
-	return nil
-}
-
-func (s *silentSpanExporter) Shutdown(ctx context.Context) error {
-	_ = s.delegate.Shutdown(ctx)
-	return nil
-}
+func (noopErrorHandler) Handle(err error) {}
 
 // Init initializes OpenTelemetry with the given configuration.
 // Graceful degradation: if the metrics collector is unreachable or init fails,
@@ -46,6 +36,9 @@ func Init(ctx context.Context, config Config) (func(), error) {
 	if !config.Enabled {
 		return func() {}, nil
 	}
+
+	// Set global no-op error handler to swallow export failures.
+	otel.SetErrorHandler(noopErrorHandler{})
 
 	// Create OTLP HTTP exporter (best-effort; short timeout to avoid blocking)
 	exporter, err := otlptracehttp.New(ctx,
@@ -63,7 +56,7 @@ func Init(ctx context.Context, config Config) (func(), error) {
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(config.ServiceName),
-			semconv.ServiceVersionKey.String("dev"),
+			semconv.ServiceVersionKey.String(config.ServiceVersion),
 		),
 	)
 	if err != nil {
@@ -72,12 +65,9 @@ func Init(ctx context.Context, config Config) (func(), error) {
 		return func() {}, nil
 	}
 
-	// Wrap exporter so export failures never surface or log
-	silent := &silentSpanExporter{delegate: exporter}
-
-	// Create trace provider with silent exporter so collector downtime doesn't block or log
+	// Create trace provider with exporter
 	tp := trace.NewTracerProvider(
-		trace.WithBatcher(silent),
+		trace.WithBatcher(exporter),
 		trace.WithResource(res),
 	)
 

@@ -11,8 +11,14 @@ fn test_signature_verification_mock_true() {
         envelope_xdr: String::new(),
         result_meta_xdr: String::new(),
         ledger_entries: None,
+        control_command: None,
+        rewind_step: None,
+        fork_params: None,
+        harness_reset: false,
+        ledger_entries_zstd: None,
         contract_wasm: None,
         wasm_path: None,
+        no_cache: false,
         enable_optimization_advisor: false,
         profile: None,
         _timestamp: None,
@@ -26,6 +32,8 @@ fn test_signature_verification_mock_true() {
         memory_limit: None,
         restore_preamble: None,
         include_linear_memory: false,
+        enable_asset_safety: false,
+        pprof_output_path: None,
     };
 
     assert!(request.mock_signature_verification.is_some());
@@ -38,8 +46,14 @@ fn test_signature_verification_mock_false() {
         envelope_xdr: String::new(),
         result_meta_xdr: String::new(),
         ledger_entries: None,
+        control_command: None,
+        rewind_step: None,
+        fork_params: None,
+        harness_reset: false,
+        ledger_entries_zstd: None,
         contract_wasm: None,
         wasm_path: None,
+        no_cache: false,
         enable_optimization_advisor: false,
         profile: None,
         _timestamp: None,
@@ -53,6 +67,8 @@ fn test_signature_verification_mock_false() {
         memory_limit: None,
         restore_preamble: None,
         include_linear_memory: false,
+        enable_asset_safety: false,
+        pprof_output_path: None,
     };
 
     assert!(request.mock_signature_verification.is_some());
@@ -65,8 +81,14 @@ fn test_signature_verification_mock_disabled() {
         envelope_xdr: String::new(),
         result_meta_xdr: String::new(),
         ledger_entries: None,
+        control_command: None,
+        rewind_step: None,
+        fork_params: None,
+        harness_reset: false,
+        ledger_entries_zstd: None,
         contract_wasm: None,
         wasm_path: None,
+        no_cache: false,
         enable_optimization_advisor: false,
         profile: None,
         _timestamp: None,
@@ -80,6 +102,8 @@ fn test_signature_verification_mock_disabled() {
         memory_limit: None,
         restore_preamble: None,
         include_linear_memory: false,
+        enable_asset_safety: false,
+        pprof_output_path: None,
     };
 
     assert!(request.mock_signature_verification.is_none());

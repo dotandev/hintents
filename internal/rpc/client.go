@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -144,10 +145,14 @@ func (c *Client) getTransactionAttempt(ctx context.Context, hash string) (txResp
 		metrics.RecordRemoteNodeResponse(c.HorizonURL, string(c.Network), false, duration)
 		c.recordTelemetry(c.HorizonURL, duration, false)
 
-		// Check if it's a 404 (Transaction Not Found)
+		// Check if it's a 404 (Transaction Not Found) or the known go-stellar-sdk unmarshal bug
 		if hErr, ok := err.(*horizonclient.Error); ok && hErr.Problem.Status == 404 {
 			c.recordTelemetry(c.HorizonURL, duration, true)
 			return nil, errors.WrapTransactionNotFound(err)
+		} else if strings.Contains(err.Error(), "json: cannot unmarshal number") {
+			// Known go-stellar-sdk bug where some Horizons return malformed JSON for 404s
+			c.recordTelemetry(c.HorizonURL, duration, true)
+			return nil, errors.WrapTransactionNotFound(fmt.Errorf("transaction not found (horizon returned malformed error)"))
 		}
 
 		c.recordTelemetry(c.HorizonURL, duration, false)

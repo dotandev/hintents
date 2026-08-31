@@ -24,6 +24,14 @@ type SimulationResponse struct {
 	SourceLocation     *SourceLocation      `json:"source_location,omitempty"`
 	WasmOffset         *uint64              `json:"wasm_offset,omitempty"`
 	LinearMemoryDump   string               `json:"linear_memory_dump,omitempty"`
+	AssetAnomalies     []AssetAnomaly       `json:"asset_anomalies,omitempty"`
+}
+
+type AssetAnomaly struct {
+	AnomalyType string `json:"anomaly_type"`
+	ContractID  string `json:"contract_id"`
+	Amount      int64  `json:"amount"`
+	Message     string `json:"message"`
 }
 
 type OptimizationTip struct {

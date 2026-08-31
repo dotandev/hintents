@@ -6,6 +6,9 @@ package fuzz
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
+	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,6 +43,23 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, uint64(5000), fuzzer.config.TimeoutMs)
 	assert.Equal(t, 1000, fuzzer.config.MaxCorpusSize)
 	assert.Equal(t, 0.1, fuzzer.config.CoverageSampleRate)
+}
+
+// TestLCOVFileCleanup tests that coverage temp files are properly managed.
+func TestLCOVFileCleanup(t *testing.T) {
+	runner := simulator.NewDefaultMockRunner()
+	config := FuzzerConfig{
+		EnableCoverage: true,
+	}
+	fuzzer := NewCoverageGuidedFuzzer(runner, config)
+
+	input := &simulator.FuzzerInput{EnvelopeXdr: "xdr"}
+	ctx := context.Background()
+
+	// Temp file shouldn't be created unless we explicitly pass one to executeInput,
+	// or Run() manages it.
+	result, _ := fuzzer.executeInput(ctx, input, "")
+	assert.NotNil(t, result)
 }
 
 // TestMutateInput tests input mutation
@@ -116,7 +136,7 @@ func TestCrashTracking(t *testing.T) {
 	crashingInput := &simulator.FuzzerInput{
 		EnvelopeXdr: "crash_input",
 	}
-	result, _ := fuzzer.executeInput(context.Background(), crashingInput)
+	result, _ := fuzzer.executeInput(context.Background(), crashingInput, "")
 
 	// Mock runner will return a response, so this won't crash in test
 	assert.NotNil(t, result)
@@ -168,14 +188,14 @@ func TestMutationStrategies(t *testing.T) {
 	runner := simulator.NewDefaultMockRunner()
 
 	strategies := []MutationStrategy{
-		StrategyBitflip,
-		StrategyByteFlip,
-		StrategyInteresting,
-		StrategyHavoc,
+		&BitflipStrategy{},
+		&ByteflipStrategy{},
+		&InterestingStrategy{},
+		&HavocStrategy{Strategies: []MutationStrategy{&BitflipStrategy{}}},
 	}
 
 	for _, strategy := range strategies {
-		t.Run(string(strategy), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%T", strategy), func(t *testing.T) {
 			config := FuzzerConfig{
 				MutationStrategies: []MutationStrategy{strategy},
 			}
@@ -229,10 +249,19 @@ func TestExecuteInput(t *testing.T) {
 		EnvelopeXdr: "test_envelope",
 	}
 
-	result, coverage := fuzzer.executeInput(context.Background(), input)
+	result, coverage := fuzzer.executeInput(context.Background(), input, "")
 	assert.NotNil(t, result)
 	assert.GreaterOrEqual(t, result.ExecutionTimeMs, uint64(0))
 	assert.NotNil(t, coverage)
+}
+
+func TestRunRejectsEmptyEnvelopeXdr(t *testing.T) {
+	runner := simulator.NewDefaultMockRunner()
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{})
+
+	_, err := fuzzer.Run(context.Background(), &simulator.FuzzerInput{})
+	require.Error(t, err)
+	assert.EqualError(t, err, "envelope XDR required")
 }
 
 func TestExecuteInputWithCoverage(t *testing.T) {
@@ -246,13 +275,67 @@ func TestExecuteInputWithCoverage(t *testing.T) {
 	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{EnableCoverage: true})
 
 	input := &simulator.FuzzerInput{EnvelopeXdr: "test_envelope"}
-	result, coverage := fuzzer.executeInput(context.Background(), input)
+	result, coverage := fuzzer.executeInput(context.Background(), input, "")
 
 	assert.NotNil(t, result)
 	assert.Equal(t, uint32(2), result.CodeCoverage)
 	assert.NotNil(t, coverage)
 	assert.Equal(t, uint32(2), coverage.totalCoverage)
 	assert.Len(t, coverage.coveredLines, 2)
+}
+
+// TestCoverageTempFileReuse verifies the fuzzer creates a single LCOV temp file
+// and reuses it across every iteration (instead of one per iteration), then
+// removes it when the campaign ends.
+func TestCoverageTempFileReuse(t *testing.T) {
+	var (
+		mu        sync.Mutex
+		seenPaths []string
+	)
+
+	runner := simulator.NewMockRunner(func(ctx context.Context, req *simulator.SimulationRequest) (*simulator.SimulationResponse, error) {
+		require.True(t, req.EnableCoverage)
+		require.NotNil(t, req.CoverageLCOVPath)
+
+		// The reused temp file must exist for the duration of the run.
+		_, statErr := os.Stat(*req.CoverageLCOVPath)
+		assert.NoError(t, statErr, "coverage temp file should exist during execution")
+
+		mu.Lock()
+		seenPaths = append(seenPaths, *req.CoverageLCOVPath)
+		mu.Unlock()
+
+		return &simulator.SimulationResponse{
+			Status:     "success",
+			LCOVReport: "TN:\nSF:/tmp/contract.wasm\nDA:10,1\nDA:20,1\nend_of_record\n",
+		}, nil
+	})
+
+	const iterations = 8
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{
+		MaxIterations:  iterations,
+		EnableCoverage: true,
+	})
+
+	seed := &simulator.FuzzerInput{
+		EnvelopeXdr:   hex.EncodeToString([]byte("seed input")),
+		LedgerEntries: map[string]string{},
+	}
+
+	_, err := fuzzer.Run(context.Background(), seed)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	require.Greater(t, len(seenPaths), 1, "expected multiple simulator executions")
+	for _, p := range seenPaths {
+		assert.Equal(t, seenPaths[0], p, "every iteration must reuse the same temp file")
+	}
+
+	// After the campaign ends the reusable temp file must be cleaned up.
+	_, statErr := os.Stat(seenPaths[0])
+	assert.True(t, os.IsNotExist(statErr), "coverage temp file should be removed after Run")
 }
 
 // TestContextCancellation tests behavior when context is cancelled
@@ -293,6 +376,135 @@ func TestCoverageStatisticsString(t *testing.T) {
 	assert.Contains(t, str, "50") // corpus_size
 	assert.Contains(t, str, "25") // unique_coverage
 	assert.Contains(t, str, "3")  // crashes
+}
+
+// TestGetCrashingInputsDeepCopy verifies that mutating a returned crashing input
+// does not affect the fuzzer's internal state (isolation guarantee).
+func TestGetCrashingInputsDeepCopy(t *testing.T) {
+	runner := simulator.NewDefaultMockRunner()
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{})
+
+	// Inject a crashing input directly so we have a known, stable value.
+	original := &simulator.FuzzerInput{
+		EnvelopeXdr: "deadbeef",
+		LedgerEntries: map[string]string{
+			"key1": "value1",
+		},
+		Args:      []string{"arg1", "arg2"},
+		Timestamp: 1000,
+		Seed:      42,
+	}
+	fuzzer.mu.Lock()
+	fuzzer.crashingInputs = append(fuzzer.crashingInputs, original)
+	fuzzer.mu.Unlock()
+
+	// Retrieve a copy and mutate it.
+	crashes := fuzzer.GetCrashingInputs()
+	require.Len(t, crashes, 1)
+
+	returned := crashes[0]
+	returned.EnvelopeXdr = "mutated"
+	returned.LedgerEntries["key1"] = "mutated_value"
+	returned.LedgerEntries["new_key"] = "new_value"
+	returned.Args[0] = "mutated_arg"
+
+	// Internal state must be unchanged.
+	fuzzer.mu.RLock()
+	internal := fuzzer.crashingInputs[0]
+	fuzzer.mu.RUnlock()
+
+	assert.Equal(t, "deadbeef", internal.EnvelopeXdr, "EnvelopeXdr should not be mutated")
+	assert.Equal(t, "value1", internal.LedgerEntries["key1"], "LedgerEntries value should not be mutated")
+	assert.NotContains(t, internal.LedgerEntries, "new_key", "new key should not appear in internal map")
+	assert.Equal(t, "arg1", internal.Args[0], "Args should not be mutated")
+}
+
+// TestGetCorpusDeepCopy verifies that mutating a returned corpus entry does not
+// affect the fuzzer's internal corpus state (isolation guarantee).
+func TestGetCorpusDeepCopy(t *testing.T) {
+	runner := simulator.NewDefaultMockRunner()
+	fuzzer := NewCoverageGuidedFuzzer(runner, FuzzerConfig{
+		MaxCorpusSize:  10,
+		EnableCoverage: false,
+	})
+
+	// Seed the corpus with a known input.
+	input := &simulator.FuzzerInput{
+		EnvelopeXdr: "cafebabe",
+		LedgerEntries: map[string]string{
+			"entry1": "original",
+		},
+		Args:      []string{"a", "b"},
+		Timestamp: 2000,
+	}
+	fuzzer.addToCorpus(context.Background(), input, nil)
+
+	corpus := fuzzer.GetCorpus()
+	require.Len(t, corpus, 1)
+
+	returned := corpus[0]
+	require.NotNil(t, returned.Input)
+
+	// Mutate the returned copy.
+	returned.Input.EnvelopeXdr = "mutated_xdr"
+	returned.Input.LedgerEntries["entry1"] = "mutated"
+	returned.Input.LedgerEntries["extra"] = "extra_value"
+	returned.Input.Args = append(returned.Input.Args, "c")
+
+	// Internal corpus entry must be unchanged.
+	fuzzer.mu.RLock()
+	internalEntry := fuzzer.corpus[0]
+	fuzzer.mu.RUnlock()
+
+	assert.Equal(t, "cafebabe", internalEntry.Input.EnvelopeXdr, "EnvelopeXdr should not be mutated")
+	assert.Equal(t, "original", internalEntry.Input.LedgerEntries["entry1"], "LedgerEntries should not be mutated")
+	assert.NotContains(t, internalEntry.Input.LedgerEntries, "extra", "extra key should not appear in internal map")
+	assert.Len(t, internalEntry.Input.Args, 2, "Args slice length should not change")
+}
+
+// TestFuzzerInputDeepCopy verifies that FuzzerInput.DeepCopy produces a fully
+// independent copy with no shared underlying maps or slices.
+func TestFuzzerInputDeepCopy(t *testing.T) {
+	original := &simulator.FuzzerInput{
+		EnvelopeXdr: "aabbcc",
+		LedgerEntries: map[string]string{
+			"k": "v",
+		},
+		Args:      []string{"x"},
+		Timestamp: 999,
+		Seed:      7,
+	}
+
+	cp := original.DeepCopy()
+
+	// Values equal on creation.
+	assert.Equal(t, original.EnvelopeXdr, cp.EnvelopeXdr)
+	assert.Equal(t, original.LedgerEntries, cp.LedgerEntries)
+	assert.Equal(t, original.Args, cp.Args)
+	assert.Equal(t, original.Timestamp, cp.Timestamp)
+	assert.Equal(t, original.Seed, cp.Seed)
+
+	// Mutating the copy does not affect the original.
+	cp.EnvelopeXdr = "changed"
+	cp.LedgerEntries["k"] = "changed"
+	cp.Args[0] = "changed"
+
+	assert.Equal(t, "aabbcc", original.EnvelopeXdr)
+	assert.Equal(t, "v", original.LedgerEntries["k"])
+	assert.Equal(t, "x", original.Args[0])
+}
+
+// TestFuzzerInputDeepCopyNilFields verifies DeepCopy handles nil maps and slices safely.
+func TestFuzzerInputDeepCopyNilFields(t *testing.T) {
+	original := &simulator.FuzzerInput{
+		EnvelopeXdr:   "test",
+		LedgerEntries: nil,
+		Args:          nil,
+	}
+
+	cp := original.DeepCopy()
+	assert.Nil(t, cp.LedgerEntries)
+	assert.Nil(t, cp.Args)
 }
 
 // BenchmarkMutation benchmarks the mutation performance

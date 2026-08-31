@@ -23,23 +23,66 @@ pub enum ValueType {
     ExternRef,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeError {
+    UnsupportedValType(String),
+}
+
+impl std::fmt::Display for TypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeError::UnsupportedValType(s) => write!(f, "Unsupported value type: {}", s),
+        }
+    }
+}
+
+impl std::error::Error for TypeError {}
+
+impl TryFrom<ValType> for ValueType {
+    type Error = TypeError;
+
+    fn try_from(vt: ValType) -> Result<Self, Self::Error> {
+        Self::from_valtype(&vt)
+    }
+}
+
+impl TryFrom<&ValType> for ValueType {
+    type Error = TypeError;
+
+    fn try_from(vt: &ValType) -> Result<Self, Self::Error> {
+        Self::from_valtype(vt)
+    }
+}
+
 impl ValueType {
-    /// Convert from wasmparser's ValType
-    fn from_valtype(vt: ValType) -> Self {
+    pub fn from_valtype(vt: &ValType) -> Result<Self, TypeError> {
         match vt {
-            ValType::I32 => ValueType::I32,
-            ValType::I64 => ValueType::I64,
-            ValType::F32 => ValueType::F32,
-            ValType::F64 => ValueType::F64,
-            ValType::V128 => ValueType::V128,
+            ValType::I32 => Ok(Self::I32),
+            ValType::I64 => Ok(Self::I64),
+            ValType::F32 => Ok(Self::F32),
+            ValType::F64 => Ok(Self::F64),
+            ValType::V128 => Ok(Self::V128),
             ValType::Ref(rt) => {
                 if rt.is_func_ref() {
-                    ValueType::FuncRef
+                    Ok(Self::FuncRef)
+                } else if rt.is_extern_ref() {
+                    Ok(Self::ExternRef)
                 } else {
-                    ValueType::ExternRef
+                    Err(TypeError::UnsupportedValType(format!("{vt:?}")))
                 }
             }
         }
+    }
+
+    pub fn from_valtype_slice<'a, I>(val_types: I) -> Result<Vec<Self>, TypeError>
+    where
+        I: IntoIterator<Item = &'a ValType>,
+    {
+        let mut values = Vec::new();
+        for vt in val_types {
+            values.push(Self::from_valtype(vt)?);
+        }
+        Ok(values)
     }
 }
 
@@ -170,17 +213,12 @@ impl TypeSection {
                     // RecGroup contains SubType entries
                     for sub_type in rec_group.types() {
                         let func_type = sub_type.composite_type.unwrap_func();
-                        let params = func_type
-                            .params()
-                            .iter()
-                            .map(|vt| ValueType::from_valtype(*vt))
-                            .collect();
 
-                        let results = func_type
-                            .results()
-                            .iter()
-                            .map(|vt| ValueType::from_valtype(*vt))
-                            .collect();
+                        let params = ValueType::from_valtype_slice(func_type.params().iter())
+                            .map_err(|e| e.to_string())?;
+
+                        let results = ValueType::from_valtype_slice(func_type.results().iter())
+                            .map_err(|e| e.to_string())?;
 
                         types.push(FunctionSignature::new(params, results));
                     }
@@ -211,6 +249,15 @@ impl TypeSection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_from_valtype_borrowed_conversion() {
+        let vt = ValType::I32;
+        assert_eq!(ValueType::from_valtype(&vt).unwrap(), ValueType::I32);
+
+        let vt = ValType::F64;
+        assert_eq!(ValueType::from_valtype(&vt).unwrap(), ValueType::F64);
+    }
 
     #[test]
     fn test_value_type_display() {

@@ -762,7 +762,7 @@ func TestGetLedgerEntries_OfflineMockManifestMerge(t *testing.T) {
 	}
 	accountKeyXDR, err := EncodeLedgerKey(accountKey)
 	require.NoError(t, err)
-	accountEntryXDR := buildValidEntryB64(accountKeyXDR)
+	accountEntryXDR := buildValidEntryB64(t, accountKeyXDR)
 
 	manifestPath := filepath.Join(t.TempDir(), "ledger_override.json")
 	manifest := ledgerOverrideManifest{

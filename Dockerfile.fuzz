@@ -1,0 +1,10 @@
+FROM gcr.io/oss-fuzz-base/base-builder-go
+
+COPY . $SRC/hintents
+WORKDIR $SRC/hintents
+
+RUN echo '#!/bin/bash -eu' > $SRC/build.sh && \
+    echo 'cd $SRC/hintents' >> $SRC/build.sh && \
+    echo 'compile_native_go_fuzzer github.com/dotandev/hintents/internal/decoder FuzzDecodeEnvelope fuzz_decode_envelope' >> $SRC/build.sh && \
+    echo 'compile_native_go_fuzzer github.com/dotandev/hintents/internal/decoder FuzzDecodeEnvelopeBytes fuzz_decode_envelope_bytes' >> $SRC/build.sh && \
+    chmod +x $SRC/build.sh

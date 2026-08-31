@@ -17,6 +17,7 @@ jobs:
   integration:
     name: Integration / ${{ matrix.os }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
 
     strategy:
       fail-fast: false          # run all platforms even if one fails

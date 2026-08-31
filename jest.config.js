@@ -5,9 +5,12 @@ module.exports = {
     preset: 'ts-jest',
     testEnvironment: 'node',
     testMatch: ['**/tests/**/*.test.ts', '**/__tests__/**/*.spec.ts'],
+    testPathIgnorePatterns: ['/node_modules/', '/erst_extension/'],
+    watchPathIgnorePatterns: ['/erst_extension/'],
+    modulePathIgnorePatterns: ['/erst_extension/'],
     collectCoverage: true,
     coverageDirectory: 'coverage',
-    coveragePathIgnorePatterns: ['/node_modules/'],
+    coveragePathIgnorePatterns: ['/node_modules/', '/erst_extension/'],
     globals: {
         'ts-jest': {
             tsconfig: 'tsconfig.test.json',

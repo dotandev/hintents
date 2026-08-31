@@ -1,5 +1,5 @@
 [package]
-name = "simulator"
+name = "erst-sim"
 version = "0.1.0"
 edition = "2021"
 
@@ -21,13 +21,13 @@ nursery = "warn"
 # HostedContractEvent.failed_call field that this simulator relies on.
 # We accept any release in the 21-25 range so the binary stays compatible
 # with both mainnet protocol 21 and subsequent minor protocol bumps.
-soroban-env-host = { version = ">=21.0, <26" } # Updated to latest version
+soroban-env-host = { version = ">=21.0, <26", features = ["testutils"] } # Updated to latest version
 base64 = "0.21"
 clap = { version = "4.4", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["fmt", "json", "env-filter"] }
 inferno = "0.11"
 jsonschema = "0.40.2"
 object = { version = "0.38.1", features = ["wasm"] }
@@ -50,6 +50,11 @@ libc = "0.2"
 zstd = "0.13"
 regex = "1.12.3"
 once_cell = "1.21.4"
+prost = "0.12"
+memmap2 = "0.9"
+
+[target.'cfg(unix)'.dependencies]
+pprof = { version = "0.15", features = ["prost-codec"], default-features = false }
 
 [dev-dependencies]
 tempfile = "3.26.0"
