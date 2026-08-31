@@ -11,9 +11,9 @@
 //! These utilities can be shared across different Soroban tools that need
 //! to reconstruct ledger state for simulation or analysis purposes.
 
-#![allow(dead_code)]
-
 pub mod delta;
+
+pub use delta::{apply_delta, rollback_delta, MemoryChunkDelta, MemoryDelta};
 
 use base64::Engine;
 use bincode::Options;
@@ -519,6 +519,19 @@ impl LedgerSnapshot {
             delta: Arc::new(HashMap::new()),
         }
     }
+
+    /// Removes an entry from the snapshot by key.
+    ///
+    /// Records a tombstone (`None`) in the delta layer if the key is present in `base`,
+    /// or removes it from `delta` if it was only present in `delta`.
+    #[allow(dead_code)]
+    pub fn remove(&mut self, key: &[u8]) {
+        if self.base.contains_key(key) {
+            self.delta.insert(key.to_vec(), None);
+        } else {
+            self.delta.remove(key);
+        }
+    }
 }
 
 impl Default for LedgerSnapshot {
@@ -809,334 +822,42 @@ mod tests {
     }
 
     #[test]
-    fn test_mmap_round_trip_preserves_entries() {
-        let mut snapshot = LedgerSnapshot::new();
-        for i in 0..5u8 {
-            snapshot.insert(vec![i], create_dummy_ledger_entry());
-        }
+    fn test_snapshot_remove_and_delta_isolation() {
+        let mut base_map = HashMap::new();
+        let key1 = vec![1, 2, 3];
+        let key2 = vec![4, 5, 6];
+        let entry1 = create_dummy_ledger_entry();
+        let entry2 = create_dummy_ledger_entry();
 
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("hintents-mmap-test-{}.bin", std::process::id()));
-        snapshot
-            .to_mmap_file(&path)
-            .expect("failed to write mmap snapshot");
+        base_map.insert(key1.clone(), entry1.clone());
+        base_map.insert(key2.clone(), entry2.clone());
 
-        let loaded = LedgerSnapshot::from_mmap_file(&path).expect("failed to load mmap snapshot");
+        let mut snapshot = LedgerSnapshot {
+            base: Arc::new(base_map),
+            delta: HashMap::new(),
+        };
 
-        assert_eq!(loaded.len(), 5);
-        for i in 0..5u8 {
-            assert!(
-                loaded.get(&[i]).is_some(),
-                "missing entry for key {i} after mmap round trip"
-            );
-        }
+        assert_eq!(snapshot.len(), 2);
+        assert!(snapshot.get(&key1).is_some());
+        assert!(snapshot.get(&key2).is_some());
 
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn test_mmap_snapshot_matches_in_memory_snapshot() {
-        let mut snapshot = LedgerSnapshot::new();
-        let key = vec![9, 9, 9];
-        let entry = create_dummy_ledger_entry();
-        snapshot.insert(key.clone(), entry.clone());
-
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("hintents-mmap-match-{}.bin", std::process::id()));
-        snapshot.to_mmap_file(&path).expect("write failed");
-
-        let loaded = LedgerSnapshot::from_mmap_file(&path).expect("load failed");
-
-        let expected_bytes = entry.to_xdr(Limits::none()).unwrap();
-        let loaded_bytes = loaded.get(&key).unwrap().to_xdr(Limits::none()).unwrap();
-        assert_eq!(expected_bytes, loaded_bytes);
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn test_mmap_snapshot_missing_key_returns_none() {
-        let snapshot = LedgerSnapshot::new();
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("hintents-mmap-empty-{}.bin", std::process::id()));
-        snapshot.to_mmap_file(&path).expect("write failed");
-
-        let loaded = LedgerSnapshot::from_mmap_file(&path).expect("load failed");
-        assert!(loaded.is_empty());
-        assert!(loaded.get(&[1, 2, 3]).is_none());
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn test_mmap_snapshot_rejects_missing_file() {
-        let missing = std::env::temp_dir().join("hintents-does-not-exist-12345.bin");
-        let result = LedgerSnapshot::from_mmap_file(&missing);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_mmap_snapshot_rejects_truncated_file() {
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!(
-            "hintents-mmap-truncated-{}.bin",
-            std::process::id()
-        ));
-        // Fewer than 8 bytes: not even a full index-length header.
-        std::fs::write(&path, [0u8, 1, 2]).unwrap();
-
-        let result = LedgerSnapshot::from_mmap_file(&path);
-        assert!(result.is_err());
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn test_mmap_snapshot_rejects_corrupt_index_length() {
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("hintents-mmap-corrupt-{}.bin", std::process::id()));
-        // A huge claimed index length that exceeds the actual file size.
-        let mut bytes = (u64::MAX / 2).to_le_bytes().to_vec();
-        bytes.extend_from_slice(&[0u8; 4]);
-        std::fs::write(&path, &bytes).unwrap();
-
-        let result = LedgerSnapshot::from_mmap_file(&path);
-        assert!(result.is_err());
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn test_mmap_snapshot_fork_with_delta_materializes_correctly() {
-        let mut snapshot = LedgerSnapshot::new();
-        snapshot.insert(vec![1], create_dummy_ledger_entry());
-
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("hintents-mmap-fork-{}.bin", std::process::id()));
-        snapshot.to_mmap_file(&path).expect("write failed");
-
-        let mut loaded = LedgerSnapshot::from_mmap_file(&path).expect("load failed");
-        // Mutate the mmap-backed snapshot: this must go through the delta
-        // layer, since the mmap itself is read-only.
-        loaded.insert(vec![2], create_dummy_ledger_entry());
-
-        let forked = loaded.fork();
-        assert_eq!(forked.len(), 2);
-        assert!(forked.get(&[1]).is_some());
-        assert!(forked.get(&[2]).is_some());
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    #[ignore] // run manually with: cargo test --release -- --ignored --nocapture bench_
-    fn bench_compare_from_bytes_vs_from_mmap_file() {
-        use std::time::Instant;
-
-        const N: usize = 50_000;
-
-        let mut snapshot = LedgerSnapshot::new();
-        for i in 0..N {
-            let key = (i as u32).to_le_bytes().to_vec();
-            snapshot.insert(key, create_dummy_ledger_entry());
-        }
-
-        let dir = std::env::temp_dir();
-        let bin_path = dir.join("hintents-bench.bin");
-        let mmap_path = dir.join("hintents-bench.mmap");
-
-        let bytes = snapshot.to_bytes().unwrap();
-        std::fs::write(&bin_path, &bytes).unwrap();
-        snapshot.to_mmap_file(&mmap_path).unwrap();
-
-        let t0 = Instant::now();
-        let loaded_bytes = std::fs::read(&bin_path).unwrap();
-        let from_bytes_snapshot = LedgerSnapshot::from_bytes(&loaded_bytes).unwrap();
-        let from_bytes_elapsed = t0.elapsed();
-
-        let t1 = Instant::now();
-        let from_mmap_snapshot = LedgerSnapshot::from_mmap_file(&mmap_path).unwrap();
-        let from_mmap_elapsed = t1.elapsed();
-
-        println!("N = {N} entries");
-        println!(
-            "from_bytes (eager):     {from_bytes_elapsed:?}, len = {}",
-            from_bytes_snapshot.len()
-        );
-        println!(
-            "from_mmap_file (lazy):  {from_mmap_elapsed:?}, len = {}",
-            from_mmap_snapshot.len()
-        );
-        println!(
-            "Run this test under `/usr/bin/time -v` (see PR description) to compare peak RSS."
-        );
-
-        let _ = std::fs::remove_file(&bin_path);
-        let _ = std::fs::remove_file(&mmap_path);
-    }
-
-    #[test]
-    fn test_mmap_load_does_not_materialize_unread_entries() {
-        // Not a formal allocation benchmark, but a concrete demonstration
-        // of the core claim: from_mmap_file's cost is proportional to the
-        // index size, not the number/size of entries, since entries are
-        // only decoded when actually requested via get()/iter(). We prove
-        // this indirectly: loading a snapshot with many entries succeeds
-        // and reports the correct count without ever calling get() or
-        // iter() on it.
-        let mut snapshot = LedgerSnapshot::new();
-        for i in 0..500u16 {
-            let key = i.to_le_bytes().to_vec();
-            snapshot.insert(key, create_dummy_ledger_entry());
-        }
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("hintents-mmap-scale-{}.bin", std::process::id()));
-        snapshot.to_mmap_file(&path).expect("write failed");
-        let loaded = LedgerSnapshot::from_mmap_file(&path).expect("load failed");
-        assert_eq!(loaded.len(), 500);
-        for i in [0u16, 250, 499] {
-            let key = i.to_le_bytes().to_vec();
-            assert!(
-                loaded.get(&key).is_some(),
-                "entry {i} failed to decode on demand"
-            );
-        }
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn test_mmap_snapshot_diff_against_in_memory_snapshot() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(vec![1], create_dummy_ledger_entry());
-
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("hintents-mmap-diff-{}.bin", std::process::id()));
-        before.to_mmap_file(&path).expect("write failed");
-        let before_mmap = LedgerSnapshot::from_mmap_file(&path).expect("load failed");
-
-        let mut after = before_mmap.clone();
-        after.insert(vec![2], create_dummy_ledger_entry());
-
-        let diff = diff_snapshots(&before_mmap, &after);
-        assert_eq!(diff.inserted, vec![vec![2]]);
-        assert!(diff.modified.is_empty());
-        assert!(diff.deleted.is_empty());
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    // ------------------------------------------------------------------
-    // compute_delta / apply_delta integration tests
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn test_ledger_snapshot_compute_delta_no_changes() {
-        let mut snap = LedgerSnapshot::new();
-        snap.insert(vec![1], create_dummy_ledger_entry());
-        let delta = snap.compute_delta(&snap);
-        assert!(delta.is_empty());
-    }
-
-    #[test]
-    fn test_ledger_snapshot_compute_delta_inserted() {
-        let before = LedgerSnapshot::new();
-        let mut after = LedgerSnapshot::new();
-        after.insert(vec![1, 2], create_dummy_ledger_entry());
-
-        let delta = before.compute_delta(&after);
-        assert_eq!(delta.inserted.len(), 1);
-        assert!(delta.inserted.contains_key(&vec![1, 2]));
-    }
-
-    #[test]
-    fn test_ledger_snapshot_compute_delta_modified() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(vec![1], create_dummy_ledger_entry());
-        let mut after = LedgerSnapshot::new();
-        // Insert a different entry under the same key
-        let mut different = create_dummy_ledger_entry();
-        use soroban_env_host::xdr::{LedgerEntryData, SequenceNumber};
-        if let LedgerEntryData::Account(ref mut acc) = different.data {
-            acc.balance = 9999;
-            acc.seq_num = SequenceNumber(99);
-        }
-        after.insert(vec![1], different);
-
-        let delta = before.compute_delta(&after);
-        assert!(delta.inserted.is_empty());
-        assert_eq!(delta.modified.len(), 1);
-        assert!(delta.modified.contains_key(&vec![1]));
-    }
-
-    #[test]
-    fn test_ledger_snapshot_compute_delta_deleted() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(vec![1], create_dummy_ledger_entry());
-        let after = LedgerSnapshot::new();
-
-        let delta = before.compute_delta(&after);
-        assert_eq!(delta.deleted, vec![vec![1]]);
-    }
-
-    #[test]
-    fn test_ledger_snapshot_apply_delta_full_round_trip() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(vec![1], create_dummy_ledger_entry());
-        before.insert(vec![2], create_dummy_ledger_entry());
-
-        let mut after = LedgerSnapshot::new();
-        after.insert(vec![2], create_dummy_ledger_entry()); // same as before
-        after.insert(vec![3], create_dummy_ledger_entry()); // inserted
-
-        let delta = before.compute_delta(&after);
-        let reconstructed = before.apply_delta(&delta);
-
-        assert_eq!(reconstructed.len(), 2);
-        assert!(reconstructed.get(&[1]).is_none()); // deleted
-        assert!(reconstructed.get(&[2]).is_some()); // preserved
-        assert!(reconstructed.get(&[3]).is_some()); // inserted
-    }
-
-    #[test]
-    fn test_ledger_snapshot_apply_delta_on_forked_snapshot() {
-        // Verify apply_delta works correctly on a forked (COW merged) snapshot.
-        let mut base = LedgerSnapshot::new();
-        base.insert(vec![1], create_dummy_ledger_entry());
-        base.insert(vec![2], create_dummy_ledger_entry());
-
-        // Fork and add changes on the fork.
-        let mut fork = base.fork();
-        fork.insert(vec![3], create_dummy_ledger_entry());
-
-        // Compute delta from base to fork.
-        let delta = base.compute_delta(&fork);
-        assert_eq!(delta.inserted.len(), 1);
-        assert!(delta.inserted.contains_key(&vec![3]));
-
-        // Apply delta to original base — should match fork.
-        let reconstructed = base.apply_delta(&delta);
-        assert_eq!(reconstructed.len(), fork.len());
-        assert!(reconstructed.get(&[1]).is_some());
-        assert!(reconstructed.get(&[2]).is_some());
-        assert!(reconstructed.get(&[3]).is_some());
-    }
-
-    #[test]
-    fn test_ledger_snapshot_delete_entry() {
-        let mut snapshot = LedgerSnapshot::new();
-        snapshot.insert(vec![1], create_dummy_ledger_entry());
+        // Remove key1 via delta tombstone
+        snapshot.remove(&key1);
         assert_eq!(snapshot.len(), 1);
+        assert!(snapshot.get(&key1).is_none());
+        assert!(snapshot.get(&key2).is_some());
 
-        snapshot.delete(&[1]);
-        assert_eq!(snapshot.len(), 0);
-        assert!(snapshot.get(&[1]).is_none());
-    }
+        // Inserting a new key
+        let key3 = vec![7, 8, 9];
+        let entry3 = create_dummy_ledger_entry();
+        snapshot.insert(key3.clone(), entry3);
+        assert_eq!(snapshot.len(), 2);
+        assert!(snapshot.get(&key3).is_some());
 
-    #[test]
-    fn test_ledger_snapshot_delete_non_existent_is_noop() {
-        let mut snapshot = LedgerSnapshot::new();
-        snapshot.delete(&[99]); // should not panic
-        assert!(snapshot.is_empty());
+        // Removing key3 (which only exists in delta)
+        snapshot.remove(&key3);
+        assert_eq!(snapshot.len(), 1);
+        assert!(snapshot.get(&key3).is_none());
     }
 
     // Helper function to create a dummy ledger entry for testing

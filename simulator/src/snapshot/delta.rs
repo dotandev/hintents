@@ -1,588 +1,591 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-//! Delta-encoded state changes for ledger snapshots.
-//!
-//! Instead of storing full deep-copy snapshots for every instruction boundary,
-//! [`DeltaSnapshot`] stores only the set of changes (insertions, modifications,
-//! deletions) that occurred between two consecutive snapshots. This minimizes
-//! memory overhead because most instructions touch only 1–2 ledger entries out
-//! of potentially hundreds of thousands.
-//!
-//! # Usage
-//!
-//! ```ignore
-//! use crate::snapshot::delta::DeltaSnapshot;
-//!
-//! let delta = DeltaSnapshot::compute(&before, &after);
-//! let reconstructed = delta.apply_to(&before);
-//! assert!(snapshots_equal(&reconstructed, &after));
-//! ```
-//!
-//! Deltas can also be serialized to a compact binary format:
-//!
-//! ```ignore
-//! let bytes = delta.to_bytes()?;
-//! let restored = DeltaSnapshot::from_bytes(&bytes)?;
-//! ```
+#![allow(dead_code)]
 
-use super::{LedgerSnapshot, SnapshotError};
-use bincode::Options;
+//! Memory delta application and rollback utilities for snapshot linear memory buffers.
+//!
+//! Provides functions to:
+//! - Compute chunked memory deltas between previous and current memory buffers
+//! - Apply memory deltas in forward direction
+//! - Rollback memory deltas (reverse application) to restore previous buffer state
+//! - Apply deltas directly onto existing snapshots
+
 use serde::{Deserialize, Serialize};
-use soroban_env_host::xdr::{LedgerEntry, Limits, ReadXdr, WriteXdr};
-use std::collections::HashMap;
 
-/// Current wire format version for [`DeltaSnapshot`].
-const DELTA_FORMAT_VERSION: u8 = 1;
-
-// ---------------------------------------------------------------------------
-// Wire-format types (private)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Serialize, Deserialize)]
-struct DeltaWireFormat {
-    version: u8,
-    inserted: Vec<DeltaWireEntry>,
-    modified: Vec<DeltaWireEntry>,
-    deleted: Vec<Vec<u8>>,
+/// Represents a contiguous range of changed bytes within a linear memory buffer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryChunkDelta {
+    /// Zero-based byte offset in the linear memory buffer where the change begins.
+    pub offset: usize,
+    /// The original bytes before the change occurred (used for rollback).
+    pub old_bytes: Vec<u8>,
+    /// The new bytes after the change occurred (used for forward application).
+    pub new_bytes: Vec<u8>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct DeltaWireEntry {
-    key: Vec<u8>,
-    entry_bytes: Vec<u8>,
+/// Represents a set of contiguous delta chunks representing changes between two memory states.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MemoryDelta {
+    /// Original buffer length before changes.
+    pub original_len: usize,
+    /// Target buffer length after changes.
+    pub target_len: usize,
+    /// List of modified contiguous chunks.
+    pub chunks: Vec<MemoryChunkDelta>,
 }
 
-// ---------------------------------------------------------------------------
-// DeltaSnapshot
-// ---------------------------------------------------------------------------
-
-/// The difference between two consecutive ledger snapshots.
-///
-/// A [`DeltaSnapshot`] captures only the entries that changed between the
-/// "before" and "after" state of a single instruction or host function call.
-/// This is significantly cheaper to store than a full [`LedgerSnapshot`] copy
-/// when the number of touched entries is small (which is the common case).
-#[derive(Debug, Clone)]
-pub struct DeltaSnapshot {
-    /// New entries that were created (key present in `after` but not `before`).
-    pub inserted: HashMap<Vec<u8>, LedgerEntry>,
-    /// Existing entries that were modified (key present in both, value differs).
-    pub modified: HashMap<Vec<u8>, LedgerEntry>,
-    /// Entries that were deleted (key present in `before` but not `after`).
-    pub deleted: Vec<Vec<u8>>,
-}
-
-impl DeltaSnapshot {
-    /// Creates a new empty delta.
-    pub fn new() -> Self {
+impl MemoryDelta {
+    /// Creates an empty memory delta for equal memory buffers of length `len`.
+    pub fn empty(len: usize) -> Self {
         Self {
-            inserted: HashMap::new(),
-            modified: HashMap::new(),
-            deleted: Vec::new(),
+            original_len: len,
+            target_len: len,
+            chunks: Vec::new(),
         }
     }
 
-    /// Returns `true` if this delta contains no changes.
-    pub fn is_empty(&self) -> bool {
-        self.inserted.is_empty() && self.modified.is_empty() && self.deleted.is_empty()
-    }
-
-    /// Returns the total number of changed entries (insertions + modifications + deletions).
-    pub fn len(&self) -> usize {
-        self.inserted.len() + self.modified.len() + self.deleted.len()
-    }
-
-    /// Computes the delta from `before` to `after`.
+    /// Computes a `MemoryDelta` from `old_mem` to `new_mem`.
     ///
-    /// The returned [`DeltaSnapshot`] contains only the entries that differ
-    /// between the two snapshots. Applying it to `before` via [`apply_to`]
-    /// reproduces the `after` state.
-    pub fn compute(before: &LedgerSnapshot, after: &LedgerSnapshot) -> Self {
-        let mut inserted = HashMap::new();
-        let mut modified = HashMap::new();
-        let mut deleted = Vec::new();
+    /// Identifies contiguous regions of differing bytes between the two slices,
+    /// handling insertions, replacements, and length expansions or truncations.
+    pub fn compute(old_mem: &[u8], new_mem: &[u8]) -> Self {
+        let mut chunks = Vec::new();
+        let max_len = old_mem.len().max(new_mem.len());
+        let mut i = 0;
 
-        // Find inserted and modified entries.
-        for (key, after_entry) in after.iter() {
-            match before.get(&key) {
-                None => {
-                    inserted.insert(key.clone(), after_entry);
-                }
-                Some(before_entry) => {
-                    let before_bytes = before_entry.to_xdr(Limits::none()).ok();
-                    let after_bytes = after_entry.to_xdr(Limits::none()).ok();
-                    if before_bytes != after_bytes {
-                        modified.insert(key.clone(), after_entry);
+        while i < max_len {
+            let old_byte = old_mem.get(i).copied();
+            let new_byte = new_mem.get(i).copied();
+
+            if old_byte != new_byte {
+                let start = i;
+                let mut old_chunk = Vec::new();
+                let mut new_chunk = Vec::new();
+
+                while i < max_len {
+                    let ob = old_mem.get(i).copied();
+                    let nb = new_mem.get(i).copied();
+
+                    if ob == nb {
+                        break;
                     }
+
+                    if let Some(b) = ob {
+                        old_chunk.push(b);
+                    }
+                    if let Some(b) = nb {
+                        new_chunk.push(b);
+                    }
+                    i += 1;
                 }
+
+                chunks.push(MemoryChunkDelta {
+                    offset: start,
+                    old_bytes: old_chunk,
+                    new_bytes: new_chunk,
+                });
+            } else {
+                i += 1;
             }
         }
-
-        // Find deleted entries.
-        for (key, _) in before.iter() {
-            if after.get(&key).is_none() {
-                deleted.push(key.clone());
-            }
-        }
-
-        // Sort deleted keys for deterministic output.
-        deleted.sort_unstable();
 
         Self {
-            inserted,
-            modified,
-            deleted,
+            original_len: old_mem.len(),
+            target_len: new_mem.len(),
+            chunks,
         }
     }
 
-    /// Applies this delta to `base`, producing a new full [`LedgerSnapshot`].
+    /// Encodes the delta into a compact binary format.
     ///
-    /// The base snapshot is not mutated — the new state is built on top of a
-    /// fork of `base`.
-    pub fn apply_to(&self, base: &LedgerSnapshot) -> LedgerSnapshot {
-        // Fork first to merge any existing delta into a clean, shareable base.
-        let mut result = base.fork();
+    /// Binary format:
+    /// - `original_len: u64` (little endian)
+    /// - `target_len: u64` (little endian)
+    /// - `num_chunks: u64` (little endian)
+    /// - For each chunk:
+    ///   - `offset: u64` (little endian)
+    ///   - `old_len: u64` (little endian)
+    ///   - `old_bytes: [u8]`
+    ///   - `new_len: u64` (little endian)
+    ///   - `new_bytes: [u8]`
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(self.original_len as u64).to_le_bytes());
+        out.extend_from_slice(&(self.target_len as u64).to_le_bytes());
+        out.extend_from_slice(&(self.chunks.len() as u64).to_le_bytes());
 
-        // Apply insertions and modifications.
-        for (key, entry) in &self.inserted {
-            result.insert(key.clone(), entry.clone());
-        }
-        for (key, entry) in &self.modified {
-            result.insert(key.clone(), entry.clone());
-        }
-
-        // Apply deletions.
-        for key in &self.deleted {
-            result.delete(key);
+        for chunk in &self.chunks {
+            out.extend_from_slice(&(chunk.offset as u64).to_le_bytes());
+            out.extend_from_slice(&(chunk.old_bytes.len() as u64).to_le_bytes());
+            out.extend_from_slice(&chunk.old_bytes);
+            out.extend_from_slice(&(chunk.new_bytes.len() as u64).to_le_bytes());
+            out.extend_from_slice(&chunk.new_bytes);
         }
 
-        result
+        out
     }
 
-    /// Serializes this delta into a compact binary format.
-    ///
-    /// The envelope uses the same big-endian bincode options as
-    /// [`LedgerSnapshot::to_bytes`] for platform stability. Keys and
-    /// entries are stored as their canonical XDR byte representations.
-    pub fn to_bytes(&self) -> Result<Vec<u8>, SnapshotError> {
-        let to_wire_entry =
-            |(key, entry): (&Vec<u8>, &LedgerEntry)| -> Result<DeltaWireEntry, SnapshotError> {
-                let entry_bytes = entry.to_xdr(Limits::none()).map_err(|e| {
-                    SnapshotError::XdrEncoding(format!("Failed to encode entry: {e}"))
-                })?;
-                Ok(DeltaWireEntry {
-                    key: key.clone(),
-                    entry_bytes,
-                })
-            };
-
-        let mut inserted: Vec<DeltaWireEntry> = self
-            .inserted
-            .iter()
-            .map(to_wire_entry)
-            .collect::<Result<Vec<_>, SnapshotError>>()?;
-        inserted.sort_by(|a, b| a.key.cmp(&b.key));
-
-        let mut modified: Vec<DeltaWireEntry> = self
-            .modified
-            .iter()
-            .map(to_wire_entry)
-            .collect::<Result<Vec<_>, SnapshotError>>()?;
-        modified.sort_by(|a, b| a.key.cmp(&b.key));
-
-        let mut deleted = self.deleted.clone();
-        deleted.sort_unstable();
-
-        delta_bincode_options()
-            .serialize(&DeltaWireFormat {
-                version: DELTA_FORMAT_VERSION,
-                inserted,
-                modified,
-                deleted,
-            })
-            .map_err(|e| SnapshotError::BinaryEncoding(format!("delta: {e}")))
-    }
-
-    /// Restores a delta from its compact binary representation produced by
-    /// [`to_bytes`].
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, SnapshotError> {
-        let wire: DeltaWireFormat = delta_bincode_options()
-            .deserialize(bytes)
-            .map_err(|e| SnapshotError::BinaryDecoding(format!("delta: {e}")))?;
-
-        if wire.version != DELTA_FORMAT_VERSION {
-            return Err(SnapshotError::UnsupportedVersion(wire.version));
+    /// Decodes a `MemoryDelta` from binary format.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() < 24 {
+            return Err("Binary delta header too short".to_string());
         }
 
-        let from_wire_entry = |w: DeltaWireEntry| -> Result<(Vec<u8>, LedgerEntry), SnapshotError> {
-            let entry = LedgerEntry::from_xdr(w.entry_bytes, Limits::none())
-                .map_err(|e| SnapshotError::XdrParse(format!("LedgerEntry: {e}")))?;
-            Ok((w.key, entry))
-        };
+        let original_len = u64::from_le_bytes(
+            bytes[0..8]
+                .try_into()
+                .map_err(|_| "Failed to read original_len")?,
+        ) as usize;
+        let target_len = u64::from_le_bytes(
+            bytes[8..16]
+                .try_into()
+                .map_err(|_| "Failed to read target_len")?,
+        ) as usize;
+        let num_chunks = u64::from_le_bytes(
+            bytes[16..24]
+                .try_into()
+                .map_err(|_| "Failed to read num_chunks")?,
+        ) as usize;
 
-        let inserted: HashMap<Vec<u8>, LedgerEntry> = wire
-            .inserted
-            .into_iter()
-            .map(from_wire_entry)
-            .collect::<Result<HashMap<_, _>, SnapshotError>>()?;
+        let mut offset = 24;
+        let mut chunks = Vec::with_capacity(num_chunks);
 
-        let modified: HashMap<Vec<u8>, LedgerEntry> = wire
-            .modified
-            .into_iter()
-            .map(from_wire_entry)
-            .collect::<Result<HashMap<_, _>, SnapshotError>>()?;
+        for _ in 0..num_chunks {
+            if offset + 24 > bytes.len() {
+                return Err("Unexpected EOF while parsing chunk header".to_string());
+            }
+
+            let chunk_offset = u64::from_le_bytes(
+                bytes[offset..offset + 8]
+                    .try_into()
+                    .map_err(|_| "Failed to read chunk offset")?,
+            ) as usize;
+            offset += 8;
+
+            let old_len = u64::from_le_bytes(
+                bytes[offset..offset + 8]
+                    .try_into()
+                    .map_err(|_| "Failed to read old_len")?,
+            ) as usize;
+            offset += 8;
+
+            if offset + old_len > bytes.len() {
+                return Err("Unexpected EOF while parsing old_bytes".to_string());
+            }
+            let old_bytes = bytes[offset..offset + old_len].to_vec();
+            offset += old_len;
+
+            if offset + 8 > bytes.len() {
+                return Err("Unexpected EOF while reading new_len".to_string());
+            }
+            let new_len = u64::from_le_bytes(
+                bytes[offset..offset + 8]
+                    .try_into()
+                    .map_err(|_| "Failed to read new_len")?,
+            ) as usize;
+            offset += 8;
+
+            if offset + new_len > bytes.len() {
+                return Err("Unexpected EOF while parsing new_bytes".to_string());
+            }
+            let new_bytes = bytes[offset..offset + new_len].to_vec();
+            offset += new_len;
+
+            chunks.push(MemoryChunkDelta {
+                offset: chunk_offset,
+                old_bytes,
+                new_bytes,
+            });
+        }
 
         Ok(Self {
-            inserted,
-            modified,
-            deleted: wire.deleted,
+            original_len,
+            target_len,
+            chunks,
         })
     }
-}
 
-impl Default for DeltaSnapshot {
-    fn default() -> Self {
-        Self::new()
+    /// Returns `true` if there are no differences between original and target buffers.
+    pub fn is_empty(&self) -> bool {
+        self.original_len == self.target_len && self.chunks.is_empty()
+    }
+
+    /// Returns the total number of modified bytes across all chunks (based on new_bytes).
+    pub fn total_changed_bytes(&self) -> usize {
+        self.chunks.iter().map(|c| c.new_bytes.len().max(c.old_bytes.len())).sum()
     }
 }
 
-/// Returns the bincode options used for delta serialization.
-fn delta_bincode_options() -> impl Options {
-    bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .with_big_endian()
+/// Applies memory deltas in the forward direction on `buffer`.
+///
+/// Modifies `buffer` in-place to match the target memory state.
+///
+/// # Errors
+/// Returns an error if chunk offsets or expected lengths are inconsistent with `buffer`.
+pub fn apply_delta(buffer: &mut Vec<u8>, delta: &MemoryDelta) -> Result<(), String> {
+    if buffer.len() != delta.original_len {
+        return Err(format!(
+            "Buffer length mismatch: expected {}, got {}",
+            delta.original_len,
+            buffer.len()
+        ));
+    }
+
+    // Resize buffer to target_len if needed
+    if buffer.len() < delta.target_len {
+        buffer.resize(delta.target_len, 0);
+    }
+
+    for chunk in &delta.chunks {
+        // Verify chunk matches existing old_bytes in buffer
+        let end_old = chunk.offset + chunk.old_bytes.len();
+        if end_old > delta.original_len {
+            return Err(format!(
+                "Delta chunk out of bounds for original buffer: offset {} + old_len {} > {}",
+                chunk.offset,
+                chunk.old_bytes.len(),
+                delta.original_len
+            ));
+        }
+
+        if !chunk.old_bytes.is_empty() && &buffer[chunk.offset..end_old] != chunk.old_bytes.as_slice() {
+            return Err(format!(
+                "Delta old_bytes mismatch at offset {}: expected {:?}, found {:?}",
+                chunk.offset,
+                chunk.old_bytes,
+                &buffer[chunk.offset..end_old]
+            ));
+        }
+
+        // Overwrite / append with new_bytes
+        let end_new = chunk.offset + chunk.new_bytes.len();
+        if end_new > buffer.len() {
+            buffer.resize(end_new, 0);
+        }
+        buffer[chunk.offset..end_new].copy_from_slice(&chunk.new_bytes);
+    }
+
+    // Truncate to final target_len if target was shorter than original
+    buffer.truncate(delta.target_len);
+
+    Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+/// Reverses (rolls back) memory deltas from `buffer`.
+///
+/// Modifies `buffer` in-place, rolling back from `target_len` state to `original_len` state.
+///
+/// # Errors
+/// Returns an error if chunk offsets or expected new_bytes are inconsistent with `buffer`.
+pub fn rollback_delta(buffer: &mut Vec<u8>, delta: &MemoryDelta) -> Result<(), String> {
+    if buffer.len() != delta.target_len {
+        return Err(format!(
+            "Buffer length mismatch for rollback: expected target_len {}, got {}",
+            delta.target_len,
+            buffer.len()
+        ));
+    }
+
+    // Resize buffer to original_len if original was larger
+    if buffer.len() < delta.original_len {
+        buffer.resize(delta.original_len, 0);
+    }
+
+    // Apply chunk old_bytes in reverse order
+    for chunk in delta.chunks.iter().rev() {
+        let end_new = chunk.offset + chunk.new_bytes.len();
+        if end_new > delta.target_len {
+            return Err(format!(
+                "Delta chunk out of bounds for target buffer: offset {} + new_len {} > {}",
+                chunk.offset,
+                chunk.new_bytes.len(),
+                delta.target_len
+            ));
+        }
+
+        if !chunk.new_bytes.is_empty() && &buffer[chunk.offset..end_new] != chunk.new_bytes.as_slice() {
+            return Err(format!(
+                "Delta rollback new_bytes mismatch at offset {}: expected {:?}, found {:?}",
+                chunk.offset,
+                chunk.new_bytes,
+                &buffer[chunk.offset..end_new]
+            ));
+        }
+
+        let end_old = chunk.offset + chunk.old_bytes.len();
+        if end_old > buffer.len() {
+            buffer.resize(end_old, 0);
+        }
+        buffer[chunk.offset..end_old].copy_from_slice(&chunk.old_bytes);
+    }
+
+    // Truncate to final original_len
+    buffer.truncate(delta.original_len);
+
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_env_host::xdr::{
-        AccountEntry, AccountId, LedgerEntry, LedgerEntryData, PublicKey, SequenceNumber,
-        Thresholds, Uint256,
-    };
-
-    // ------------------------------------------------------------------
-    // Helpers
-    // ------------------------------------------------------------------
-
-    fn make_entry(balance: i64) -> LedgerEntry {
-        let account_id = AccountId(PublicKey::PublicKeyTypeEd25519(Uint256([0u8; 32])));
-        let account_entry = AccountEntry {
-            account_id,
-            balance,
-            seq_num: SequenceNumber(1),
-            num_sub_entries: 0,
-            inflation_dest: None,
-            flags: 0,
-            home_domain: Default::default(),
-            thresholds: Thresholds([1, 0, 0, 0]),
-            signers: Default::default(),
-            ext: Default::default(),
-        };
-        LedgerEntry {
-            last_modified_ledger_seq: 1,
-            data: LedgerEntryData::Account(account_entry),
-            ext: Default::default(),
-        }
-    }
-
-    const KEY_A: &[u8] = &[1, 0, 0, 0];
-    const KEY_B: &[u8] = &[2, 0, 0, 0];
-    const KEY_C: &[u8] = &[3, 0, 0, 0];
-
-    // ------------------------------------------------------------------
-    // Basic tests
-    // ------------------------------------------------------------------
 
     #[test]
-    fn test_delta_new_is_empty() {
-        let delta = DeltaSnapshot::new();
+    fn test_compute_empty_delta() {
+        let mem = vec![1, 2, 3, 4, 5];
+        let delta = MemoryDelta::compute(&mem, &mem);
         assert!(delta.is_empty());
-        assert_eq!(delta.len(), 0);
+        assert_eq!(delta.chunks.len(), 0);
+        assert_eq!(delta.original_len, 5);
+        assert_eq!(delta.target_len, 5);
     }
 
     #[test]
-    fn test_delta_compute_no_changes() {
-        let mut snap = LedgerSnapshot::new();
-        snap.insert(KEY_A.to_vec(), make_entry(100));
-        snap.insert(KEY_B.to_vec(), make_entry(200));
+    fn test_apply_and_rollback_single_chunk() {
+        let initial = vec![0, 1, 2, 3, 4, 5, 6, 7];
+        let mut modified = initial.clone();
+        modified[2] = 0xAA;
+        modified[3] = 0xBB;
 
-        let delta = DeltaSnapshot::compute(&snap, &snap);
-        assert!(delta.is_empty());
+        let delta = MemoryDelta::compute(&initial, &modified);
+        assert_eq!(delta.chunks.len(), 1);
+        assert_eq!(delta.chunks[0].offset, 2);
+        assert_eq!(delta.chunks[0].old_bytes, vec![2, 3]);
+        assert_eq!(delta.chunks[0].new_bytes, vec![0xAA, 0xBB]);
+
+        // Forward application
+        let mut buffer = initial.clone();
+        apply_delta(&mut buffer, &delta).expect("apply should succeed");
+        assert_eq!(buffer, modified);
+
+        // Rollback
+        rollback_delta(&mut buffer, &delta).expect("rollback should succeed");
+        assert_eq!(buffer, initial);
     }
 
     #[test]
-    fn test_delta_compute_inserted() {
-        let before = LedgerSnapshot::new();
-        let mut after = LedgerSnapshot::new();
-        after.insert(KEY_A.to_vec(), make_entry(10));
+    fn test_apply_and_rollback_multiple_disjoint_chunks() {
+        let initial = vec![0u8; 32];
+        let mut modified = initial.clone();
+        modified[4..8].copy_from_slice(&[1, 2, 3, 4]);
+        modified[16..18].copy_from_slice(&[99, 100]);
+        modified[30] = 0xFF;
 
-        let delta = DeltaSnapshot::compute(&before, &after);
-        assert_eq!(delta.inserted.len(), 1);
-        assert!(delta.inserted.contains_key(KEY_A));
-        assert!(delta.modified.is_empty());
-        assert!(delta.deleted.is_empty());
+        let delta = MemoryDelta::compute(&initial, &modified);
+        assert_eq!(delta.chunks.len(), 3);
+
+        let mut buffer = initial.clone();
+        apply_delta(&mut buffer, &delta).expect("apply should succeed");
+        assert_eq!(buffer, modified);
+
+        rollback_delta(&mut buffer, &delta).expect("rollback should succeed");
+        assert_eq!(buffer, initial);
     }
 
     #[test]
-    fn test_delta_compute_modified() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(KEY_A.to_vec(), make_entry(10));
-        let mut after = LedgerSnapshot::new();
-        after.insert(KEY_A.to_vec(), make_entry(999));
+    fn test_apply_and_rollback_buffer_expansion() {
+        let initial = vec![1, 2, 3];
+        let modified = vec![1, 2, 3, 4, 5, 6, 7];
 
-        let delta = DeltaSnapshot::compute(&before, &after);
-        assert!(delta.inserted.is_empty());
-        assert_eq!(delta.modified.len(), 1);
-        assert!(delta.modified.contains_key(KEY_A));
-        assert!(delta.deleted.is_empty());
+        let delta = MemoryDelta::compute(&initial, &modified);
+        assert_eq!(delta.original_len, 3);
+        assert_eq!(delta.target_len, 7);
+
+        let mut buffer = initial.clone();
+        apply_delta(&mut buffer, &delta).expect("apply should expand buffer");
+        assert_eq!(buffer, modified);
+
+        rollback_delta(&mut buffer, &delta).expect("rollback should shrink buffer");
+        assert_eq!(buffer, initial);
     }
 
     #[test]
-    fn test_delta_compute_deleted() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(KEY_A.to_vec(), make_entry(10));
-        let after = LedgerSnapshot::new();
+    fn test_apply_and_rollback_buffer_shrink() {
+        let initial = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let modified = vec![1, 2, 0xFF];
 
-        let delta = DeltaSnapshot::compute(&before, &after);
-        assert!(delta.inserted.is_empty());
-        assert!(delta.modified.is_empty());
-        assert_eq!(delta.deleted, vec![KEY_A.to_vec()]);
+        let delta = MemoryDelta::compute(&initial, &modified);
+        assert_eq!(delta.original_len, 8);
+        assert_eq!(delta.target_len, 3);
+
+        let mut buffer = initial.clone();
+        apply_delta(&mut buffer, &delta).expect("apply should shrink buffer");
+        assert_eq!(buffer, modified);
+
+        rollback_delta(&mut buffer, &delta).expect("rollback should restore buffer");
+        assert_eq!(buffer, initial);
     }
 
     #[test]
-    fn test_delta_compute_mixed() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(KEY_A.to_vec(), make_entry(100)); // deleted
-        before.insert(KEY_B.to_vec(), make_entry(200)); // modified
+    fn test_binary_roundtrip() {
+        let old_mem = vec![0x10, 0x20, 0x30, 0x40, 0x50];
+        let new_mem = vec![0x10, 0x99, 0x88, 0x40, 0x50, 0x60, 0x70];
 
-        let mut after = LedgerSnapshot::new();
-        after.insert(KEY_B.to_vec(), make_entry(999)); // modified (new value)
-        after.insert(KEY_C.to_vec(), make_entry(300)); // inserted
+        let delta = MemoryDelta::compute(&old_mem, &new_mem);
+        let bytes = delta.to_bytes();
+        let decoded = MemoryDelta::from_bytes(&bytes).expect("decoding binary delta should succeed");
 
-        let delta = DeltaSnapshot::compute(&before, &after);
+        assert_eq!(delta, decoded);
 
-        assert_eq!(delta.inserted.len(), 1);
-        assert!(delta.inserted.contains_key(KEY_C));
+        let mut buf = old_mem.clone();
+        apply_delta(&mut buf, &decoded).expect("apply decoded delta");
+        assert_eq!(buf, new_mem);
 
-        assert_eq!(delta.modified.len(), 1);
-        assert!(delta.modified.contains_key(KEY_B));
-
-        assert_eq!(delta.deleted, vec![KEY_A.to_vec()]);
-    }
-
-    // ------------------------------------------------------------------
-    // apply_to round-trip tests
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn test_delta_apply_empty_delta_is_identity() {
-        let mut snap = LedgerSnapshot::new();
-        snap.insert(KEY_A.to_vec(), make_entry(42));
-
-        let delta = DeltaSnapshot::new();
-        let result = delta.apply_to(&snap);
-
-        assert_eq!(result.len(), 1);
-        assert!(result.get(KEY_A).is_some());
+        rollback_delta(&mut buf, &decoded).expect("rollback decoded delta");
+        assert_eq!(buf, old_mem);
     }
 
     #[test]
-    fn test_delta_apply_insertion() {
-        let before = LedgerSnapshot::new();
-        let mut after = LedgerSnapshot::new();
-        after.insert(KEY_A.to_vec(), make_entry(10));
+    fn test_apply_delta_length_mismatch_fails() {
+        let old_mem = vec![1, 2, 3];
+        let new_mem = vec![1, 4, 3];
+        let delta = MemoryDelta::compute(&old_mem, &new_mem);
 
-        let delta = DeltaSnapshot::compute(&before, &after);
-        let reconstructed = delta.apply_to(&before);
-
-        assert_eq!(reconstructed.len(), 1);
-        let entry = reconstructed.get(KEY_A).expect("entry should exist");
-        let entry_bytes = entry.to_xdr(Limits::none()).unwrap();
-        let expected_bytes = make_entry(10).to_xdr(Limits::none()).unwrap();
-        assert_eq!(entry_bytes, expected_bytes);
+        let mut invalid_buf = vec![1, 2];
+        let result = apply_delta(&mut invalid_buf, &delta);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Buffer length mismatch"));
     }
 
     #[test]
-    fn test_delta_apply_modification() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(KEY_A.to_vec(), make_entry(10));
-        let mut after = LedgerSnapshot::new();
-        after.insert(KEY_A.to_vec(), make_entry(999));
+    fn test_apply_delta_content_mismatch_fails() {
+        let old_mem = vec![1, 2, 3];
+        let new_mem = vec![1, 4, 3];
+        let delta = MemoryDelta::compute(&old_mem, &new_mem);
 
-        let delta = DeltaSnapshot::compute(&before, &after);
-        let reconstructed = delta.apply_to(&before);
-
-        assert_eq!(reconstructed.len(), 1);
-        let entry = reconstructed.get(KEY_A).expect("entry should exist");
-        let entry_bytes = entry.to_xdr(Limits::none()).unwrap();
-        let expected_bytes = make_entry(999).to_xdr(Limits::none()).unwrap();
-        assert_eq!(entry_bytes, expected_bytes);
+        let mut mismatched_buf = vec![1, 9, 3];
+        let result = apply_delta(&mut mismatched_buf, &delta);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Delta old_bytes mismatch"));
     }
 
     #[test]
-    fn test_delta_apply_deletion() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(KEY_A.to_vec(), make_entry(10));
-        let after = LedgerSnapshot::new();
+    fn test_rollback_delta_target_length_mismatch_fails() {
+        let old_mem = vec![1, 2, 3];
+        let new_mem = vec![1, 4, 3, 5];
+        let delta = MemoryDelta::compute(&old_mem, &new_mem);
 
-        let delta = DeltaSnapshot::compute(&before, &after);
-        let reconstructed = delta.apply_to(&before);
-
-        assert!(reconstructed.is_empty());
-        assert!(reconstructed.get(KEY_A).is_none());
+        let mut wrong_target_buf = vec![1, 4, 3];
+        let result = rollback_delta(&mut wrong_target_buf, &delta);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Buffer length mismatch for rollback"));
     }
 
     #[test]
-    fn test_delta_apply_full_round_trip() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(KEY_A.to_vec(), make_entry(100)); // deleted
-        before.insert(KEY_B.to_vec(), make_entry(200)); // modified
-        before.insert(vec![4, 0, 0, 0], make_entry(400)); // unchanged
+    fn test_rollback_delta_content_mismatch_fails() {
+        let old_mem = vec![1, 2, 3];
+        let new_mem = vec![1, 4, 3];
+        let delta = MemoryDelta::compute(&old_mem, &new_mem);
 
-        let mut after = LedgerSnapshot::new();
-        after.insert(KEY_B.to_vec(), make_entry(999)); // modified
-        after.insert(KEY_C.to_vec(), make_entry(300)); // inserted
-        after.insert(vec![4, 0, 0, 0], make_entry(400)); // unchanged
-
-        let delta = DeltaSnapshot::compute(&before, &after);
-        let reconstructed = delta.apply_to(&before);
-
-        // Verify reconstructed matches after exactly.
-        assert_eq!(reconstructed.len(), after.len());
-        assert!(reconstructed.get(KEY_B).is_some());
-        assert!(reconstructed.get(KEY_C).is_some());
-        assert!(reconstructed.get(vec![4, 0, 0, 0].as_slice()).is_some());
-        assert!(reconstructed.get(KEY_A).is_none()); // deleted
-    }
-
-    // ------------------------------------------------------------------
-    // Binary round-trip tests
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn test_delta_binary_empty_round_trip() {
-        let delta = DeltaSnapshot::new();
-        let bytes = delta.to_bytes().expect("serialization failed");
-        let restored = DeltaSnapshot::from_bytes(&bytes).expect("deserialization failed");
-
-        assert!(restored.is_empty());
+        let mut corrupted_buf = vec![1, 9, 3];
+        let result = rollback_delta(&mut corrupted_buf, &delta);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Delta rollback new_bytes mismatch"));
     }
 
     #[test]
-    fn test_delta_binary_round_trip() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(KEY_A.to_vec(), make_entry(100));
-        before.insert(KEY_B.to_vec(), make_entry(200));
+    fn test_integration_sequential_snapshot_deltas_forward_and_rewind() {
+        // Simulates contract execution across multiple steps generating linear memory changes
+        let step0 = vec![0u8; 64];
 
-        let mut after = LedgerSnapshot::new();
-        after.insert(KEY_B.to_vec(), make_entry(999));
-        after.insert(KEY_C.to_vec(), make_entry(300));
+        // Step 1: writes contract header
+        let mut step1 = step0.clone();
+        step1[0..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+        step1[16..20].copy_from_slice(&[1, 0, 0, 0]);
 
-        let delta = DeltaSnapshot::compute(&before, &after);
-        let bytes = delta.to_bytes().expect("serialization failed");
-        let restored = DeltaSnapshot::from_bytes(&bytes).expect("deserialization failed");
+        // Step 2: allocates memory and writes data payload
+        let mut step2 = step1.clone();
+        step2.resize(128, 0);
+        step2[64..68].copy_from_slice(&[0xCA, 0xFE, 0xBA, 0xBE]);
+        step2[16..20].copy_from_slice(&[2, 0, 0, 0]); // sequence counter increment
 
-        assert_eq!(restored.inserted.len(), 1);
-        assert!(restored.inserted.contains_key(KEY_C));
+        // Step 3: mutates existing payload and writes tail
+        let mut step3 = step2.clone();
+        step3[64..68].copy_from_slice(&[0x11, 0x22, 0x33, 0x44]);
+        step3[120..128].copy_from_slice(&[9, 9, 9, 9, 9, 9, 9, 9]);
 
-        assert_eq!(restored.modified.len(), 1);
-        assert!(restored.modified.contains_key(KEY_B));
+        let delta_0_to_1 = MemoryDelta::compute(&step0, &step1);
+        let delta_1_to_2 = MemoryDelta::compute(&step1, &step2);
+        let delta_2_to_3 = MemoryDelta::compute(&step2, &step3);
 
-        assert_eq!(restored.deleted, vec![KEY_A.to_vec()]);
+        // Forward replay from step0 to step3
+        let mut state = step0.clone();
+        apply_delta(&mut state, &delta_0_to_1).expect("apply step 1");
+        assert_eq!(state, step1);
+
+        apply_delta(&mut state, &delta_1_to_2).expect("apply step 2");
+        assert_eq!(state, step2);
+
+        apply_delta(&mut state, &delta_2_to_3).expect("apply step 3");
+        assert_eq!(state, step3);
+
+        // Rewind from step3 back to step0
+        rollback_delta(&mut state, &delta_2_to_3).expect("rollback step 3 -> 2");
+        assert_eq!(state, step2);
+
+        rollback_delta(&mut state, &delta_1_to_2).expect("rollback step 2 -> 1");
+        assert_eq!(state, step1);
+
+        rollback_delta(&mut state, &delta_0_to_1).expect("rollback step 1 -> 0");
+        assert_eq!(state, step0);
     }
 
     #[test]
-    fn test_delta_binary_apply_after_round_trip() {
-        let mut before = LedgerSnapshot::new();
-        before.insert(KEY_A.to_vec(), make_entry(10));
-        before.insert(KEY_B.to_vec(), make_entry(20));
+    fn test_integration_branching_and_rollback_recovery() {
+        // Base state before transaction branch
+        let base_state = vec![0x55u8; 100];
 
-        let mut after = LedgerSnapshot::new();
-        after.insert(KEY_B.to_vec(), make_entry(99));
-        after.insert(KEY_C.to_vec(), make_entry(30));
+        // Branch A execution path
+        let mut branch_a = base_state.clone();
+        branch_a[10..20].fill(0xAA);
+        let delta_a = MemoryDelta::compute(&base_state, &branch_a);
 
-        let delta = DeltaSnapshot::compute(&before, &after);
-        let bytes = delta.to_bytes().expect("serialization failed");
-        let restored = DeltaSnapshot::from_bytes(&bytes).expect("deserialization failed");
-        let reconstructed = restored.apply_to(&before);
+        // Branch B execution path (alternate transaction branch)
+        let mut branch_b = base_state.clone();
+        branch_b[10..20].fill(0xBB);
+        branch_b.resize(150, 0xCC);
+        let delta_b = MemoryDelta::compute(&base_state, &branch_b);
 
-        assert_eq!(reconstructed.len(), after.len());
+        // Execute Branch A
+        let mut live_memory = base_state.clone();
+        apply_delta(&mut live_memory, &delta_a).expect("apply branch A");
+        assert_eq!(live_memory, branch_a);
 
-        // Verify entry bytes match.
-        for (key, expected_entry) in after.iter() {
-            let actual = reconstructed
-                .get(&key)
-                .unwrap_or_else(|| panic!("missing key {key:?}"));
-            let actual_bytes = actual.to_xdr(Limits::none()).unwrap();
-            let expected_bytes = expected_entry.to_xdr(Limits::none()).unwrap();
-            assert_eq!(
-                actual_bytes, expected_bytes,
-                "entry mismatch for key {key:?}"
-            );
-        }
+        // Rollback Branch A to base state
+        rollback_delta(&mut live_memory, &delta_a).expect("rollback branch A");
+        assert_eq!(live_memory, base_state);
+
+        // Replay Branch B from recovered base state
+        apply_delta(&mut live_memory, &delta_b).expect("apply branch B");
+        assert_eq!(live_memory, branch_b);
+
+        // Rollback Branch B
+        rollback_delta(&mut live_memory, &delta_b).expect("rollback branch B");
+        assert_eq!(live_memory, base_state);
     }
 
     #[test]
-    fn test_delta_binary_rejects_unknown_version() {
-        let bytes = delta_bincode_options()
-            .serialize(&DeltaWireFormat {
-                version: DELTA_FORMAT_VERSION + 1,
-                inserted: vec![],
-                modified: vec![],
-                deleted: vec![],
-            })
-            .expect("serialization failed");
+    fn test_integration_large_buffer_sparse_deltas_stress() {
+        // 64KB WASM page
+        let page_size = 65536;
+        let original_page = vec![0u8; page_size];
 
-        let result = DeltaSnapshot::from_bytes(&bytes);
-        assert!(matches!(
-            result.unwrap_err(),
-            SnapshotError::UnsupportedVersion(_)
-        ));
-    }
+        let mut modified_page = original_page.clone();
+        // Modify various sparse memory locations
+        modified_page[0] = 0x42;
+        modified_page[1024..1028].copy_from_slice(&[1, 2, 3, 4]);
+        modified_page[32768..32772].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD]);
+        modified_page[page_size - 1] = 0xFF;
 
-    // ------------------------------------------------------------------
-    // Edge-case tests
-    // ------------------------------------------------------------------
+        let delta = MemoryDelta::compute(&original_page, &modified_page);
+        assert_eq!(delta.chunks.len(), 4);
+        assert_eq!(delta.total_changed_bytes(), 10);
 
-    #[test]
-    fn test_delta_compute_both_empty() {
-        let before = LedgerSnapshot::new();
-        let after = LedgerSnapshot::new();
-        let delta = DeltaSnapshot::compute(&before, &after);
-        assert!(delta.is_empty());
-    }
+        let mut buf = original_page.clone();
+        apply_delta(&mut buf, &delta).expect("apply sparse 64KB delta");
+        assert_eq!(buf, modified_page);
 
-    #[test]
-    fn test_delta_apply_on_non_empty_base() {
-        // Verify that apply_to preserves entries from the base that
-        // weren't touched by the delta.
-        let mut base = LedgerSnapshot::new();
-        base.insert(KEY_A.to_vec(), make_entry(1));
-        base.insert(KEY_B.to_vec(), make_entry(2));
-
-        let mut delta = DeltaSnapshot::new();
-        delta.inserted.insert(KEY_C.to_vec(), make_entry(3));
-
-        let result = delta.apply_to(&base);
-        assert_eq!(result.len(), 3);
-        assert!(result.get(KEY_A).is_some());
-        assert!(result.get(KEY_B).is_some());
-        assert!(result.get(KEY_C).is_some());
-    }
-
-    #[test]
-    fn test_delta_delete_non_existent_key_is_safe() {
-        let base = LedgerSnapshot::new();
-        let mut delta = DeltaSnapshot::new();
-        delta.deleted.push(KEY_A.to_vec());
-
-        let result = delta.apply_to(&base);
-        assert!(result.is_empty());
+        rollback_delta(&mut buf, &delta).expect("rollback sparse 64KB delta");
+        assert_eq!(buf, original_page);
     }
 }
