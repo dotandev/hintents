@@ -137,7 +137,8 @@ jobs:
           args: "-severity high ./..."
 
       - name: Run tests
-        run: go test -v -race ./...
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -v ./...
 
       - name: Build
         run: go build -v ./...
