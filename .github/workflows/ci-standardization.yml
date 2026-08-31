@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+
 jobs:
   ci-standardization:
     name: Validate CI scripts from non-root cwd
@@ -13,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -30,15 +33,14 @@ jobs:
       - name: Run CI validation script from non-root directory
         run: |
           cd /tmp
-          "$GITHUB_WORKSPACE/scripts/validate-ci.sh"
+          "$GITHUB_WOSKSPACE/scripts/validate-ci.sh"
 
       - name: Run local CI smoke tests from non-root directory
         run: |
           cd /tmp
-          "$GITHUB_WORKSPACE/scripts/test-ci-locally.sh"
+          "$GITHUB_WOSKSPACE/scripts/test-ci-locally.sh"
 
       - name: Run strict linting config tests from non-root directory
         run: |
           cd /tmp
           "$GITHUB_WORKSPACE/scripts/test-strict-linting.sh"
-
