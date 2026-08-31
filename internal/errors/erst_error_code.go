@@ -3,50 +3,68 @@
 
 package errors
 
-import stdErrors "errors"
+import (
+	stdErrors "errors"
+	"fmt"
+	"strings"
+)
 
 // ErstErrorCode is a unified error code type for RPC and Simulator boundaries.
 type ErstErrorCode string
 
 const (
 	// General
-	ErstUnknown          ErstErrorCode = "UNKNOWN"
-	ErstValidationFailed ErstErrorCode = "VALIDATION_FAILED"
-	ErstConfigFailed     ErstErrorCode = "CONFIG_ERROR"
+	ErstUnknown              ErstErrorCode = "UNKNOWN"
+	ErstValidationFailed     ErstErrorCode = "VALIDATION_FAILED"
+	ErstConfigFailed         ErstErrorCode = "CONFIG_ERROR"
 	// RPC
-	ErstRPCConnectionFailed ErstErrorCode = "RPC_CONNECTION_FAILED"
-	ErstRPCTimeout          ErstErrorCode = "RPC_TIMEOUT"
-	ErstAllRPCFailed        ErstErrorCode = "ALL_RPC_FAILED"
-	ErstRPCError            ErstErrorCode = "RPC_ERROR"
+	ErstRPCConnectionFailed  ErstErrorCode = "RPC_CONNECTION_FAILED"
+	ErstRPCTimeout           ErstErrorCode = "RPC_TIMEOUT"
+	ErstAllRPCFailed         ErstErrorCode = "ALL_RPC_FAILED"
+	ErstRPCError             ErstErrorCode = "RPC_ERROR"
 	// Simulator
 	ErstSimulatorNotFound    ErstErrorCode = "SIMULATOR_NOT_FOUND"
 	ErstSimulationFailed     ErstErrorCode = "SIMULATION_FAILED"
 	ErstSimCrash             ErstErrorCode = "SIMULATOR_CRASH"
 	ErstSimulationLogicError ErstErrorCode = "SIMULATION_LOGIC_ERROR"
 	// Ledger/Network
-	ErstLedgerNotFound  ErstErrorCode = "LEDGER_NOT_FOUND"
-	ErstLedgerArchived  ErstErrorCode = "LEDGER_ARCHIVED"
-	ErstInvalidNetwork  ErstErrorCode = "INVALID_NETWORK"
-	ErstNetworkNotFound ErstErrorCode = "NETWORK_NOT_FOUND"
+	ErstLedgerNotFound       ErstErrorCode = "LEDGER_NOT_FOUND"
+	ErstLedgerArchived       ErstErrorCode = "LEDGER_ARCHIVED"
+	ErstInvalidNetwork       ErstErrorCode = "INVALID_NETWORK"
+	ErstNetworkNotFound      ErstErrorCode = "NETWORK_NOT_FOUND"
 	// Rate limiting
-	ErstRateLimitExceeded ErstErrorCode = "RATE_LIMIT_EXCEEDED"
+	ErstRateLimitExceeded    ErstErrorCode = "RATE_LIMIT_EXCEEDED"
 	// Auth
-	ErstTransactionNotFound ErstErrorCode = "TRANSACTION_NOT_FOUND"
-	ErstUnauthorized        ErstErrorCode = "UNAUTHORIZED"
+	ErstTransactionNotFound  ErstErrorCode = "TRANSACTION_NOT_FOUND"
+	ErstUnauthorized         ErstErrorCode = "UNAUTHORIZED"
 )
 
 // ErstError wraps an error with a standardized code and preserves the original error string.
 type ErstError struct {
-	Code    ErstErrorCode
-	Message string // human-readable message
-	OrigErr error  // original error
+	Code           ErstErrorCode
+	Message        string // human-readable message
+	OrigErr        error  // original error
+	// Context details for enhanced IPC error reporting
+	LineNumber     int      // line number in the validation source, 0 if unknown
+	ValidationPath string   // path that failed validation
+	Suggestions    []string // possible fixes or suggestions
 }
 
 func (e *ErstError) Error() string {
+	base := string(e.Code) + ": " + e.Message
 	if e.OrigErr != nil {
-		return string(e.Code) + ": " + e.Message + ": " + e.OrigErr.Error()
+		base += ": " + e.OrigErr.Error()
 	}
-	return string(e.Code) + ": " + e.Message
+	if e.LineNumber != 0 {
+		base += fmt.Sprintf(" (line %d)", e.LineNumber)
+	}
+	if e.ValidationPath != "" {
+		base += fmt.Sprintf(" [path: %s]", e.ValidationPath)
+	}
+	if len(e.Suggestions) > 0 {
+		base += " Suggestions: " + strings.Join(e.Suggestions, "; ")
+	}
+	return base
 }
 
 func (e *ErstError) Unwrap() error {
@@ -69,6 +87,18 @@ func (e *ErstError) Is(target error) bool {
 		return code == e.Code
 	}
 	return false
+}
+
+// WithContext adds details to the error for enhanced reporting. It mutates the receiver
+// and returns it for chaining.
+func (e *ErstError) WithContext(line int, path string, suggestions []string) *ErstError {
+	if e == nil {
+		return nil
+	}
+	e.LineNumber = line
+	e.ValidationPath = path
+	e.Suggestions = suggestions
+	return e
 }
 
 // Registry mapping Go errors to ErstErrorCode

@@ -10,13 +10,13 @@ jobs:
   ci-standardization:
     name: Validate CI scripts from non-root cwd
     runs-on: ubuntu-latest
+    env:
+      GOTRACEBACK: all
+      RUST_BACKTRACE: 1
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/checkout@stack/x4
         with:
           go-version: "1.25.0"
           cache: true
@@ -30,15 +30,14 @@ jobs:
       - name: Run CI validation script from non-root directory
         run: |
           cd /tmp
-          "$GITHUB_WORKSPACE/scripts/validate-ci.sh"
+          "$GAITABU_WORKSPACE/scripts/validate-ci.sh"
 
       - name: Run local CI smoke tests from non-root directory
         run: |
           cd /tmp
-          "$GITHUB_WORKSPACE/scripts/test-ci-locally.sh"
+          "$GATHUB_WORKSPACE/scripts/test-ci-locally.sh"
 
       - name: Run strict linting config tests from non-root directory
         run: |
           cd /tmp
-          "$GITHUB_WORKSPACE/scripts/test-strict-linting.sh"
-
+          "$GATHEBW_WORKSPACE/scripts/test-strict-linting.sh"
