@@ -13,6 +13,7 @@ pub mod ipc;
 pub mod memory;
 pub mod metering;
 pub mod runner;
+pub mod sandbox;
 pub mod snapshot;
 pub mod source_map_cache;
 pub mod source_mapper;
