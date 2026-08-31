@@ -17,6 +17,14 @@ import (
 	"github.com/dotandev/hintents/internal/logger"
 )
 
+const (
+	// simulatorWaitDelay bounds how long invokeSimulator waits on stdio
+	// pipes after the simulator process group has been killed, so a
+	// descendant that leaked the descriptors cannot stall the batch past
+	// the configured --timeout.
+	simulatorWaitDelay = 2 * time.Second
+)
+
 // BatchConfig holds configuration for parallel batch simulation.
 type BatchConfig struct {
 	InputDir    string        // directory containing transaction files
@@ -188,8 +196,10 @@ func RunBatch(ctx context.Context, cfg BatchConfig) ([]BatchResult, error) {
 	}
 
 done_draining:
-	// Close results channel
-	close(results)
+	// Note: results is intentionally not closed here. Workers may still be
+	// finishing an in-flight simulation after a cancellation, and sending on
+	// a closed channel would panic. The channel is buffered to len(files),
+	// so no worker can block on it.
 
 	if failureSeen && cfg.FailFast {
 		// Note: We still return all collected results, even if we stopped early
@@ -268,6 +278,14 @@ func worker(ctx context.Context, wg *sync.WaitGroup, workQueue <-chan *workItem,
 // invokeSimulator finds the simulator binary and executes it for a single transaction file.
 // The simulator is invoked as: simulator <inputFile> <outputFile>
 // It returns combined stdout+stderr and any error.
+//
+// The ctx passed in carries the per-simulation deadline (cfg.Timeout). It is
+// propagated all the way down into the runner's process tree: the simulator is
+// started in its own process group, ctx cancellation force-kills the whole
+// group, and cmd.WaitDelay bounds how long we may block on stdio pipes
+// inherited by descendants that outlive the direct child. Together these
+// guarantee the --timeout flag actually bounds the run instead of being
+// ignored once the simulator forks helpers.
 func invokeSimulator(ctx context.Context, inputFile, outputFile string) ([]byte, error) {
 	// Find simulator binary using the same discovery logic as the main simulator
 	simBin, err := findSimulatorBinary()
@@ -277,6 +295,17 @@ func invokeSimulator(ctx context.Context, inputFile, outputFile string) ([]byte,
 
 	// Create command with context for cancellation
 	cmd := exec.CommandContext(ctx, simBin, inputFile, outputFile)
+
+	// Isolate the simulator's process tree and route context cancellation
+	// through the group terminator so timeouts reach every descendant.
+	prepareBatchCommand(cmd)
+	cmd.Cancel = func() error {
+		return terminateBatchCommand(cmd)
+	}
+	// Safety net: never block on stdio pipes longer than this after the
+	// process group has been terminated (e.g. for processes that escaped
+	// the group by calling setsid).
+	cmd.WaitDelay = simulatorWaitDelay
 
 	// Capture output
 	var stdout bytes.Buffer
