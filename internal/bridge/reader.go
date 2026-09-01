@@ -13,15 +13,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/dotandev/hintents/internal/xdr"
 	"io"
 	"sort"
-	"strings"
 )
 
 // chunkEntry is an internal helper for collecting and sorting chunk frames.
 type chunkEntry struct {
 	seq uint32
-	raw json.RawMessage
+	raw xdr.ZeroCopyRawMessage
 }
 
 // sortChunksBySeq sorts chunk entries by their seq number in ascending order.
@@ -124,10 +124,10 @@ func (fr *FrameReader) ReadFrames(ctx context.Context, frames chan<- StreamFrame
 
 		// Fast-path: peek at the "type" field without a full unmarshal.
 		var envelope struct {
-			Type  FrameType       `json:"type"`
-			Seq   uint32          `json:"seq"`
-			Total uint32          `json:"total,omitempty"`
-			Data  json.RawMessage `json:"data"`
+			Type  FrameType              `json:"type"`
+			Seq   uint32                 `json:"seq"`
+			Total uint32                 `json:"total,omitempty"`
+			Data  xdr.ZeroCopyRawMessage `json:"data"`
 		}
 		if err := json.Unmarshal(line, &envelope); err != nil {
 			return nil, fmt.Errorf("bridge: unmarshal frame: %w", err)
@@ -135,13 +135,13 @@ func (fr *FrameReader) ReadFrames(ctx context.Context, frames chan<- StreamFrame
 
 		switch envelope.Type {
 		case FrameTypeFinal:
-			return envelope.Data, nil
+			return json.RawMessage(envelope.Data), nil
 
 		case FrameTypeSnapshot:
 			frame := StreamFrame{
 				Type: FrameTypeSnapshot,
 				Seq:  envelope.Seq,
-				Data: envelope.Data,
+				Data: append([]byte(nil), envelope.Data...),
 			}
 			select {
 			case frames <- frame:
@@ -155,7 +155,7 @@ func (fr *FrameReader) ReadFrames(ctx context.Context, frames chan<- StreamFrame
 				total = 1
 			}
 			chunks := make([]chunkEntry, 0, total)
-			chunks = append(chunks, chunkEntry{seq: envelope.Seq, raw: envelope.Data})
+			chunks = append(chunks, chunkEntry{seq: envelope.Seq, raw: append([]byte(nil), envelope.Data...)})
 
 			for uint32(len(chunks)) < total {
 				select {
@@ -187,22 +187,26 @@ func (fr *FrameReader) ReadFrames(ctx context.Context, frames chan<- StreamFrame
 				if nextEnv.Type != FrameTypeChunk {
 					return nil, fmt.Errorf("bridge: expected chunk frame, got %q", nextEnv.Type)
 				}
-				chunks = append(chunks, chunkEntry{seq: nextEnv.Seq, raw: nextEnv.Data})
+				chunks = append(chunks, chunkEntry{seq: nextEnv.Seq, raw: append([]byte(nil), nextEnv.Data...)})
 			}
 
 			sortChunksBySeq(chunks)
 
 			// Each chunk's data field is a JSON string containing a fragment
 			// of the full payload. Decode each string and concatenate.
-			var sb strings.Builder
+			var totalLen int
 			for _, c := range chunks {
-				var fragment string
-				if err := json.Unmarshal(c.raw, &fragment); err != nil {
+				totalLen += len(c.raw)
+			}
+			result := make([]byte, 0, totalLen)
+			for _, c := range chunks {
+				fragment, err := xdr.UnescapeJSONString(c.raw)
+				if err != nil {
 					return nil, fmt.Errorf("bridge: decode chunk data: %w", err)
 				}
-				sb.WriteString(fragment)
+				result = append(result, fragment...)
 			}
-			return json.RawMessage(sb.String()), nil
+			return json.RawMessage(result), nil
 
 		default:
 			// The "type" field is absent or unknown.  Check for a legacy
