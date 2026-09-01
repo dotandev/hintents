@@ -6,6 +6,7 @@ mod asset_tracker;
 mod config;
 mod context;
 mod debug_host_fn;
+mod decoder;
 mod events;
 mod gas_optimizer;
 mod git_detector;
@@ -567,6 +568,13 @@ fn main() {
     let source_mapper = if let Some(wasm_base64) = &request.contract_wasm {
         match base64::engine::general_purpose::STANDARD.decode(wasm_base64) {
             Ok(wasm_bytes) => {
+                // Reject modules whose data section exceeds safe bounds *before*
+                // handing bytes to any allocating parser or runtime.  A crafted
+                // module with a massive declared data section would otherwise
+                // exhaust simulator memory before the Soroban budget fires.
+                if let Err(e) = decoder::validate_data_section(&wasm_bytes) {
+                    return send_error(format!("WASM data section validation failed: {e}"));
+                }
                 if let Err(e) = vm::enforce_soroban_compatibility(&wasm_bytes) {
                     return send_error(format!("Strict VM enforcement failed: {}", e));
                 }
