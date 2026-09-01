@@ -44,6 +44,8 @@ pub enum FrameType {
     /// The consumer concatenates all Chunk frames in seq order to
     /// reconstruct the full JSON payload.
     Chunk,
+    /// Structured log entry emitted via IPC.
+    Log,
 }
 
 /// A single newline-delimited JSON (NDJSON) frame written to stdout.
@@ -66,6 +68,120 @@ pub struct StreamFrame {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum BridgeControlCommand {
     RollbackAndResume,
+}
+
+/// Log level for structured log entries.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+/// Structured log entry sent over IPC.
+///
+/// All trace and debug logs emitted during simulation are serialized
+/// through this schema to provide uniform structure for downstream
+/// consumers (e.g., the Go bridge, CLI, or external tooling).
+///
+/// # Schema
+///
+/// ```json
+/// {
+///   "timestamp": "2026-08-26T15:30:45.123456789Z",
+///   "level": "debug",
+///   "target": "simulator::runner",
+///   "message": "Starting contract invocation",
+///   "fields": {
+///     "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+///     "function": "increment",
+///     "ledger": 1234
+///   },
+///   "span": {
+///     "name": "invoke_contract",
+///     "id": 42
+///   }
+/// }
+/// ```
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogEntry {
+    /// ISO 8601 timestamp with nanosecond precision.
+    pub timestamp: String,
+    /// Log level (trace, debug, info, warn, error).
+    pub level: LogLevel,
+    /// Module path where the log originated (e.g., "simulator::runner").
+    pub target: String,
+    /// Human-readable log message.
+    pub message: String,
+    /// Optional key-value pairs providing additional structured context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<serde_json::Value>,
+    /// Optional span context for distributed tracing integration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<SpanContext>,
+}
+
+/// Span context for distributed tracing.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpanContext {
+    /// Span name (e.g., "invoke_contract", "storage_read").
+    pub name: String,
+    /// Unique span identifier within the current trace.
+    pub id: u64,
+    /// Optional parent span ID for hierarchical traces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<u64>,
+}
+
+impl LogEntry {
+    /// Create a new log entry with the current timestamp.
+    #[allow(dead_code)]
+    pub fn new(level: LogLevel, target: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+            level,
+            target: target.into(),
+            message: message.into(),
+            fields: None,
+            span: None,
+        }
+    }
+
+    /// Add structured fields to the log entry.
+    #[allow(dead_code)]
+    pub fn with_fields(mut self, fields: serde_json::Value) -> Self {
+        self.fields = Some(fields);
+        self
+    }
+
+    /// Add span context to the log entry.
+    #[allow(dead_code)]
+    pub fn with_span(mut self, span: SpanContext) -> Self {
+        self.span = Some(span);
+        self
+    }
+
+    /// Emit the log entry as an IPC frame to stdout.
+    #[allow(dead_code)]
+    pub fn emit(&self) {
+        let frame = StreamFrame {
+            frame_type: FrameType::Log,
+            seq: 0, // Log frames don't use sequence numbers
+            total: None,
+            data: serde_json::to_value(self).unwrap_or_else(|e| {
+                serde_json::json!({
+                    "error": format!("Failed to serialize LogEntry: {}", e)
+                })
+            }),
+        };
+        frame.emit();
+    }
 }
 
 impl StreamFrame {
@@ -325,6 +441,96 @@ pub fn emit_chunk_frame(seq: u32, total: u32, data: serde_json::Value) {
         data,
     }
     .emit();
+}
+
+/// Emit a trace-level log entry over IPC.
+///
+/// # Example
+///
+/// ```ignore
+/// emit_trace_log("simulator::runner", "Contract execution started", None);
+/// ```
+#[allow(dead_code)]
+pub fn emit_trace_log(
+    target: impl Into<String>,
+    message: impl Into<String>,
+    fields: Option<serde_json::Value>,
+) {
+    let mut entry = LogEntry::new(LogLevel::Trace, target, message);
+    if let Some(f) = fields {
+        entry = entry.with_fields(f);
+    }
+    entry.emit();
+}
+
+/// Emit a debug-level log entry over IPC.
+///
+/// # Example
+///
+/// ```ignore
+/// emit_debug_log(
+///     "simulator::storage",
+///     "Storage read completed",
+///     Some(serde_json::json!({
+///         "key": "counter",
+///         "value": 42,
+///         "duration_us": 123
+///     }))
+/// );
+/// ```
+#[allow(dead_code)]
+pub fn emit_debug_log(
+    target: impl Into<String>,
+    message: impl Into<String>,
+    fields: Option<serde_json::Value>,
+) {
+    let mut entry = LogEntry::new(LogLevel::Debug, target, message);
+    if let Some(f) = fields {
+        entry = entry.with_fields(f);
+    }
+    entry.emit();
+}
+
+/// Emit an info-level log entry over IPC.
+#[allow(dead_code)]
+pub fn emit_info_log(
+    target: impl Into<String>,
+    message: impl Into<String>,
+    fields: Option<serde_json::Value>,
+) {
+    let mut entry = LogEntry::new(LogLevel::Info, target, message);
+    if let Some(f) = fields {
+        entry = entry.with_fields(f);
+    }
+    entry.emit();
+}
+
+/// Emit a warn-level log entry over IPC.
+#[allow(dead_code)]
+pub fn emit_warn_log(
+    target: impl Into<String>,
+    message: impl Into<String>,
+    fields: Option<serde_json::Value>,
+) {
+    let mut entry = LogEntry::new(LogLevel::Warn, target, message);
+    if let Some(f) = fields {
+        entry = entry.with_fields(f);
+    }
+    entry.emit();
+}
+
+/// Emit an error-level log entry over IPC.
+#[allow(dead_code)]
+pub fn emit_error_log(
+    target: impl Into<String>,
+    message: impl Into<String>,
+    fields: Option<serde_json::Value>,
+) {
+    let mut entry = LogEntry::new(LogLevel::Error, target, message);
+    if let Some(f) = fields {
+        entry = entry.with_fields(f);
+    }
+    entry.emit();
 }
 
 #[allow(dead_code)]
