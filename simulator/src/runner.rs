@@ -9,11 +9,43 @@ use soroban_env_host::{
     xdr::{Hash, HostFunction, Limits, ScErrorCode, ScErrorType, ScVal, WriteXdr},
     DiagnosticLevel, Error as EnvError, Host, HostError, TryIntoVal, Val,
 };
+use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::memory;
 use crate::snapshot::{LedgerSnapshot, SnapshotError};
 use tracing::{debug, instrument};
+
+thread_local! {
+    static THREAD_MEMORY_BYTES: Cell<u64> = const { Cell::new(0) };
+}
+
+static SHARED_MEMORY_BYTES: AtomicU64 = AtomicU64::new(0);
+
+fn track_memory_usage(consumed: u64) -> u64 {
+    let previous = THREAD_MEMORY_BYTES.with(|cell| {
+        let prior = cell.get();
+        cell.set(consumed);
+        prior
+    });
+
+    match consumed.cmp(&previous) {
+        std::cmp::Ordering::Greater => {
+            let delta = consumed - previous;
+            SHARED_MEMORY_BYTES.fetch_add(delta, Ordering::AcqRel);
+        }
+        std::cmp::Ordering::Less => {
+            let delta = previous - consumed;
+            let _ = SHARED_MEMORY_BYTES.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |total| {
+                Some(total.saturating_sub(delta))
+            });
+        }
+        std::cmp::Ordering::Equal => {}
+    }
+
+    consumed
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SimHostError {
@@ -182,7 +214,8 @@ impl SimHost {
     pub fn check_memory_limit(&self) {
         if let Some(limit) = self.config.memory_limit {
             if let Ok(consumed) = self.inner.budget_cloned().get_mem_bytes_consumed() {
-                memory::check_memory_limit(consumed, limit);
+                let tracked = track_memory_usage(consumed);
+                memory::check_memory_limit(tracked, limit);
             }
         }
     }
