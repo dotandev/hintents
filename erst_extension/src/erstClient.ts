@@ -4,6 +4,15 @@
 import * as rpc from 'vscode-jsonrpc/node';
 import * as net from 'net';
 
+export interface WasmLocal {
+    name: string;
+    type: string;
+    location: string;
+    value?: any;
+    startLine?: number;
+    endLine?: number;
+}
+
 export interface TraceStep {
     step: number;
     timestamp: string;
@@ -17,6 +26,8 @@ export interface TraceStep {
     memory?: any;
     cpu_delta?: number;
     memory_delta?: number;
+    wasm_locals?: WasmLocal[];
+    wasm_offset?: number;
 }
 
 export interface Trace {
