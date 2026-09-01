@@ -4,10 +4,14 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dotandev/hintents/internal/cli"
+	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/spf13/cobra"
 )
@@ -19,6 +23,7 @@ var (
 	batchSimulateFilePatternFlag string
 	batchSimulateTimeoutFlag     time.Duration
 	batchSimulateFailFastFlag    bool
+	batchSimulateFormatFlag      string
 )
 
 // batchSimulateCmd executes parallel simulations of multiple transaction files.
@@ -59,6 +64,7 @@ func init() {
 	batchSimulateCmd.Flags().StringVar(&batchSimulateFilePatternFlag, "file-pattern", "*.json", "Glob pattern for transaction files")
 	batchSimulateCmd.Flags().DurationVar(&batchSimulateTimeoutFlag, "timeout", 30*time.Second, "Per-simulation timeout")
 	batchSimulateCmd.Flags().BoolVar(&batchSimulateFailFastFlag, "fail-fast", false, "Stop all on first failure")
+	batchSimulateCmd.Flags().StringVar(&batchSimulateFormatFlag, "format", "text", "Output format: text or json")
 
 	_ = batchSimulateCmd.MarkFlagRequired("input-dir")
 
@@ -68,6 +74,17 @@ func init() {
 func runBatchSimulate(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
+	switch strings.ToLower(batchSimulateFormatFlag) {
+	case "", "text":
+		return runBatchSimulateText(ctx, cmd)
+	case "json":
+		return runBatchSimulateJSON(ctx, cmd)
+	default:
+		return errors.WrapValidationError(fmt.Sprintf("unsupported format: %s (use: text, json)", batchSimulateFormatFlag))
+	}
+}
+
+func runBatchSimulateText(ctx context.Context, cmd *cobra.Command) error {
 	// Set default concurrency if not specified
 	concurrency := batchSimulateConcurrencyFlag
 	if concurrency <= 0 {
@@ -121,4 +138,94 @@ func runBatchSimulate(cmd *cobra.Command, _ []string) error {
 	}
 
 	return err
+}
+
+func runBatchSimulateJSON(ctx context.Context, cmd *cobra.Command) error {
+	concurrency := batchSimulateConcurrencyFlag
+	if concurrency <= 0 {
+		concurrency = 0
+	}
+
+	cfg := cli.BatchConfig{
+		InputDir:    batchSimulateInputDirFlag,
+		OutputDir:   batchSimulateOutputDirFlag,
+		Concurrency: concurrency,
+		FilePattern: batchSimulateFilePatternFlag,
+		Timeout:     batchSimulateTimeoutFlag,
+		FailFast:    batchSimulateFailFastFlag,
+	}
+
+	startTime := time.Now()
+	results, err := cli.RunBatch(ctx, cfg)
+	duration := time.Since(startTime)
+
+	summary := batchSimulateJSONSummary{
+		Succeeded:      0,
+		Failed:         0,
+		Total:          len(results),
+		DurationSeconds: duration.Seconds(),
+		Results:        make([]batchSimulateJSONResult, 0, len(results)),
+	}
+
+	for _, result := range results {
+		item := batchSimulateJSONResult{
+			FilePath:        result.FilePath,
+			Success:         result.Success,
+			DurationSeconds: result.Duration.Seconds(),
+		}
+		if result.Error != nil {
+			item.Error = result.Error.Error()
+		}
+		if len(result.Output) > 0 {
+			item.Output = string(result.Output)
+		}
+		summary.Results = append(summary.Results, item)
+		if result.Success {
+			summary.Succeeded++
+		} else {
+			summary.Failed++
+		}
+	}
+
+	if err != nil {
+		summary.Error = err.Error()
+	}
+	if summary.Failed > 0 {
+		summary.Status = "failed"
+	} else if summary.Error != "" {
+		summary.Status = "error"
+	} else {
+		summary.Status = "success"
+	}
+
+	payload, marshalErr := json.MarshalIndent(summary, "", "  ")
+	if marshalErr != nil {
+		return fmt.Errorf("marshal batch json output: %w", marshalErr)
+	}
+	if _, printErr := fmt.Fprintln(cmd.OutOrStdout(), string(payload)); printErr != nil {
+		return printErr
+	}
+
+	if summary.Failed > 0 {
+		return fmt.Errorf("batch simulate: %d file(s) failed", summary.Failed)
+	}
+	return err
+}
+
+type batchSimulateJSONSummary struct {
+	Status          string                     `json:"status"`
+	Succeeded       int                        `json:"succeeded"`
+	Failed          int                        `json:"failed"`
+	Total           int                        `json:"total"`
+	DurationSeconds float64                    `json:"duration_seconds"`
+	Error           string                     `json:"error,omitempty"`
+	Results         []batchSimulateJSONResult `json:"results"`
+}
+
+type batchSimulateJSONResult struct {
+	FilePath        string  `json:"file_path"`
+	Success         bool    `json:"success"`
+	Error           string  `json:"error,omitempty"`
+	Output          string  `json:"output,omitempty"`
+	DurationSeconds float64 `json:"duration_seconds"`
 }
