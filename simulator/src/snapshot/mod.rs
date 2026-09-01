@@ -474,6 +474,33 @@ impl LedgerSnapshot {
         delta.apply_to(self)
     }
 
+    /// Returns a fully independent deep copy of this snapshot.
+    ///
+    /// Unlike `clone()` (which shares the `Arc`-wrapped base and delta with
+    /// the original) and `fork()` (which shares the merged base via `Arc`),
+    /// `deep_copy()` materializes every entry — base **and** delta — into a
+    /// brand-new `Arc<HashMap>` that shares **no** allocation with the original.
+    ///
+    /// This is the correct choice for time-travel checkpointing: after
+    /// `deep_copy()` the caller can freely mutate either the original or the
+    /// copy without either observation affecting the other.
+    ///
+    /// # Cost
+    ///
+    /// O(n) in the number of live entries. Every XDR-backed entry in an
+    /// mmap base is decoded exactly once during the copy. For large ledger
+    /// loads, prefer `fork()` when mutation isolation is not required.
+    pub fn deep_copy(&self) -> Self {
+        // Collect all live entries (base merged with delta).
+        let materialized: HashMap<Vec<u8>, LedgerEntry> = self.iter().collect();
+
+        Self {
+            base: BaseStore::InMemory(Arc::new(materialized)),
+            // Fresh, independent delta — not shared with the original.
+            delta: Arc::new(HashMap::new()),
+        }
+    }
+
     /// Creates a forked snapshot optimized for sharing read-only state.
     ///
     /// This method merges the current delta into the base (creating a new Arc)
@@ -1137,6 +1164,124 @@ mod tests {
         let mut snapshot = LedgerSnapshot::new();
         snapshot.delete(&[99]); // should not panic
         assert!(snapshot.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // deep_copy isolation invariant
+    // ------------------------------------------------------------------
+
+    /// Inserting into the original after deep_copy must not affect the copy.
+    #[test]
+    fn test_deep_copy_original_mutation_does_not_affect_copy() {
+        let original = build_snapshot(4);
+        let copy = original.deep_copy();
+
+        let mut mutated = original;
+        mutated.insert(vec![0xFF], create_dummy_ledger_entry());
+
+        assert_eq!(
+            copy.len(),
+            4,
+            "deep copy len changed after original was mutated"
+        );
+        assert!(
+            copy.get(&[0xFF]).is_none(),
+            "deep copy saw key inserted after copy was taken"
+        );
+    }
+
+    /// Deleting from the copy must not affect the original.
+    #[test]
+    fn test_deep_copy_copy_mutation_does_not_affect_original() {
+        let original = build_snapshot(3);
+        let mut copy = original.deep_copy();
+
+        copy.delete(&[0]);
+
+        assert_eq!(
+            original.len(),
+            3,
+            "original len changed after copy was mutated"
+        );
+        assert!(
+            original.get(&[0]).is_some(),
+            "original lost entry after copy was mutated"
+        );
+    }
+
+    /// Two deep copies of the same snapshot are mutually independent.
+    #[test]
+    fn test_two_deep_copies_are_independent() {
+        let original = build_snapshot(2);
+        let mut copy_a = original.deep_copy();
+        let mut copy_b = original.deep_copy();
+
+        copy_a.insert(vec![0xAA], create_dummy_ledger_entry());
+        copy_b.insert(vec![0xBB], create_dummy_ledger_entry());
+
+        assert!(copy_a.get(&[0xBB]).is_none(), "copy_a saw copy_b's insert");
+        assert!(copy_b.get(&[0xAA]).is_none(), "copy_b saw copy_a's insert");
+    }
+
+    /// deep_copy of an empty snapshot produces a valid empty snapshot.
+    #[test]
+    fn test_deep_copy_empty_snapshot() {
+        let original = LedgerSnapshot::new();
+        let copy = original.deep_copy();
+        assert!(copy.is_empty());
+    }
+
+    /// deep_copy preserves all entries faithfully.
+    #[test]
+    fn test_deep_copy_entries_match_original() {
+        let original = build_snapshot(5);
+        let copy = original.deep_copy();
+
+        assert_eq!(original.len(), copy.len());
+        for i in 0u8..5 {
+            let orig_entry = original.get(&[i]).expect("original missing entry");
+            let copy_entry = copy.get(&[i]).expect("copy missing entry");
+            let orig_xdr = orig_entry.to_xdr(Limits::none()).unwrap();
+            let copy_xdr = copy_entry.to_xdr(Limits::none()).unwrap();
+            assert_eq!(orig_xdr, copy_xdr, "entry {i} differs between original and copy");
+        }
+    }
+
+    /// deep_copy on a snapshot with a non-empty delta includes delta entries.
+    #[test]
+    fn test_deep_copy_includes_delta_entries() {
+        let mut original = build_snapshot(2);
+        // Add an entry to the delta layer (not the base).
+        original.insert(vec![0xCC], create_dummy_ledger_entry());
+        assert_eq!(original.len(), 3);
+
+        let copy = original.deep_copy();
+        assert_eq!(copy.len(), 3);
+        assert!(copy.get(&[0xCC]).is_some(), "deep copy missing delta entry");
+    }
+
+    /// deep_copy on a snapshot with a tombstone in the delta excludes that entry.
+    #[test]
+    fn test_deep_copy_excludes_tombstoned_entries() {
+        let mut original = build_snapshot(3);
+        original.delete(&[0]); // tombstone key [0]
+        assert_eq!(original.len(), 2);
+
+        let copy = original.deep_copy();
+        assert_eq!(copy.len(), 2);
+        assert!(copy.get(&[0]).is_none(), "deep copy included tombstoned entry");
+    }
+
+    // ------------------------------------------------------------------
+    // Helper functions
+    // ------------------------------------------------------------------
+
+    fn build_snapshot(n: u8) -> LedgerSnapshot {
+        let mut snap = LedgerSnapshot::new();
+        for i in 0..n {
+            snap.insert(vec![i], create_dummy_ledger_entry());
+        }
+        snap
     }
 
     // Helper function to create a dummy ledger entry for testing
