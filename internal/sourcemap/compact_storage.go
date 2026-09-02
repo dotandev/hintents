@@ -55,12 +55,12 @@ type SourceMapping struct {
 
 // CompactMappingStats contains statistics about the compact source map.
 type CompactMappingStats struct {
-	OriginalSize    int
-	CompressedSize  int
-	ReductionRatio  float64
-	NumMappings     int
-	NumFiles        int
-	AvgMappingSize  float64
+	OriginalSize   int
+	CompressedSize int
+	ReductionRatio float64
+	NumMappings    int
+	NumFiles       int
+	AvgMappingSize float64
 }
 
 // NewCompactSourceMap creates a new compact source map from the given mappings.
@@ -73,9 +73,9 @@ func NewCompactSourceMap(mappings []SourceMapping, files []string) *CompactSourc
 	})
 
 	return &CompactSourceMap{
-		Version:   CurrentVersion,
-		Files:     files,
-		Mappings:  sortedMappings,
+		Version:      CurrentVersion,
+		Files:        files,
+		Mappings:     sortedMappings,
 		OriginalSize: estimateOriginalSize(mappings, files),
 	}
 }
@@ -480,15 +480,13 @@ func writeUvarint(w io.Writer, val uint64) error {
 // readUvarint reads an unsigned varint.
 func readUvarint(r io.Reader) (uint64, error) {
 	var buf [10]byte
-	n, err := io.ReadFull(r, buf[:1])
-	if err != nil {
+	if _, err := io.ReadFull(r, buf[:1]); err != nil {
 		return 0, err
 	}
 	val := uint64(buf[0])
 	shift := uint(7)
 	for buf[0]&0x80 != 0 {
-		n, err = io.ReadFull(r, buf[:1])
-		if err != nil {
+		if _, err := io.ReadFull(r, buf[:1]); err != nil {
 			return 0, err
 		}
 		val |= uint64(buf[0]&0x7F) << shift

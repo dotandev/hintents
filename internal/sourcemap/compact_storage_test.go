@@ -170,12 +170,12 @@ func TestGetSourceLocation(t *testing.T) {
 		wantFound  bool
 	}{
 		{0, "file1.rs", 1, true},
-		{50, "file1.rs", 1, true},   // Between 0 and 100, should return first
+		{50, "file1.rs", 1, true}, // Between 0 and 100, should return first
 		{100, "file2.rs", 2, true},
-		{150, "file2.rs", 2, true},  // Between 100 and 200
+		{150, "file2.rs", 2, true}, // Between 100 and 200
 		{200, "file3.rs", 3, true},
 		{300, "file4.rs", 4, false}, // Unknown file index
-		{500, "", 0, false},          // Beyond all mappings
+		{500, "", 0, false},         // Beyond all mappings
 	}
 
 	for _, tt := range tests {
@@ -201,8 +201,8 @@ func TestInternFilePaths(t *testing.T) {
 	paths := []string{
 		"src/lib.rs",
 		"src/contract.rs",
-		"src/lib.rs", // Duplicate
-		"src\\lib.rs", // Windows-style separator (should be normalized)
+		"src/lib.rs",      // Duplicate
+		"src\\lib.rs",     // Windows-style separator (should be normalized)
 		"src/contract.rs", // Duplicate
 	}
 
