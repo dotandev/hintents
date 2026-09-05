@@ -24,11 +24,21 @@ func TestBuildContractStats_Empty(t *testing.T) {
 	}
 }
 
+func catEvent(eventType string, contractID *string) simulator.CategorizedEvent {
+	return simulator.CategorizedEvent{
+		Category: "Diagnostic",
+		Event: simulator.DiagnosticEvent{
+			EventType:  eventType,
+			ContractID: contractID,
+		},
+	}
+}
+
 func TestBuildContractStats_SingleContract(t *testing.T) {
 	cid := "CONTRACT_A"
 	resp := makeResponse([]simulator.CategorizedEvent{
-		{EventType: "storage_write", ContractID: &cid},
-		{EventType: "require_auth", ContractID: &cid},
+		catEvent("storage_write", &cid),
+		catEvent("require_auth", &cid),
 	})
 
 	stats := buildContractStats(resp)
@@ -49,8 +59,8 @@ func TestBuildContractStats_Sorted(t *testing.T) {
 	expensive := "A"
 
 	resp := makeResponse([]simulator.CategorizedEvent{
-		{EventType: "contract_call", ContractID: &cheap},
-		{EventType: "storage_write", ContractID: &expensive},
+		catEvent("contract_call", &cheap),
+		catEvent("storage_write", &expensive),
 	})
 
 	stats := buildContractStats(resp)

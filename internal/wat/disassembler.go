@@ -28,7 +28,7 @@ import (
 // =============================================================================
 
 // WASM magic number and version.
-var wasmMagic = []byte{0x00, 0x61, 0x73, 0x6d}
+var wasmMagic = [4]byte{0x00, 0x61, 0x73, 0x6d}
 
 const wasmVersion = 1
 
@@ -49,6 +49,191 @@ const (
 )
 
 // =============================================================================
+// Gas cost mapping
+// =============================================================================
+
+// GasCosts defines the gas cost for each WASM instruction type.
+// These costs are based on ewasm documentation and typical WASM execution patterns.
+// Base costs are in "particles" (1/10000 of a gas unit) for precision.
+var GasCosts = map[string]uint64{
+	// Control flow instructions
+	"unreachable":  1,
+	"nop":          1,
+	"block":        1,
+	"loop":         1,
+	"if":           1,
+	"else":         1,
+	"end":          1,
+	"br":           2,
+	"br_if":        3,
+	"br_table":     4, // Variable cost based on table size
+	"return":       1,
+	"call":         5,
+	"call_indirect": 10,
+
+	// Variable access
+	"local.get":    2,
+	"local.set":    2,
+	"local.tee":    2,
+	"global.get":   3,
+	"global.set":   3,
+
+	// Memory operations
+	"i32.load":     3,
+	"i64.load":     3,
+	"f32.load":     3,
+	"f64.load":     3,
+	"i32.store":    3,
+	"i64.store":    3,
+	"f32.store":    3,
+	"f64.store":    3,
+	"memory.size":  5,
+	"memory.grow":  10,
+
+	// Constants
+	"i32.const":    1,
+	"i64.const":    1,
+	"f32.const":    1,
+	"f64.const":    1,
+
+	// i32 comparison
+	"i32.eqz":      1,
+	"i32.eq":       1,
+	"i32.ne":       1,
+	"i32.lt_s":     1,
+	"i32.lt_u":     1,
+	"i32.gt_s":     1,
+	"i32.gt_u":     1,
+	"i32.le_s":     1,
+	"i32.le_u":     1,
+	"i32.ge_s":     1,
+	"i32.ge_u":     1,
+
+	// i64 comparison
+	"i64.eqz":      1,
+	"i64.eq":       1,
+	"i64.ne":       1,
+	"i64.lt_s":     1,
+	"i64.lt_u":     1,
+	"i64.gt_s":     1,
+	"i64.gt_u":     1,
+	"i64.le_s":     1,
+	"i64.le_u":     1,
+	"i64.ge_s":     1,
+	"i64.ge_u":     1,
+
+	// i32 arithmetic
+	"i32.clz":      10, // Complex instruction
+	"i32.ctz":      10, // Complex instruction
+	"i32.popcnt":   8,  // Complex instruction
+	"i32.add":      1,
+	"i32.sub":      1,
+	"i32.mul":      3,
+	"i32.div_s":    5,
+	"i32.div_u":    5,
+	"i32.rem_s":    5,
+	"i32.rem_u":    5,
+	"i32.and":      1,
+	"i32.or":       1,
+	"i32.xor":      1,
+	"i32.shl":      1,
+	"i32.shr_s":    1,
+	"i32.shr_u":    1,
+	"i32.rotl":     2,
+	"i32.rotr":     2,
+
+	// i64 arithmetic
+	"i64.clz":      12, // Complex instruction
+	"i64.ctz":      12, // Complex instruction
+	"i64.popcnt":   10, // Complex instruction
+	"i64.add":      1,
+	"i64.sub":      1,
+	"i64.mul":      5,
+	"i64.div_s":    7,
+	"i64.div_u":    7,
+	"i64.rem_s":    7,
+	"i64.rem_u":    7,
+	"i64.and":      1,
+	"i64.or":       1,
+	"i64.xor":      1,
+	"i64.shl":      1,
+	"i64.shr_s":    1,
+	"i64.shr_u":    1,
+	"i64.rotl":     2,
+	"i64.rotr":     2,
+
+	// f32 arithmetic
+	"f32.add":      3,
+	"f32.sub":      3,
+	"f32.mul":      3,
+	"f32.div":      5,
+	"f32.min":      3,
+	"f32.max":      3,
+	"f32.abs":      2,
+	"f32.neg":      2,
+	"f32.sqrt":     5,
+	"f32.ceil":     5,
+	"f32.floor":    5,
+	"f32.trunc":    5,
+	"f32.nearest":  5,
+
+	// f64 arithmetic
+	"f64.add":      3,
+	"f64.sub":      3,
+	"f64.mul":      3,
+	"f64.div":      5,
+	"f64.min":      3,
+	"f64.max":      3,
+	"f64.abs":      2,
+	"f64.neg":      2,
+	"f64.sqrt":     5,
+	"f64.ceil":     5,
+	"f64.floor":    5,
+	"f64.trunc":    5,
+	"f64.nearest":  5,
+
+	// Conversions
+	"i32.wrap_i64":     1,
+	"i64.extend_i32_s": 2,
+	"i64.extend_i32_u": 2,
+	"f32.convert_i32_s": 3,
+	"f32.convert_i32_u": 3,
+	"f32.convert_i64_s": 3,
+	"f32.convert_i64_u": 3,
+	"f64.convert_i32_s": 3,
+	"f64.convert_i32_u": 3,
+	"f64.convert_i64_s": 3,
+	"f64.convert_i64_u": 3,
+	"f32.demote_f64":   3,
+	"f64.promote_f32":  3,
+	"i32.trunc_f32_s":  5,
+	"i32.trunc_f32_u":  5,
+	"i32.trunc_f64_s":  5,
+	"i32.trunc_f64_u":  5,
+	"i64.trunc_f32_s":  5,
+	"i64.trunc_f32_u":  5,
+	"i64.trunc_f64_s":  5,
+	"i64.trunc_f64_u":  5,
+	"f32.reinterpret_i32": 2,
+	"f64.reinterpret_i64": 2,
+	"i32.reinterpret_f32": 2,
+	"i64.reinterpret_f64": 2,
+
+	// Miscellaneous
+	"drop":        1,
+	"select":      3, // Complex instruction
+}
+
+// GetGasCost returns the gas cost for a given instruction mnemonic.
+// If the instruction is not in the mapping, it returns a default cost of 1.
+func GetGasCost(mnemonic string) uint64 {
+	if cost, ok := GasCosts[mnemonic]; ok {
+		return cost
+	}
+	return 1 // Default cost for unknown instructions
+}
+
+// =============================================================================
 // Instruction representation
 // =============================================================================
 
@@ -64,6 +249,8 @@ type Instruction struct {
 	Operands string
 	// Size is the number of bytes this instruction occupies.
 	Size int
+	// GasCost is the gas cost for this instruction in particles.
+	GasCost uint64
 }
 
 // String formats the instruction in WAT style.
@@ -72,6 +259,36 @@ func (inst *Instruction) String() string {
 		return fmt.Sprintf("%s %s", inst.Mnemonic, inst.Operands)
 	}
 	return inst.Mnemonic
+}
+
+// =============================================================================
+// Basic Block Analysis
+// =============================================================================
+
+// BasicBlock represents a sequence of instructions with single entry/exit points.
+type BasicBlock struct {
+	// StartOffset is the byte offset of the first instruction in this block.
+	StartOffset uint64
+	// EndOffset is the byte offset of the last instruction in this block.
+	EndOffset uint64
+	// Instructions is the list of instructions in this block.
+	Instructions []Instruction
+	// IsJumpTarget indicates if this block is the target of a branch instruction.
+	IsJumpTarget bool
+	// JumpSources contains the offsets of instructions that jump to this block.
+	JumpSources []uint64
+	// BlockType indicates the type of block (normal, conditional, loop, etc.)
+	BlockType string
+}
+
+// BasicBlockAnalysis contains the results of basic block analysis.
+type BasicBlockAnalysis struct {
+	// Blocks is the list of identified basic blocks in order.
+	Blocks []BasicBlock
+	// OffsetToBlock maps instruction offsets to their containing block.
+	OffsetToBlock map[uint64]*BasicBlock
+	// JumpTargets maps jump instruction offsets to their target block offsets.
+	JumpTargets map[uint64]uint64
 }
 
 // =============================================================================
@@ -88,6 +305,10 @@ type Snippet struct {
 	TargetIndex int
 	// FuncIndex is the function index this snippet belongs to, if known.
 	FuncIndex int
+	// ShowGasCosts indicates whether to display gas costs alongside instructions.
+	ShowGasCosts bool
+	// BasicBlocks contains basic block analysis if enabled.
+	BasicBlocks *BasicBlockAnalysis
 }
 
 // Format renders the snippet as a human-readable WAT text block with an
@@ -98,14 +319,107 @@ func (s *Snippet) Format() string {
 	}
 
 	var b strings.Builder
+	if s.BasicBlocks != nil {
+		return s.formatWithBasicBlocks(&b)
+	}
+
 	for i, inst := range s.Instructions {
 		marker := "  "
 		if i == s.TargetIndex {
 			marker = "> "
 		}
-		fmt.Fprintf(&b, "%s0x%04x: %s\n", marker, inst.Offset, inst.String())
+		
+		if s.ShowGasCosts {
+			gasUnits := float64(inst.GasCost) / 10000.0
+			fmt.Fprintf(&b, "%s0x%04x: %-20s [gas: %d particles (%.4f)]\n", 
+				marker, inst.Offset, inst.String(), inst.GasCost, gasUnits)
+		} else {
+			fmt.Fprintf(&b, "%s0x%04x: %s\n", marker, inst.Offset, inst.String())
+		}
 	}
 	return b.String()
+}
+
+// formatWithBasicBlocks formats the snippet with basic block boundaries and jump targets.
+func (s *Snippet) formatWithBasicBlocks(b *strings.Builder) string {
+	currentBlock := (*BasicBlock)(nil)
+	for i, inst := range s.Instructions {
+		// Check if we're starting a new basic block
+		if block, exists := s.BasicBlocks.OffsetToBlock[inst.Offset]; exists {
+			if currentBlock != block {
+				// Print block boundary if we're switching blocks
+				if currentBlock != nil {
+					fmt.Fprintf(b, "  --- end of block (0x%04x-0x%04x) ---\n", 
+						currentBlock.StartOffset, currentBlock.EndOffset)
+				}
+				
+				// Print block header
+				blockType := ""
+				if block.BlockType != "" {
+					blockType = fmt.Sprintf(" [%s]", block.BlockType)
+				}
+				targetMarker := ""
+				if block.IsJumpTarget {
+					targetMarker = " [JUMP TARGET]"
+				}
+				fmt.Fprintf(b, "  --- block start (0x%04x-0x%04x)%s%s ---\n", 
+					block.StartOffset, block.EndOffset, blockType, targetMarker)
+				
+				// Show jump sources if this is a jump target
+				if len(block.JumpSources) > 0 {
+					fmt.Fprintf(b, "  --- jumped from: ")
+					for j, src := range block.JumpSources {
+						if j > 0 {
+							fmt.Fprintf(b, ", ")
+						}
+						fmt.Fprintf(b, "0x%04x", src)
+					}
+					fmt.Fprintf(b, " ---\n")
+				}
+				
+				currentBlock = block
+			}
+		}
+		
+		// Print instruction with target marker
+		marker := "  "
+		if i == s.TargetIndex {
+			marker = "> "
+		}
+		
+			// Check if this instruction is a jump
+		if targetOffset, isJump := s.BasicBlocks.JumpTargets[inst.Offset]; isJump {
+			if s.ShowGasCosts {
+				gasUnits := float64(inst.GasCost) / 10000.0
+				fmt.Fprintf(b, "%s0x%04x: %-20s [gas: %d particles (%.4f)] [-> 0x%04x]\n",
+					marker, inst.Offset, inst.String(), inst.GasCost, gasUnits, targetOffset)
+			} else {
+				fmt.Fprintf(b, "%s0x%04x: %s [-> 0x%04x]\n", marker, inst.Offset, inst.String(), targetOffset)
+			}
+		} else {
+			if s.ShowGasCosts {
+				gasUnits := float64(inst.GasCost) / 10000.0
+				fmt.Fprintf(b, "%s0x%04x: %-20s [gas: %d particles (%.4f)]\n",
+					marker, inst.Offset, inst.String(), inst.GasCost, gasUnits)
+			} else {
+				fmt.Fprintf(b, "%s0x%04x: %s\n", marker, inst.Offset, inst.String())
+			}
+		}
+	}
+	
+	// Close the final block if we have one
+	if currentBlock != nil {
+		fmt.Fprintf(b, "  --- end of block (0x%04x-0x%04x) ---\n", 
+			currentBlock.StartOffset, currentBlock.EndOffset)
+	}
+	
+	return b.String()
+}
+
+// FormatWithGas renders the snippet with gas cost information.
+func (s *Snippet) FormatWithGas() string {
+	s.ShowGasCosts = true
+	return s.Format()
 }
 
 // =============================================================================
@@ -200,6 +514,233 @@ func (d *Disassembler) DisassembleAt(targetOffset uint64, contextLines int) (*Sn
 	}, nil
 }
 
+// DisassembleAtWithGas decodes instructions around the given byte offset and
+// includes gas cost information in the output.
+func (d *Disassembler) DisassembleAtWithGas(targetOffset uint64, contextLines int) (*Snippet, error) {
+	snippet, err := d.DisassembleAt(targetOffset, contextLines)
+	if err != nil {
+		return nil, err
+	}
+	snippet.ShowGasCosts = true
+	return snippet, nil
+}
+
+// DisassembleAtWithBasicBlocks decodes instructions around the given byte offset
+// and includes basic block analysis to improve jump target readability.
+func (d *Disassembler) DisassembleAtWithBasicBlocks(targetOffset uint64, contextLines int) (*Snippet, error) {
+	snippet, err := d.DisassembleAt(targetOffset, contextLines)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Perform basic block analysis on the full instruction set
+	allInstructions, err := d.DecodeAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode all instructions for basic block analysis: %w", err)
+	}
+	
+	analysis := d.AnalyzeBasicBlocks(allInstructions)
+	snippet.BasicBlocks = analysis
+	
+	return snippet, nil
+}
+
+// AnalyzeBasicBlocks performs basic block identification on the given instructions.
+func (d *Disassembler) AnalyzeBasicBlocks(instructions []Instruction) *BasicBlockAnalysis {
+	if len(instructions) == 0 {
+		return &BasicBlockAnalysis{
+			Blocks:        []BasicBlock{},
+			OffsetToBlock: make(map[uint64]*BasicBlock),
+			JumpTargets:   make(map[uint64]uint64),
+		}
+	}
+	
+	analysis := &BasicBlockAnalysis{
+		OffsetToBlock: make(map[uint64]*BasicBlock),
+		JumpTargets:   make(map[uint64]uint64),
+	}
+	
+	// Step 1: Identify leaders (start of basic blocks)
+	leaders := make(map[uint64]bool)
+	leaders[instructions[0].Offset] = true // First instruction is always a leader
+	
+	// Step 2: Find all jump targets and mark them as leaders
+	for i, inst := range instructions {
+		if d.isJumpInstruction(inst.Mnemonic) {
+			targetOffset := d.getJumpTarget(inst, instructions, i)
+			if targetOffset > 0 {
+				analysis.JumpTargets[inst.Offset] = targetOffset
+				leaders[targetOffset] = true
+			}
+			
+			// Instruction after a jump is also a leader (if it exists)
+			if i+1 < len(instructions) {
+				leaders[instructions[i+1].Offset] = true
+			}
+		}
+	}
+	
+	// Step 3: Create basic blocks from leaders
+	var sortedLeaders []uint64
+	for offset := range leaders {
+		sortedLeaders = append(sortedLeaders, offset)
+	}
+	sort.Slice(sortedLeaders, func(i, j int) bool {
+		return sortedLeaders[i] < sortedLeaders[j]
+	})
+	
+	for i, leaderOffset := range sortedLeaders {
+		// Find the end of this block (next leader or end of instructions)
+		var endOffset uint64
+		if i+1 < len(sortedLeaders) {
+			// Block ends at the next leader
+			nextLeader := sortedLeaders[i+1]
+			// Find the instruction before next leader
+			for j := len(instructions) - 1; j >= 0; j-- {
+				if instructions[j].Offset < nextLeader {
+					endOffset = instructions[j].Offset
+					break
+				}
+			}
+		} else {
+			// Last block goes to the end
+			endOffset = instructions[len(instructions)-1].Offset
+		}
+		
+		// Collect instructions in this block
+		var blockInsts []Instruction
+		for _, inst := range instructions {
+			if inst.Offset >= leaderOffset && inst.Offset <= endOffset {
+				blockInsts = append(blockInsts, inst)
+			}
+		}
+		
+		// Determine block type
+		blockType := d.determineBlockType(blockInsts)
+		
+		block := BasicBlock{
+			StartOffset: leaderOffset,
+			EndOffset:   endOffset,
+			Instructions: blockInsts,
+			BlockType:   blockType,
+		}
+		
+		analysis.Blocks = append(analysis.Blocks, block)
+		
+		// Map all instructions in this block to the block
+		for _, inst := range blockInsts {
+			analysis.OffsetToBlock[inst.Offset] = &analysis.Blocks[len(analysis.Blocks)-1]
+		}
+	}
+	
+	// Step 4: Mark jump targets and populate jump sources
+	for jumpOffset, targetOffset := range analysis.JumpTargets {
+		if targetBlock, exists := analysis.OffsetToBlock[targetOffset]; exists {
+			targetBlock.IsJumpTarget = true
+			targetBlock.JumpSources = append(targetBlock.JumpSources, jumpOffset)
+		}
+	}
+	
+	return analysis
+}
+
+// isJumpInstruction returns true if the given mnemonic is a control flow instruction.
+func (d *Disassembler) isJumpInstruction(mnemonic string) bool {
+	switch mnemonic {
+	case "br", "br_if", "br_table", "return", "call", "call_indirect":
+		return true
+	default:
+		return false
+	}
+}
+
+// getJumpTarget calculates the target offset of a jump instruction.
+func (d *Disassembler) getJumpTarget(inst Instruction, allInstructions []Instruction, instIndex int) uint64 {
+	switch inst.Mnemonic {
+	case "br", "br_if":
+		// For branch instructions, we need to calculate the target based on the block depth
+		// This is a simplified implementation - in practice, you'd need to track block nesting
+		return d.calculateBranchTarget(inst, allInstructions, instIndex)
+	case "br_table":
+		// Similar to br, but with multiple targets
+		return d.calculateBranchTableTarget(inst, allInstructions, instIndex)
+	case "return":
+		// Return targets the end of the function
+		if len(allInstructions) > 0 {
+			return allInstructions[len(allInstructions)-1].Offset
+		}
+		return 0
+	case "call", "call_indirect":
+		// Call targets are function entry points, which we can't determine from local analysis
+		return 0
+	default:
+		return 0
+	}
+}
+
+// calculateBranchTarget calculates the target of a branch instruction.
+func (d *Disassembler) calculateBranchTarget(inst Instruction, allInstructions []Instruction, instIndex int) uint64 {
+	// Parse the branch depth from operands
+	depthStr := inst.Operands
+	if depthStr == "" {
+		return 0
+	}
+	
+	// For WASM branches, we need to find the corresponding block/loop/end
+	// This is a simplified implementation that looks for the matching end instruction
+	// In a full implementation, you'd track the block stack during disassembly
+	
+	// Look forward for the next end instruction as a reasonable target
+	for j := instIndex + 1; j < len(allInstructions) && j < instIndex + 10; j++ {
+		if allInstructions[j].Mnemonic == "end" {
+			return allInstructions[j].Offset
+		}
+	}
+	
+	// If no end found, return the next instruction as fallback
+	if instIndex+1 < len(allInstructions) {
+		return allInstructions[instIndex+1].Offset
+	}
+	
+	return 0
+}
+
+// calculateBranchTableTarget calculates targets for br_table instructions.
+func (d *Disassembler) calculateBranchTableTarget(inst Instruction, allInstructions []Instruction, instIndex int) uint64 {
+	// Simplified implementation for br_table
+	// In practice, br_table has multiple targets based on the value
+	return d.calculateBranchTarget(inst, allInstructions, instIndex)
+}
+
+// determineBlockType determines the type of basic block based on its instructions.
+func (d *Disassembler) determineBlockType(instructions []Instruction) string {
+	if len(instructions) == 0 {
+		return "empty"
+	}
+	
+	// Check for conditional branches
+	for _, inst := range instructions {
+		if inst.Mnemonic == "br_if" || inst.Mnemonic == "if" {
+			return "conditional"
+		}
+	}
+	
+	// Check for loops
+	for _, inst := range instructions {
+		if inst.Mnemonic == "loop" {
+			return "loop"
+		}
+	}
+	
+	// Check if it ends with a branch
+	lastInst := instructions[len(instructions)-1]
+	if d.isJumpInstruction(lastInst.Mnemonic) {
+		return "branch"
+	}
+	
+	return "normal"
+}
+
 // DecodeAll decodes all instructions in the code section.
 func (d *Disassembler) DecodeAll() ([]Instruction, error) {
 	if !d.IsValidWasm() {
@@ -212,6 +753,213 @@ func (d *Disassembler) DecodeAll() ([]Instruction, error) {
 	}
 
 	return d.decodeInstructions(codeStart, codeEnd)
+}
+
+// GasCostAnalysis provides gas cost statistics for decoded instructions.
+type GasCostAnalysis struct {
+	// TotalInstructions is the total number of instructions decoded.
+	TotalInstructions int `json:"total_instructions"`
+	// TotalGasCost is the sum of all instruction gas costs in particles.
+	TotalGasCost uint64 `json:"total_gas_cost"`
+	// AverageGasCost is the average gas cost per instruction in particles.
+	AverageGasCost uint64 `json:"average_gas_cost"`
+	// InstructionCounts maps instruction mnemonics to their execution counts.
+	InstructionCounts map[string]int `json:"instruction_counts"`
+	// InstructionGasCosts maps instruction mnemonics to their total gas cost.
+	InstructionGasCosts map[string]uint64 `json:"instruction_gas_costs"`
+	// AverageGasCostByInstruction maps instruction mnemonics to their average gas cost.
+	AverageGasCostByInstruction map[string]uint64 `json:"average_gas_cost_by_instruction"`
+}
+
+// AnalyzeGasCosts performs gas cost analysis on all decoded instructions.
+func (d *Disassembler) AnalyzeGasCosts() (*GasCostAnalysis, error) {
+	instructions, err := d.DecodeAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode instructions: %w", err)
+	}
+
+	if len(instructions) == 0 {
+		return &GasCostAnalysis{
+			InstructionCounts:           make(map[string]int),
+			InstructionGasCosts:         make(map[string]uint64),
+			AverageGasCostByInstruction: make(map[string]uint64),
+		}, nil
+	}
+
+	analysis := &GasCostAnalysis{
+		TotalInstructions:           len(instructions),
+		InstructionCounts:           make(map[string]int),
+		InstructionGasCosts:         make(map[string]uint64),
+		AverageGasCostByInstruction: make(map[string]uint64),
+	}
+
+	for _, inst := range instructions {
+		analysis.InstructionCounts[inst.Mnemonic]++
+		analysis.InstructionGasCosts[inst.Mnemonic] += inst.GasCost
+		analysis.TotalGasCost += inst.GasCost
+	}
+
+	// Calculate average gas costs per instruction type
+	for mnemonic, totalCost := range analysis.InstructionGasCosts {
+		count := analysis.InstructionCounts[mnemonic]
+		if count > 0 {
+			analysis.AverageGasCostByInstruction[mnemonic] = totalCost / uint64(count)
+		}
+	}
+
+	// Calculate overall average gas cost
+	if analysis.TotalInstructions > 0 {
+		analysis.AverageGasCost = analysis.TotalGasCost / uint64(analysis.TotalInstructions)
+	}
+
+	return analysis, nil
+}
+
+// FormatGasAnalysis formats the gas cost analysis as a human-readable string.
+func (a *GasCostAnalysis) Format() string {
+	if a.TotalInstructions == 0 {
+		return "No instructions to analyze"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Gas Cost Analysis\n")
+	fmt.Fprintf(&b, "================\n")
+	fmt.Fprintf(&b, "Total Instructions: %d\n", a.TotalInstructions)
+	fmt.Fprintf(&b, "Total Gas Cost: %d particles (%.4f gas units)\n", a.TotalGasCost, float64(a.TotalGasCost)/10000.0)
+	fmt.Fprintf(&b, "Average Gas Cost: %d particles (%.4f gas units)\n\n", a.AverageGasCost, float64(a.AverageGasCost)/10000.0)
+
+	// Sort instructions by total gas cost (descending)
+	type instructionStat struct {
+		mnemonic  string
+		count     int
+		totalCost uint64
+		avgCost   uint64
+	}
+
+	var stats []instructionStat
+	for mnemonic := range a.InstructionCounts {
+		stats = append(stats, instructionStat{
+			mnemonic:  mnemonic,
+			count:     a.InstructionCounts[mnemonic],
+			totalCost: a.InstructionGasCosts[mnemonic],
+			avgCost:   a.AverageGasCostByInstruction[mnemonic],
+		})
+	}
+
+	sort.Slice(stats, func(i, j int) bool {
+		return stats[i].totalCost > stats[j].totalCost
+	})
+
+	fmt.Fprintf(&b, "Top Instructions by Total Gas Cost:\n")
+	fmt.Fprintf(&b, "%-20s %-8s %-12s %-12s %-8s\n", "Instruction", "Count", "Total Cost", "Avg Cost", "% of Total")
+	fmt.Fprintf(&b, "%-20s %-8s %-12s %-12s %-8s\n", "----------", "-----", "-----------", "---------", "----------")
+
+	for _, stat := range stats[:min(20, len(stats))] {
+		percentage := float64(stat.totalCost) / float64(a.TotalGasCost) * 100
+		fmt.Fprintf(&b, "%-20s %-8d %-12d %-12d %-8.2f\n",
+			stat.mnemonic, stat.count, stat.totalCost, stat.avgCost, percentage)
+	}
+
+	return b.String()
+}
+
+// FormatAvgGasCostByType formats a table of average gas cost per instruction
+// type, sorted by average cost descending. This is the output for
+// --gas-cost-mode / the GasCostMode disassembler mode.
+func (a *GasCostAnalysis) FormatAvgGasCostByType() string {
+	if a.TotalInstructions == 0 {
+		return "No instructions to analyze"
+	}
+
+	type row struct {
+		mnemonic string
+		avgCost  uint64
+		count    int
+	}
+	rows := make([]row, 0, len(a.AverageGasCostByInstruction))
+	for mnemonic, avg := range a.AverageGasCostByInstruction {
+		rows = append(rows, row{mnemonic, avg, a.InstructionCounts[mnemonic]})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].avgCost != rows[j].avgCost {
+			return rows[i].avgCost > rows[j].avgCost
+		}
+		return rows[i].mnemonic < rows[j].mnemonic
+	})
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Average Gas Cost by Instruction Type\n")
+	fmt.Fprintf(&b, "====================================\n")
+	fmt.Fprintf(&b, "%-24s %-12s %-8s\n", "Instruction", "Avg Cost", "Count")
+	fmt.Fprintf(&b, "%-24s %-12s %-8s\n", "------------------------", "------------", "--------")
+	for _, r := range rows {
+		fmt.Fprintf(&b, "%-24s %-12d %-8d\n", r.mnemonic, r.avgCost, r.count)
+	}
+	return b.String()
+}
+
+// DisassembleWithGasCostMode decodes instructions around targetOffset and
+// appends an average-gas-cost-per-type summary table after the snippet.
+// It is the backing implementation for the --gas-cost-mode CLI flag.
+func (d *Disassembler) DisassembleWithGasCostMode(targetOffset uint64, contextLines int) (string, error) {
+	if !d.IsValidWasm() {
+		return "", fmt.Errorf("not a valid WASM module")
+	}
+	codeStart, codeEnd, err := d.findCodeSection()
+	if err != nil {
+		return "", fmt.Errorf("failed to locate code section: %w", err)
+	}
+	instructions, err := d.decodeInstructions(codeStart, codeEnd)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode instructions: %w", err)
+	}
+
+	// Build snippet from already-decoded instructions.
+	targetIdx := 0
+	for i, inst := range instructions {
+		if inst.Offset == targetOffset ||
+			(inst.Offset <= targetOffset && (i+1 >= len(instructions) || instructions[i+1].Offset > targetOffset)) {
+			targetIdx = i
+			break
+		}
+	}
+	start := targetIdx - contextLines
+	if start < 0 {
+		start = 0
+	}
+	end := targetIdx + contextLines + 1
+	if end > len(instructions) {
+		end = len(instructions)
+	}
+	snippet := &Snippet{
+		Instructions: instructions[start:end],
+		TargetOffset: targetOffset,
+		TargetIndex:  targetIdx - start,
+		ShowGasCosts: true,
+	}
+
+	// Build analysis from the same decoded instructions — no second decode pass.
+	analysis := &GasCostAnalysis{
+		TotalInstructions:           len(instructions),
+		InstructionCounts:           make(map[string]int),
+		InstructionGasCosts:         make(map[string]uint64),
+		AverageGasCostByInstruction: make(map[string]uint64),
+	}
+	for _, inst := range instructions {
+		analysis.InstructionCounts[inst.Mnemonic]++
+		analysis.InstructionGasCosts[inst.Mnemonic] += inst.GasCost
+		analysis.TotalGasCost += inst.GasCost
+	}
+	for mnemonic, total := range analysis.InstructionGasCosts {
+		if c := analysis.InstructionCounts[mnemonic]; c > 0 {
+			analysis.AverageGasCostByInstruction[mnemonic] = total / uint64(c)
+		}
+	}
+	if analysis.TotalInstructions > 0 {
+		analysis.AverageGasCost = analysis.TotalGasCost / uint64(analysis.TotalInstructions)
+	}
+
+	return snippet.Format() + "\n" + analysis.FormatAvgGasCostByType(), nil
 }
 
 // findCodeSection locates the code section in the WASM module and returns
@@ -410,7 +1158,9 @@ func (d *Disassembler) decodeFuncBody(body funcBodyRange) []Instruction {
 	for i := uint64(0); i < localCount && pos < end; i++ {
 		_, m1 := decodeULEB128(d.data[pos:]) // count
 		pos += m1
-		pos++ // valtype byte
+		if pos < end {
+			pos++ // valtype byte
+		}
 	}
 
 	var insts []Instruction
@@ -442,6 +1192,7 @@ func (d *Disassembler) decodeFuncBody(body funcBodyRange) []Instruction {
 			Mnemonic: mnemonic,
 			Operands: operands,
 			Size:     1 + consumed,
+			GasCost:  GetGasCost(mnemonic),
 		})
 
 		if mnemonic == "i32.const" {

@@ -119,7 +119,7 @@ func buildContractStats(resp *simulator.SimulationResponse) []contractStat {
 	}
 
 	for _, e := range resp.CategorizedEvents {
-		process(e.ContractID, e.EventType)
+		process(e.ContractID(), e.EventType())
 	}
 
 	if len(index) == 0 {

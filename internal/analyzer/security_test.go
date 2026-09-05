@@ -10,6 +10,18 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func catEvent(category, eventType string, contractID *string, topics []string, data string) simulator.CategorizedEvent {
+	return simulator.CategorizedEvent{
+		Category: category,
+		Event: simulator.DiagnosticEvent{
+			EventType:  eventType,
+			ContractID: contractID,
+			Topics:     topics,
+			Data:       data,
+		},
+	}
+}
+
 func TestSecurityAnalyzer_NoViolations(t *testing.T) {
 	analyzer := NewSecurityAnalyzer()
 
@@ -17,18 +29,8 @@ func TestSecurityAnalyzer_NoViolations(t *testing.T) {
 	resp := &simulator.SimulationResponse{
 		Status: "success",
 		CategorizedEvents: []simulator.CategorizedEvent{
-			{
-				EventType:  "require_auth",
-				ContractID: &contractID,
-				Topics:     []string{"require_auth"},
-				Data:       "auth_data",
-			},
-			{
-				EventType:  "storage_write",
-				ContractID: &contractID,
-				Topics:     []string{"write"},
-				Data:       "write_data",
-			},
+			catEvent("Diagnostic", "require_auth", &contractID, []string{"require_auth"}, "auth_data"),
+			catEvent("Diagnostic", "storage_write", &contractID, []string{"write"}, "write_data"),
 		},
 	}
 
@@ -43,12 +45,7 @@ func TestSecurityAnalyzer_UnauthorizedStateModification(t *testing.T) {
 	resp := &simulator.SimulationResponse{
 		Status: "success",
 		CategorizedEvents: []simulator.CategorizedEvent{
-			{
-				EventType:  "storage_write",
-				ContractID: &contractID,
-				Topics:     []string{"write"},
-				Data:       "unauthorized_write",
-			},
+			catEvent("Diagnostic", "storage_write", &contractID, []string{"write"}, "unauthorized_write"),
 		},
 	}
 
@@ -66,45 +63,25 @@ func TestSecurityAnalyzer_SACPattern_NoFalsePositive(t *testing.T) {
 		{
 			name: "SAC balance update",
 			events: []simulator.CategorizedEvent{
-				{
-					EventType:  "storage_write",
-					ContractID: strPtr("sac_contract"),
-					Topics:     []string{"Balance"},
-					Data:       "balance_data",
-				},
+				catEvent("Diagnostic", "storage_write", strPtr("sac_contract"), []string{"Balance"}, "balance_data"),
 			},
 		},
 		{
 			name: "SAC allowance update",
 			events: []simulator.CategorizedEvent{
-				{
-					EventType:  "storage_write",
-					ContractID: strPtr("sac_contract"),
-					Topics:     []string{"Allowance"},
-					Data:       "allowance_data",
-				},
+				catEvent("Diagnostic", "storage_write", strPtr("sac_contract"), []string{"Allowance"}, "allowance_data"),
 			},
 		},
 		{
 			name: "SAC admin operation",
 			events: []simulator.CategorizedEvent{
-				{
-					EventType:  "storage_write",
-					ContractID: strPtr("sac_contract"),
-					Topics:     []string{"Admin"},
-					Data:       "admin_data",
-				},
+				catEvent("Diagnostic", "storage_write", strPtr("sac_contract"), []string{"Admin"}, "admin_data"),
 			},
 		},
 		{
 			name: "Stellar asset contract",
 			events: []simulator.CategorizedEvent{
-				{
-					EventType:  "storage_write",
-					ContractID: strPtr("sac_contract"),
-					Topics:     []string{"write"},
-					Data:       "stellar_asset_data",
-				},
+				catEvent("Diagnostic", "storage_write", strPtr("sac_contract"), []string{"write"}, "stellar_asset_data"),
 			},
 		},
 	}
@@ -132,24 +109,9 @@ func TestSecurityAnalyzer_MultipleContracts(t *testing.T) {
 	resp := &simulator.SimulationResponse{
 		Status: "success",
 		CategorizedEvents: []simulator.CategorizedEvent{
-			{
-				EventType:  "require_auth",
-				ContractID: &contract1,
-				Topics:     []string{"require_auth"},
-				Data:       "auth1",
-			},
-			{
-				EventType:  "storage_write",
-				ContractID: &contract1,
-				Topics:     []string{"write"},
-				Data:       "write1",
-			},
-			{
-				EventType:  "storage_write",
-				ContractID: &contract2,
-				Topics:     []string{"write"},
-				Data:       "write2",
-			},
+			catEvent("Diagnostic", "require_auth", &contract1, []string{"require_auth"}, "auth1"),
+			catEvent("Diagnostic", "storage_write", &contract1, []string{"write"}, "write1"),
+			catEvent("Diagnostic", "storage_write", &contract2, []string{"write"}, "write2"),
 		},
 	}
 
@@ -165,18 +127,8 @@ func TestSecurityAnalyzer_AuthAfterWrite_StillViolation(t *testing.T) {
 	resp := &simulator.SimulationResponse{
 		Status: "success",
 		CategorizedEvents: []simulator.CategorizedEvent{
-			{
-				EventType:  "storage_write",
-				ContractID: &contractID,
-				Topics:     []string{"write"},
-				Data:       "write_data",
-			},
-			{
-				EventType:  "require_auth",
-				ContractID: &contractID,
-				Topics:     []string{"require_auth"},
-				Data:       "auth_data",
-			},
+			catEvent("Diagnostic", "storage_write", &contractID, []string{"write"}, "write_data"),
+			catEvent("Diagnostic", "require_auth", &contractID, []string{"require_auth"}, "auth_data"),
 		},
 	}
 

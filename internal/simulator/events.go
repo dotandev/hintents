@@ -54,14 +54,33 @@ func (e *DiagnosticEvent) ParseTopics() ([]xdr.ScVal, error) {
 	return vals, nil
 }
 
+// CategorizedEvent mirrors the simulator IPC definition (simulator/src/types.rs):
+// a category label plus the nested DiagnosticEvent payload.
 type CategorizedEvent struct {
-	Category                 string   `json:"category"`
-	EventType                string   `json:"event_type"`
-	ContractID               *string  `json:"contract_id,omitempty"`
-	Topics                   []string `json:"topics"`
-	Data                     string   `json:"data"`
-	InSuccessfulContractCall bool     `json:"in_successful_contract_call"`
-	WasmInstruction          *string  `json:"wasm_instruction,omitempty"`
-	CPU                      *uint64  `json:"cpu,omitempty"`
-	Memory                   *uint64  `json:"memory,omitempty"`
+	Category string          `json:"category"`
+	Event    DiagnosticEvent `json:"event"`
 }
+
+// EventType returns the nested event's type (contract/system/diagnostic).
+func (e *CategorizedEvent) EventType() string { return e.Event.EventType }
+
+// ContractID returns the nested event's contract ID pointer.
+func (e *CategorizedEvent) ContractID() *string { return e.Event.ContractID }
+
+// Topics returns the nested event's topics.
+func (e *CategorizedEvent) Topics() []string { return e.Event.Topics }
+
+// Data returns the nested event's base64 XDR data.
+func (e *CategorizedEvent) Data() string { return e.Event.Data }
+
+// InSuccessfulContractCall reports whether the nested event succeeded.
+func (e *CategorizedEvent) InSuccessfulContractCall() bool { return e.Event.InSuccessfulContractCall }
+
+// WasmInstruction returns the nested event's WASM instruction, if any.
+func (e *CategorizedEvent) WasmInstruction() *string { return e.Event.WasmInstruction }
+
+// CPU returns the nested event's CPU instruction count, if recorded.
+func (e *CategorizedEvent) CPU() *uint64 { return e.Event.CPU }
+
+// Memory returns the nested event's memory bytes, if recorded.
+func (e *CategorizedEvent) Memory() *uint64 { return e.Event.Memory }
