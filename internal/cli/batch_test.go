@@ -291,6 +291,14 @@ func TestRunBatch_PerSimulationTimeoutKillsSlow(t *testing.T) {
 	} else if !contains(result.Error.Error(), "timeout") {
 		t.Errorf("expected timeout error, got: %v", result.Error)
 	}
+
+	// The per-simulation timeout must actually bound the run. The mock
+	// simulator forks a `sleep` child that inherits the stdio pipes; before
+	// the timeout context was propagated into the process tree, RunBatch
+	// waited for the orphaned child too and only returned after ~5s.
+	if result.Duration > cfg.Timeout+3*time.Second {
+		t.Errorf("timeout flag ignored: simulation ran for %v despite a %v timeout", result.Duration, cfg.Timeout)
+	}
 }
 
 func TestRunBatch_ResultsIncludeDuration(t *testing.T) {
