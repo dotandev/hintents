@@ -11,7 +11,7 @@ permissions:
 
 # Cancel in-progress runs for the same branch
 concurrency:
-  group: $ {{ github.workflow }}-$ {{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -86,7 +86,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: simulator -> target
-          prefix-key: $ {{ runner.os }}-rust-strict-stable
+          prefix-key: ${{ runner.os }}-rust-strict-stable
           cache-targets: false
 
       - name: Check formatting
@@ -100,7 +100,7 @@ jobs:
       - name: Run Clippy (strict mode)
         run: |
           echo "Running Clippy with strict warnings..."
-          cargo clippy --all-targets --all-features -- 
+          cargo clippy --all-targets --all-features -- \
             -T warnings \
             -D clippy::all \
             -D unused-variables \
@@ -129,10 +129,10 @@ jobs:
     steps:
       - name: Check results
         run: |
-          if [ "$ {{ needs.go-lint.result }}" != "success" ] || [ "$ {{ needs.rust-lint.result }}" != "success" ]; then
+          if [ "${{ needs.go-lint.result }}" != "success" ] || [ "${{ needs.rust-lint.result }}" != "success" ]; then
             echo "[FAIL] Strict linting checks failed"
-            echo "Go linting: $ {{ needs.go-lint.result }}"
-            echo "Rust linting: $ {{ needs.rust-lint.result }}"
+            echo "Go linting: ${{ needs.go-lint.result }}"
+            echo "Rust linting: ${{ needs.rust-lint.result }}"
             exit 1
           fi
           echo " All strict linting checks passed!"
