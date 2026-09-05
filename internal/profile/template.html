@@ -7,17 +7,29 @@
   body { font-family: monospace; background: #1e1e2e; color: #cdd6f4; margin: 0; padding: 16px; }
   h1 { font-size: 1.1rem; margin: 0 0 10px; }
   #info { background: #313244; border-radius: 6px; padding: 10px 14px; margin-bottom: 10px; font-size: 0.85rem; min-height: 38px; }
-  canvas { display: block; border-radius: 6px; cursor: pointer; }
+  canvas { display: block; border-radius: 6px; cursor: grab; }
+  canvas.panning { cursor: grabbing; }
   #snapshot-panel { background: #313244; border-radius: 6px; padding: 10px 14px; margin-top: 12px; font-size: 0.85rem; }
   #snapshot-panel h2 { font-size: 0.9rem; margin: 0 0 8px; }
   #snapshot-list { display: flex; flex-wrap: wrap; gap: 8px; }
   .snap-badge { background: #45475a; border-radius: 4px; padding: 4px 8px; cursor: pointer; user-select: none; }
   .snap-badge.active { background: #89b4fa; color: #1e1e2e; }
+  #zoom-controls { display: flex; gap: 6px; margin-bottom: 10px; }
+  #zoom-controls button {
+    background: #45475a; color: #cdd6f4; border: 1px solid #585b70;
+    border-radius: 4px; padding: 4px 10px; cursor: pointer; font-family: monospace; font-size: 0.8rem;
+  }
+  #zoom-controls button:hover { background: #585b70; }
 </style>
 </head>
 <body>
 <h1>Flamegraph &mdash; {{.TxHash}}</h1>
-<div id="info">Hover over a frame for details. Click a frame to jump to its snapshot.</div>
+<div id="info">Hover over a frame for details. Click a frame to jump to its snapshot. Scroll to zoom, drag to pan, double-click to reset.</div>
+<div id="zoom-controls">
+  <button id="zoom-in" title="Zoom in (+)">+ Zoom In</button>
+  <button id="zoom-out" title="Zoom out (-)">&minus; Zoom Out</button>
+  <button id="zoom-reset" title="Reset zoom and pan (0)">Reset</button>
+</div>
 <canvas id="fg" width="1100" height="60"></canvas>
 <div id="snapshot-panel">
   <h2>Snapshot Summary</h2>
@@ -37,6 +49,15 @@ var ROW_H = 24;
 var PAD = 2;
 var Y = PAD;
 
+var MIN_SCALE = 1;
+var MAX_SCALE = 20;
+
+// View transform: scale (1 = fit) and pan offset in canvas pixels.
+var view = { scale: 1, offsetX: 0, offsetY: 0 };
+var dragging = false;
+var dragStart = null;
+var dragMoved = false;
+
 var COLORS = ['#89b4fa','#cba6f7','#f38ba8','#fab387','#a6e3a1','#74c7ec','#f9e2af'];
 function frameColor(i) { return COLORS[i % COLORS.length]; }
 
@@ -46,6 +67,98 @@ for (var fi = 0; fi < frames.length; fi++) {
 }
 if (totalGas === 0) { totalGas = frames.length || 1; }
 
+// ─── Layout computation ─────────────────────────────────────────────────────
+// Frames are laid out in unscaled "world" coordinates once; the view transform
+// maps world coords to canvas pixels.
+var worldRects = [];
+var x = 0;
+for (var i = 0; i < frames.length; i++) {
+  var f = frames[i];
+  var gas = f.gas > 0 ? f.gas : 1;
+  var w = Math.max(1, (gas / totalGas) * W);
+  worldRects.push({ x: x, w: w, frame: f });
+  x += w;
+}
+var worldW = Math.max(x, W);
+var worldH = ROW_H + 2 * PAD;
+
+function clampView() {
+  if (view.scale < MIN_SCALE) view.scale = MIN_SCALE;
+  if (view.scale > MAX_SCALE) view.scale = MAX_SCALE;
+  // Limit panning so content edges cannot be dragged past the canvas edges.
+  var visW = W / view.scale;
+  var visH = canvas.height / view.scale;
+  var maxOffX = Math.max(0, (worldW - visW) * view.scale);
+  var maxOffY = Math.max(0, (worldH - visH) * view.scale);
+  if (view.offsetX < 0) view.offsetX = 0;
+  if (view.offsetX > maxOffX) view.offsetX = maxOffX;
+  if (view.offsetY < 0) view.offsetY = 0;
+  if (view.offsetY > maxOffY) view.offsetY = maxOffY;
+}
+
+// worldToScreen / screenToWorld helpers for the view transform.
+function worldToScreen(wx, wy) {
+  return { x: wx * view.scale - view.offsetX, y: wy * view.scale - view.offsetY };
+}
+function screenToWorld(sx, sy) {
+  return { x: (sx + view.offsetX) / view.scale, y: (sy + view.offsetY) / view.scale };
+}
+
+function draw() {
+  clampView();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(view.scale, 0, 0, view.scale, -view.offsetX, -view.offsetY);
+
+  for (var i = 0; i < worldRects.length; i++) {
+    var r = worldRects[i];
+    var sx = r.x * view.scale - view.offsetX;
+    var sw = r.w * view.scale;
+    // Skip frames fully outside the viewport.
+    if (sx + sw < 0 || sx > W) continue;
+
+    ctx.fillStyle = frameColor(i);
+    ctx.fillRect(r.x, Y, r.w - PAD / view.scale, ROW_H);
+
+    // Label only when there is enough room (in screen pixels).
+    if (sw > 30) {
+      ctx.fillStyle = '#1e1e2e';
+      ctx.font = '10px monospace';
+      var maxChars = Math.floor((sw - PAD) / 7 / view.scale * view.scale); // chars in world units
+      var charW = 7 / view.scale; // approx char width in world units
+      maxChars = Math.floor((r.w - PAD / view.scale) / charW);
+      if (maxChars > 0) {
+        ctx.fillText(r.frame.name.slice(0, maxChars), r.x + 3 / view.scale, Y + 15 / view.scale);
+      }
+    }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function resetView() {
+  view.scale = 1;
+  view.offsetX = 0;
+  view.offsetY = 0;
+  draw();
+}
+
+// zoomAt keeps the world point under (mx, my) fixed while scaling.
+function zoomAt(mx, my, factor) {
+  var before = screenToWorld(mx, my);
+  view.scale *= factor;
+  clampView();
+  var after = screenToWorld(mx, my);
+  view.offsetX += (after.x - before.x) * view.scale;
+  view.offsetY += (after.y - before.y) * view.scale;
+  clampView();
+  draw();
+}
+
+function zoomByFactor(factor) {
+  zoomAt(W / 2, canvas.height / 2, factor);
+}
+
+// ─── Snapshot panel ─────────────────────────────────────────────────────────
 function renderSnapshots(activeID) {
   snapList.innerHTML = '';
   for (var si = 0; si < snapshots.length; si++) {
@@ -62,51 +175,129 @@ function renderSnapshots(activeID) {
 }
 renderSnapshots(-1);
 
-var frameRects = [];
-var x = 0;
-for (var i = 0; i < frames.length; i++) {
-  var f = frames[i];
-  var gas = f.gas > 0 ? f.gas : 1;
-  var w = Math.max(1, Math.floor((gas / totalGas) * W));
-  ctx.fillStyle = frameColor(i);
-  ctx.fillRect(x, Y, w - PAD, ROW_H);
-  if (w > 30) {
-    ctx.fillStyle = '#1e1e2e';
-    ctx.font = '10px monospace';
-    ctx.fillText(f.name.slice(0, Math.floor((w - PAD) / 7)), x + 3, Y + 15);
-  }
-  frameRects.push({ x: x, y: Y, w: w - PAD, h: ROW_H, frame: f });
-  x += w;
-}
-
+// ─── Hit testing ────────────────────────────────────────────────────────────
 function hitTest(mx, my) {
-  for (var ri = 0; ri < frameRects.length; ri++) {
-    var r = frameRects[ri];
-    if (mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h) {
+  var p = screenToWorld(mx, my);
+  for (var ri = 0; ri < worldRects.length; ri++) {
+    var r = worldRects[ri];
+    if (p.x >= r.x && p.x < r.x + r.w && p.y >= Y && p.y < Y + ROW_H) {
       return r.frame;
     }
   }
   return null;
 }
 
+// ─── Mouse: hover, click, drag-pan ──────────────────────────────────────────
 canvas.addEventListener('mousemove', function(e) {
   var rect = canvas.getBoundingClientRect();
-  var f = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+  var mx = e.clientX - rect.left;
+  var my = e.clientY - rect.top;
+
+  if (dragging) {
+    view.offsetX -= (mx - dragStart.x);
+    view.offsetY -= (my - dragStart.y);
+    dragStart = { x: mx, y: my };
+    dragMoved = true;
+    draw();
+    return;
+  }
+
+  var f = hitTest(mx, my);
   if (f) {
     info.textContent = f.name + ' | Gas: ' + f.gas + ' | State Churn: ' + f.state_churn + ' keys | Step: ' + f.step + ' | Snapshot #' + f.snapshot_id;
   } else {
-    info.textContent = 'Hover over a frame for details. Click a frame to jump to its snapshot.';
+    info.textContent = 'Hover over a frame for details. Click a frame to jump to its snapshot. Scroll to zoom, drag to pan, double-click to reset.';
   }
 });
 
-canvas.addEventListener('click', function(e) {
+canvas.addEventListener('mousedown', function(e) {
+  dragging = true;
+  dragMoved = false;
   var rect = canvas.getBoundingClientRect();
-  var f = hitTest(e.clientX - rect.left, e.clientY - rect.top);
-  if (f) {
-    info.textContent = 'Selected: ' + f.name + ' | Gas: ' + f.gas + ' | State Churn: ' + f.state_churn + ' keys | Step: ' + f.step + ' | Snapshot #' + f.snapshot_id;
-    renderSnapshots(f.snapshot_id);
+  dragStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  canvas.classList.add('panning');
+  e.preventDefault();
+});
+
+window.addEventListener('mouseup', function(e) {
+  if (!dragging) return;
+  dragging = false;
+  canvas.classList.remove('panning');
+  // Treat as a click only if the mouse barely moved (no frame jump after a pan).
+  if (!dragMoved) {
+    var rect = canvas.getBoundingClientRect();
+    var f = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+    if (f) {
+      info.textContent = 'Selected: ' + f.name + ' | Gas: ' + f.gas + ' | State Churn: ' + f.state_churn + ' keys | Step: ' + f.step + ' | Snapshot #' + f.snapshot_id;
+      renderSnapshots(f.snapshot_id);
+    }
   }
 });
+
+canvas.addEventListener('mouseleave', function() {
+  if (dragging) {
+    dragging = false;
+    canvas.classList.remove('panning');
+  }
+});
+
+canvas.addEventListener('dblclick', function() {
+  resetView();
+});
+
+// ─── Wheel zoom (centered on cursor) ────────────────────────────────────────
+canvas.addEventListener('wheel', function(e) {
+  e.preventDefault();
+  var rect = canvas.getBoundingClientRect();
+  var mx = e.clientX - rect.left;
+  var my = e.clientY - rect.top;
+  var factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+  zoomAt(mx, my, factor);
+}, { passive: false });
+
+// ─── Buttons ────────────────────────────────────────────────────────────────
+document.getElementById('zoom-in').addEventListener('click', function() { zoomByFactor(1.25); });
+document.getElementById('zoom-out').addEventListener('click', function() { zoomByFactor(1 / 1.25); });
+document.getElementById('zoom-reset').addEventListener('click', resetView);
+
+// ─── Keyboard shortcuts ─────────────────────────────────────────────────────
+window.addEventListener('keydown', function(e) {
+  switch (e.key) {
+    case '+':
+    case '=':
+      zoomByFactor(1.25);
+      break;
+    case '-':
+    case '_':
+      zoomByFactor(1 / 1.25);
+      break;
+    case '0':
+      resetView();
+      break;
+    case 'ArrowLeft':
+      view.offsetX -= 40;
+      clampView();
+      draw();
+      break;
+    case 'ArrowRight':
+      view.offsetX += 40;
+      clampView();
+      draw();
+      break;
+    case 'ArrowUp':
+      view.offsetY -= 40;
+      clampView();
+      draw();
+      break;
+    case 'ArrowDown':
+      view.offsetY += 40;
+      clampView();
+      draw();
+      break;
+  }
+});
+
+draw();
 </script>
 </body>
 </html>
