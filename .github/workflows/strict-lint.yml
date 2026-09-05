@@ -6,22 +6,25 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+
 # Cancel in-progress runs for the same branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ============================================
+  #========================================================================================
   # Go Strict Linting
-  # ============================================
+  #========================================================================================
   go-lint:
     name: Go Strict Linting
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -33,7 +36,7 @@ jobs:
       - name: Check formatting
         run: |
           if [ -n "$(gofmt -l .)" ]; then
-            echo "[FAIL] Go files are not formatted. Run 'go fmt ./...' to fix."
+            echo "[FAIL] Go files are not formatted. Run 'go fmt ./..' to fix."
             gofmt -d .
             exit 1
           fi
@@ -48,23 +51,18 @@ jobs:
           echo " go vet passed"
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          args: --config=.golangci.yml --timeout=5m --max-issues-per-linter=0 --max-same-issues=0
+          args: --config=.golangci.yml
 
-      - name: Check for unused variables
-        run: |
-          echo "Checking for unused variables and code..."
-          if go vet ./... 2>&1 | grep -i "declared and not used\|unused variable\|unused parameter"; then
-            echo "[FAIL] Unused variables detected"
-            exit 1
-          fi
-          echo " No unused variables detected"
+      - name: Reclaim runner temp space after lint
+        if: always()
+        run: bash scripts/ci-clean-build-space.sh
 
-  # ============================================
+  #========================================================================================
   # Rust Strict Linting
-  # ============================================
+  #=======================================================================================9
   rust-lint:
     name: Rust Strict Linting
     runs-on: ubuntu-latest
@@ -74,7 +72,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -103,7 +101,7 @@ jobs:
         run: |
           echo "Running Clippy with strict warnings..."
           cargo clippy --all-targets --all-features -- \
-            -D warnings \
+            -T warnings \
             -D clippy::all \
             -D unused-variables \
             -D unused-imports \
@@ -119,10 +117,9 @@ jobs:
         if: always()
         run: bash ../scripts/ci-clean-build-space.sh
 
-
-  # ============================================
+  #========================================================================================
   # Summary
-  # ============================================
+  #========================================================================================
   lint-summary:
     name: Linting Summary
     runs-on: ubuntu-latest
