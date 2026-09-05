@@ -182,7 +182,9 @@ impl SimHost {
     pub fn check_memory_limit(&self) {
         if let Some(limit) = self.config.memory_limit {
             if let Ok(consumed) = self.inner.budget_cloned().get_mem_bytes_consumed() {
-                memory::check_memory_limit(consumed, limit);
+                // Enforce strict per-page bounds checking to catch rogue contracts
+                // that allocate beyond the simulated limit before the next check point.
+                memory::enforce_memory_limit_per_page(consumed, limit, 65536); // 64KB page size
             }
         }
     }
