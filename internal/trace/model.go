@@ -5,6 +5,8 @@ package trace
 
 import (
 	"fmt"
+	"html"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -846,4 +848,455 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ---------------------------------------------------------------------------
+// ANSI trace → interactive call-graph
+// ---------------------------------------------------------------------------
+
+// ansiEscapePattern matches ANSI/VT escape sequences (SGR colour codes, cursor
+// movement and private modes) so they can be stripped from trace logs.
+var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// stepPattern matches the "[N]" step marker emitted for every state in a
+// printed execution trace.
+var stepPattern = regexp.MustCompile(`\[(\d+)\]`)
+
+// cpuPattern and memPattern match the "CPU: 1,234" / "MEM: 1.5 KB" budget
+// sub-lines emitted for nodes that carry resource deltas.
+var (
+	cpuPattern = regexp.MustCompile(`(?i)cpu:\s*([0-9,]+)`)
+	memPattern = regexp.MustCompile(`(?i)mem:\s*([0-9.,]+\s*(?:b|kb|mb|gb)?)`)
+)
+
+// contractIDPattern matches Stellar contract/account identifiers, which are
+// 56-character base32 strings starting with C or G.
+var contractIDPattern = regexp.MustCompile(`\b[CG][A-Z2-7]{55}\b`)
+
+// knownIcons lists the glyphs used to tag operation types in printed traces.
+var knownIcons = []string{"◆", "⚙", "🔐", "◉", "▪", "▸", "■", "⚠", "…", "·", "▾", "[FAIL]", "[READY]"}
+
+// decorationPrefixes are header/footer lines that carry no trace steps.
+var decorationPrefixes = []string{
+	"transaction execution trace",
+	"hash  :",
+	"start :",
+	"steps :",
+	"steps:",
+}
+
+// CallGraphNode is a single function-call node in an interactive call graph
+// parsed from text-based trace logs.
+type CallGraphNode struct {
+	ID          string
+	Operation   string
+	EventType   string
+	ContractID  string
+	Function    string
+	Error       string
+	CPUDelta    uint64
+	MemoryDelta uint64
+	Depth       int
+	Calls       []*CallGraphNode
+	parent      *CallGraphNode
+}
+
+// AddCall appends a callee node to this node, wiring its Depth and parent.
+func (n *CallGraphNode) AddCall(child *CallGraphNode) {
+	child.parent = n
+	child.Depth = n.Depth + 1
+	n.Calls = append(n.Calls, child)
+}
+
+// IsLeaf reports whether the node has no callees.
+func (n *CallGraphNode) IsLeaf() bool {
+	return len(n.Calls) == 0
+}
+
+// Label returns a human-readable label for the node: Function (Contract) when
+// both are known, otherwise the operation name.
+func (n *CallGraphNode) Label() string {
+	if n.Function != "" {
+		if n.ContractID != "" {
+			return n.Function + " (" + shortID(n.ContractID, 66) + ")"
+		}
+		return n.Function
+	}
+	if n.Operation != "" {
+		return n.Operation
+	}
+	return n.ID
+}
+
+// CallGraphEdge is a directed call edge (caller → callee) in a CallGraph.
+type CallGraphEdge struct {
+	Caller string
+	Callee string
+}
+
+// CallGraph is an interactive call-graph structure parsed from ANSI trace
+// output. Root is the transaction entry point; Edges lists every caller/callee
+// relationship so the graph can be rendered by tools or in a browser.
+type CallGraph struct {
+	Root  *CallGraphNode
+	Edges []CallGraphEdge
+}
+
+// NewCallGraph creates an empty call graph rooted at a transaction node.
+func NewCallGraph() *CallGraph {
+	return &CallGraph{
+		Root:  &CallGraphNode{ID: "root", Operation: "transaction"},
+		Edges: make([]CallGraphEdge, 0),
+	}
+}
+
+// Nodes returns every node in the graph in depth-first order.
+func (g *CallGraph) Nodes() []*CallGraphNode {
+	if g == nil || g.Root == nil {
+		return nil
+	}
+	nodes := make([]*CallGraphNode, 0)
+	g.Root.walk(&nodes)
+	return nodes
+}
+
+func (n *CallGraphNode) walk(acc *[]*CallGraphNode) {
+	*acc = append(*acc, n)
+	for _, call := range n.Calls {
+		call.walk(acc)
+	}
+}
+
+// Find returns all nodes whose label contains the given query substring,
+// case-insensitively.
+func (g *CallGraph) Find(query string) []*CallGraphNode {
+	if g == nil || query == "" {
+		return nil
+	}
+	q := strings.ToLower(query)
+	matches := make([]*CallGraphNode, 0)
+	for _, node := range g.Nodes() {
+		if strings.Contains(strings.ToLower(node.Label()), q) {
+			matches = append(matches, node)
+		}
+	}
+	return matches
+}
+
+// ParseANSITrace converts ANSI-styled trace output into an interactive call
+// graph. The input may be a plain-text trace (as produced by
+// PrintExecutionTrace with --no-color) or the same trace including ANSI colour
+// codes, which are stripped before parsing. Each "[N] ..." step line becomes a
+// call-graph node; cross-contract calls reuse the same nesting heuristic as
+// BuildTraceTree.
+func ParseANSITrace(input string) (*CallGraph, error) {
+	if strings.TrimSpace(input) == "" {
+		return nil, fmt.Errorf("trace input is empty")
+	}
+
+	graph := NewCallGraph()
+	stack := []*CallGraphNode{graph.Root}
+	var lastNode *CallGraphNode
+
+	for _, rawLine := range strings.Split(input, "\n") {
+		line := strings.TrimSpace(stripANSIEscapes(rawLine))
+		if line == "" || isTraceDecoration(line) {
+			continue
+		}
+
+		switch {
+		case strings.Contains(line, "[FAIL]"):
+			if lastNode != nil && lastNode != graph.Root {
+				lastNode.Error = extractErrorMessage(line)
+			}
+		case strings.Contains(strings.ToLower(line), "cpu:") || strings.Contains(strings.ToLower(line), "mem:"):
+			if lastNode != nil {
+				attachBudget(lastNode, line)
+			}
+		case stepPattern.MatchString(line):
+			node := parseTraceStepLine(line)
+			if node == nil {
+				continue
+			}
+			lastNode = graph.insertNode(&stack, node)
+		default:
+			// Free-form log/event text attaches to the current frame so no
+			// trace content is lost, but never overwrites the operation.
+			if lastNode != nil && lastNode != graph.Root && lastNode.Operation == "" {
+				lastNode.Operation = line
+			}
+		}
+	}
+
+	graph.buildEdges()
+	return graph, nil
+}
+
+// insertNode places a parsed step node into the call graph using the same
+// cross-contract nesting heuristic as BuildTraceTree: a call into a different
+// contract nests under the previous contract call, while a call back into the
+// same contract is treated as a sibling.
+func (g *CallGraph) insertNode(stack *[]*CallGraphNode, node *CallGraphNode) *CallGraphNode {
+	top := (*stack)[len(*stack)-1]
+
+	if node.EventType == EventTypeContractCall {
+		switch {
+		case top != g.Root && top.ContractID != "" && node.ContractID != "" && node.ContractID != top.ContractID:
+			top.AddCall(node)
+		case top != g.Root && top.parent != nil:
+			top.parent.AddCall(node)
+		default:
+			g.Root.AddCall(node)
+		}
+		*stack = append(*stack, node)
+	} else {
+		top.AddCall(node)
+	}
+	return node
+}
+
+// buildEdges derives the directed caller/callee edge list from the tree.
+func (g *CallGraph) buildEdges() {
+	g.Edges = make([]CallGraphEdge, 0)
+	var walk func(n *CallGraphNode)
+	walk = func(n *CallGraphNode) {
+		for _, call := range n.Calls {
+			g.Edges = append(g.Edges, CallGraphEdge{Caller: n.Label(), Callee: call.Label()})
+			walk(call)
+		}
+	}
+	walk(g.Root)
+}
+
+// parseTraceStepLine extracts a call-graph node from a single "[N] ..." trace
+// line, returning nil when the line carries no recognisable trace data.
+func parseTraceStepLine(line string) *CallGraphNode {
+	marker := stepPattern.FindStringSubmatch(line)
+	if marker == nil {
+		return nil
+	}
+	step, err := strconv.Atoi(marker[1])
+	if err != nil {
+		step = -1
+	}
+
+	node := &CallGraphNode{ID: fmt.Sprintf("step-%d", step)}
+	rest := strings.TrimSpace(stepPattern.ReplaceAllString(line, " "))
+	rest = strings.TrimSpace(stripLeadingIcon(rest))
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return node
+	}
+
+	node.Operation = strings.ToUpper(fields[0])
+	node.EventType = eventTypeForOperation(node.Operation)
+
+	if id := contractIDPattern.FindString(rest); id != "" {
+		node.ContractID = id
+	}
+
+	switch node.EventType {
+	case EventTypeContractCall, EventTypeHostFunction, EventTypeAuth:
+		for _, token := range fields[1:] {
+			if strings.HasPrefix(token, "→") || contractIDPattern.MatchString(token) {
+				continue
+			}
+			node.Function = token
+			break
+		}
+	}
+	return node
+}
+
+// eventTypeForOperation maps an uppercased operation label to its event type.
+func eventTypeForOperation(op string) string {
+	switch op {
+	case "CONTRACT_CALL", "CONTRACT_INIT", "BALANCE_CHECK":
+		return EventTypeContractCall
+	case "HOST_FUNCTION", "HOST_FN":
+		return EventTypeHostFunction
+	case "AUTH":
+		return EventTypeAuth
+	case "EVENT":
+		return "event"
+	case "LOG":
+		return "log"
+	case "TRAP":
+		return EventTypeTrap
+	case "TRANSACTION":
+		return "transaction"
+	default:
+		return ""
+	}
+}
+
+// stripLeadingIcon removes the operation-type glyph and tree connectors at the
+// start of a trace label, returning the remaining text.
+func stripLeadingIcon(s string) string {
+	fields := strings.Fields(s)
+	for i, token := range fields {
+		if isIcon(token) || !containsAlphaNumeric(token) {
+			continue
+		}
+		return strings.Join(fields[i:], " ")
+	}
+	return ""
+}
+
+// isIcon reports whether token is a known operation-type glyph.
+func isIcon(token string) bool {
+	for _, icon := range knownIcons {
+		if token == icon {
+			return true
+		}
+	}
+	return false
+}
+
+// containsAlphaNumeric reports whether s contains at least one letter or digit.
+func containsAlphaNumeric(s string) bool {
+	for _, r := range s {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return true
+		}
+	}
+	return false
+}
+
+// attachBudget parses "CPU:" / "MEM:" budget metrics into the node.
+func attachBudget(node *CallGraphNode, line string) {
+	if m := cpuPattern.FindStringSubmatch(line); len(m) == 2 {
+		node.CPUDelta = parseBudgetNumber(m[1])
+	}
+	if m := memPattern.FindStringSubmatch(line); len(m) == 2 {
+		node.MemoryDelta = parseMemoryBytes(m[1])
+	}
+}
+
+// parseBudgetNumber parses a comma-separated integer like "1,234,567".
+func parseBudgetNumber(s string) uint64 {
+	v, err := strconv.ParseUint(strings.ReplaceAll(strings.TrimSpace(s), ",", ""), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// parseMemoryBytes parses human-readable byte strings like "1.5 KB", "42 B".
+func parseMemoryBytes(s string) uint64 {
+	fields := strings.Fields(strings.ToUpper(strings.TrimSpace(s)))
+	if len(fields) == 0 {
+		return 0
+	}
+	value, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0
+	}
+	unit := "B"
+	if len(fields) > 1 {
+		unit = fields[1]
+	}
+	switch unit {
+	case "KB":
+		return uint64(value * 1024)
+	case "MB":
+		return uint64(value * 1024 * 1024)
+	case "GB":
+		return uint64(value * 1024 * 1024 * 1024)
+	default:
+		return uint64(value)
+	}
+}
+
+// extractErrorMessage returns the text after the "[FAIL]" marker on a line.
+func extractErrorMessage(line string) string {
+	if idx := strings.Index(line, "[FAIL]"); idx >= 0 {
+		return strings.TrimSpace(line[idx+len("[FAIL]"):])
+	}
+	return strings.TrimSpace(line)
+}
+
+// stripANSIEscapes removes ANSI/VT escape sequences from a line.
+func stripANSIEscapes(s string) string {
+	return ansiEscapePattern.ReplaceAllString(s, "")
+}
+
+// isTraceDecoration reports whether a line is a trace header, footer or
+// separator that carries no step data.
+func isTraceDecoration(line string) bool {
+	lower := strings.ToLower(line)
+	for _, prefix := range decorationPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	if strings.Trim(line, "─-═") == "" {
+		return true
+	}
+	return false
+}
+
+// RenderInteractiveHTML renders the call graph as a self-contained, interactive
+// HTML document. Nodes are grouped in collapsible <details> elements,
+// colour-coded by event type, with CPU/memory deltas and errors shown inline.
+func (g *CallGraph) RenderInteractiveHTML() string {
+	var sb strings.Builder
+	sb.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n")
+	sb.WriteString("<title>Erst Interactive Call Graph</title>\n")
+	sb.WriteString("<style>")
+	sb.WriteString("body{font-family:ui-monospace,Menlo,Consolas,monospace;margin:24px;color:#222}")
+	sb.WriteString("details{margin-left:18px}.op{color:#333;font-weight:600}.err{color:#d33}.delta{color:#2a9d4f}")
+	sb.WriteString("</style>\n</head>\n<body>\n")
+	sb.WriteString("<h1>Erst Interactive Call Graph</h1>\n")
+	if g == nil || g.Root == nil {
+		sb.WriteString("<p>No trace data.</p>\n")
+	} else {
+		sb.WriteString(renderCallGraphNode(g.Root))
+		sb.WriteString("\n<h2>Call edges</h2>\n<ul>\n")
+		for _, edge := range g.Edges {
+			fmt.Fprintf(&sb, "<li>%s &rarr; %s</li>\n", html.EscapeString(edge.Caller), html.EscapeString(edge.Callee))
+		}
+		sb.WriteString("</ul>\n")
+	}
+	sb.WriteString("</body>\n</html>\n")
+	return sb.String()
+}
+
+// renderCallGraphNode renders a single node and its descendants as nested,
+// collapsible HTML.
+func renderCallGraphNode(n *CallGraphNode) string {
+	if n == nil {
+		return ""
+	}
+	var sb strings.Builder
+	if len(n.Calls) > 0 {
+		sb.WriteString("<details open>\n<summary>")
+	} else {
+		sb.WriteString("<div>")
+	}
+	fmt.Fprintf(&sb, "<span class=\"op\">%s</span>", html.EscapeString(n.Label()))
+	if n.EventType != "" {
+		fmt.Fprintf(&sb, " <span>[%s]</span>", html.EscapeString(n.EventType))
+	}
+	if n.CPUDelta > 0 {
+		fmt.Fprintf(&sb, " <span class=\"delta\">CPU %s</span>", formatNum(n.CPUDelta))
+	}
+	if n.MemoryDelta > 0 {
+		fmt.Fprintf(&sb, " <span class=\"delta\">MEM %s</span>", formatBytes(n.MemoryDelta))
+	}
+	if n.Error != "" {
+		fmt.Fprintf(&sb, " <span class=\"err\">%s</span>", html.EscapeString(n.Error))
+	}
+	if len(n.Calls) > 0 {
+		sb.WriteString("</summary>\n")
+	} else {
+		sb.WriteString("</div>\n")
+	}
+	for _, call := range n.Calls {
+		sb.WriteString(renderCallGraphNode(call))
+	}
+	if len(n.Calls) > 0 {
+		sb.WriteString("</details>\n")
+	}
+	return sb.String()
 }
