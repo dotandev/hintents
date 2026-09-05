@@ -729,3 +729,319 @@ func TestCrossReferenceEvents_UnparsableOffset(t *testing.T) {
 		t.Error("expected nil instruction for unparsable offset")
 	}
 }
+
+// =============================================================================
+// Basic Block Analysis Tests
+// =============================================================================
+
+func TestDisassembleAtWithBasicBlocks_SimpleFunction(t *testing.T) {
+	// Function body: i32.const 1, i32.const 2, i32.add, drop
+	body := []byte{
+		0x41, 0x01, // i32.const 1
+		0x41, 0x02, // i32.const 2
+		0x6a, // i32.add
+		0x1a, // drop
+	}
+	wasm := buildMinimalWasm(body)
+
+	d := NewDisassembler(wasm)
+	instructions, err := d.DecodeAll()
+	if err != nil {
+		t.Fatalf("DecodeAll failed: %v", err)
+	}
+
+	// Find the i32.add instruction
+	var addOffset uint64
+	for _, inst := range instructions {
+		if inst.Mnemonic == "i32.add" {
+			addOffset = inst.Offset
+			break
+		}
+	}
+
+	snippet, err := d.DisassembleAtWithBasicBlocks(addOffset, 2)
+	if err != nil {
+		t.Fatalf("DisassembleAtWithBasicBlocks failed: %v", err)
+	}
+
+	if snippet.BasicBlocks == nil {
+		t.Fatal("expected basic blocks analysis to be populated")
+	}
+
+	if len(snippet.BasicBlocks.Blocks) == 0 {
+		t.Error("expected at least one basic block")
+	}
+
+	// Should have a single block for this simple linear function
+	if len(snippet.BasicBlocks.Blocks) != 1 {
+		t.Errorf("expected 1 block, got %d", len(snippet.BasicBlocks.Blocks))
+	}
+
+	block := snippet.BasicBlocks.Blocks[0]
+	if block.BlockType != "normal" {
+		t.Errorf("expected block type 'normal', got %q", block.BlockType)
+	}
+
+	if len(block.Instructions) < 4 {
+		t.Errorf("expected at least 4 instructions in block, got %d", len(block.Instructions))
+	}
+}
+
+func TestDisassembleAtWithBasicBlocks_BranchFunction(t *testing.T) {
+	// Function body with branch: i32.const 1, br_if 0, i32.const 2, drop
+	body := []byte{
+		0x41, 0x01, // i32.const 1
+		0x0d, 0x00, // br_if 0
+		0x41, 0x02, // i32.const 2
+		0x1a, // drop
+	}
+	wasm := buildMinimalWasm(body)
+
+	d := NewDisassembler(wasm)
+	instructions, err := d.DecodeAll()
+	if err != nil {
+		t.Fatalf("DecodeAll failed: %v", err)
+	}
+
+	// Find the br_if instruction
+	var brIfOffset uint64
+	for _, inst := range instructions {
+		if inst.Mnemonic == "br_if" {
+			brIfOffset = inst.Offset
+			break
+		}
+	}
+
+	snippet, err := d.DisassembleAtWithBasicBlocks(brIfOffset, 3)
+	if err != nil {
+		t.Fatalf("DisassembleAtWithBasicBlocks failed: %v", err)
+	}
+
+	if snippet.BasicBlocks == nil {
+		t.Fatal("expected basic blocks analysis to be populated")
+	}
+
+	// Should have multiple blocks due to the branch
+	if len(snippet.BasicBlocks.Blocks) < 2 {
+		t.Errorf("expected at least 2 blocks due to branch, got %d", len(snippet.BasicBlocks.Blocks))
+	}
+
+	// Check that we identified jump targets
+	if len(snippet.BasicBlocks.JumpTargets) == 0 {
+		t.Error("expected to find jump targets")
+	}
+
+	// Check block types
+	foundConditional := false
+	for _, block := range snippet.BasicBlocks.Blocks {
+		if block.BlockType == "conditional" {
+			foundConditional = true
+			break
+		}
+	}
+	if !foundConditional {
+		t.Error("expected to find a conditional block")
+	}
+}
+
+func TestDisassembleAtWithBasicBlocks_LoopFunction(t *testing.T) {
+	// Function body with loop: loop, i32.const 1, br 0, end
+	body := []byte{
+		0x03, 0x40, // loop (void)
+		0x41, 0x01, // i32.const 1
+		0x0c, 0x00, // br 0
+		0x0b, // end
+	}
+	wasm := buildMinimalWasm(body)
+
+	d := NewDisassembler(wasm)
+	instructions, err := d.DecodeAll()
+	if err != nil {
+		t.Fatalf("DecodeAll failed: %v", err)
+	}
+
+	// Find the loop instruction
+	var loopOffset uint64
+	for _, inst := range instructions {
+		if inst.Mnemonic == "loop" {
+			loopOffset = inst.Offset
+			break
+		}
+	}
+
+	snippet, err := d.DisassembleAtWithBasicBlocks(loopOffset, 3)
+	if err != nil {
+		t.Fatalf("DisassembleAtWithBasicBlocks failed: %v", err)
+	}
+
+	if snippet.BasicBlocks == nil {
+		t.Fatal("expected basic blocks analysis to be populated")
+	}
+
+	// Check block types
+	foundLoop := false
+	for _, block := range snippet.BasicBlocks.Blocks {
+		if block.BlockType == "loop" {
+			foundLoop = true
+			break
+		}
+	}
+	if !foundLoop {
+		t.Error("expected to find a loop block")
+	}
+}
+
+func TestAnalyzeBasicBlocks_EmptyInstructions(t *testing.T) {
+	d := NewDisassembler([]byte{})
+	analysis := d.analyzeBasicBlocks([]Instruction{})
+
+	if analysis == nil {
+		t.Fatal("expected analysis to be returned")
+	}
+
+	if len(analysis.Blocks) != 0 {
+		t.Errorf("expected 0 blocks, got %d", len(analysis.Blocks))
+	}
+
+	if len(analysis.OffsetToBlock) != 0 {
+		t.Errorf("expected 0 offset mappings, got %d", len(analysis.OffsetToBlock))
+	}
+
+	if len(analysis.JumpTargets) != 0 {
+		t.Errorf("expected 0 jump targets, got %d", len(analysis.JumpTargets))
+	}
+}
+
+func TestIsJumpInstruction(t *testing.T) {
+	d := NewDisassembler([]byte{})
+
+	jumpInstructions := []string{"br", "br_if", "br_table", "return", "call", "call_indirect"}
+	for _, mnemonic := range jumpInstructions {
+		if !d.isJumpInstruction(mnemonic) {
+			t.Errorf("expected %q to be a jump instruction", mnemonic)
+		}
+	}
+
+	nonJumpInstructions := []string{"i32.add", "i32.const", "local.get", "drop", "nop"}
+	for _, mnemonic := range nonJumpInstructions {
+		if d.isJumpInstruction(mnemonic) {
+			t.Errorf("expected %q not to be a jump instruction", mnemonic)
+		}
+	}
+}
+
+func TestDetermineBlockType(t *testing.T) {
+	d := NewDisassembler([]byte{})
+
+	// Test normal block
+	normalBlock := []Instruction{
+		{Mnemonic: "i32.const"},
+		{Mnemonic: "i32.add"},
+		{Mnemonic: "drop"},
+	}
+	if blockType := d.determineBlockType(normalBlock); blockType != "normal" {
+		t.Errorf("expected 'normal', got %q", blockType)
+	}
+
+	// Test conditional block
+	conditionalBlock := []Instruction{
+		{Mnemonic: "i32.const"},
+		{Mnemonic: "br_if"},
+		{Mnemonic: "drop"},
+	}
+	if blockType := d.determineBlockType(conditionalBlock); blockType != "conditional" {
+		t.Errorf("expected 'conditional', got %q", blockType)
+	}
+
+	// Test loop block
+	loopBlock := []Instruction{
+		{Mnemonic: "loop"},
+		{Mnemonic: "i32.const"},
+		{Mnemonic: "br"},
+	}
+	if blockType := d.determineBlockType(loopBlock); blockType != "loop" {
+		t.Errorf("expected 'loop', got %q", blockType)
+	}
+
+	// Test branch block
+	branchBlock := []Instruction{
+		{Mnemonic: "i32.const"},
+		{Mnemonic: "i32.add"},
+		{Mnemonic: "br"},
+	}
+	if blockType := d.determineBlockType(branchBlock); blockType != "branch" {
+		t.Errorf("expected 'branch', got %q", blockType)
+	}
+
+	// Test empty block
+	emptyBlock := []Instruction{}
+	if blockType := d.determineBlockType(emptyBlock); blockType != "empty" {
+		t.Errorf("expected 'empty', got %q", blockType)
+	}
+}
+
+func TestFormatWithBasicBlocks_WithJumpTargets(t *testing.T) {
+	// Create a snippet with basic block analysis
+	snippet := &Snippet{
+		Instructions: []Instruction{
+			{Offset: 0x10, Mnemonic: "i32.const", Operands: "1"},
+			{Offset: 0x12, Mnemonic: "br_if", Operands: "0"},
+			{Offset: 0x14, Mnemonic: "i32.const", Operands: "2"},
+			{Offset: 0x16, Mnemonic: "drop"},
+		},
+		TargetOffset: 0x12,
+		TargetIndex:  1,
+		BasicBlocks: &BasicBlockAnalysis{
+			Blocks: []BasicBlock{
+				{
+					StartOffset: 0x10,
+					EndOffset:   0x12,
+					BlockType:   "conditional",
+					IsJumpTarget: false,
+				},
+				{
+					StartOffset: 0x14,
+					EndOffset:   0x16,
+					BlockType:   "normal",
+					IsJumpTarget: true,
+					JumpSources: []uint64{0x12},
+				},
+			},
+			OffsetToBlock: map[uint64]*BasicBlock{
+				0x10: &BasicBlock{StartOffset: 0x10, EndOffset: 0x12, BlockType: "conditional"},
+				0x12: &BasicBlock{StartOffset: 0x10, EndOffset: 0x12, BlockType: "conditional"},
+				0x14: &BasicBlock{StartOffset: 0x14, EndOffset: 0x16, BlockType: "normal", IsJumpTarget: true},
+				0x16: &BasicBlock{StartOffset: 0x14, EndOffset: 0x16, BlockType: "normal", IsJumpTarget: true},
+			},
+			JumpTargets: map[uint64]uint64{
+				0x12: 0x14,
+			},
+		},
+	}
+
+	output := snippet.Format()
+
+	// Should contain block boundaries
+	if !strings.Contains(output, "block start") {
+		t.Error("expected output to contain block start markers")
+	}
+
+	if !strings.Contains(output, "end of block") {
+		t.Error("expected output to contain block end markers")
+	}
+
+	// Should contain jump target information
+	if !strings.Contains(output, "JUMP TARGET") {
+		t.Error("expected output to contain jump target marker")
+	}
+
+	// Should contain jump arrow
+	if !strings.Contains(output, "-> 0x") {
+		t.Error("expected output to contain jump target arrow")
+	}
+
+	// Should contain block type
+	if !strings.Contains(output, "[conditional]") {
+		t.Error("expected output to contain conditional block type")
+	}
+}

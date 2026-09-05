@@ -50,11 +50,11 @@ func (sa *SecurityAnalyzer) checkUnauthorizedStateModifications(events []simulat
 
 	for i, event := range events {
 		contractID := ""
-		if event.ContractID != nil {
-			contractID = *event.ContractID
+		if event.ContractID() != nil {
+			contractID = *event.ContractID()
 		}
 
-		switch event.EventType {
+		switch event.EventType() {
 		case "require_auth":
 			authChecks[contractID] = append(authChecks[contractID], i)
 		case "storage_write":
@@ -97,7 +97,7 @@ func (sa *SecurityAnalyzer) isSACPattern(events []simulator.CategorizedEvent, wr
 
 	event := events[writeIndex]
 
-	for _, topic := range event.Topics {
+	for _, topic := range event.Topics() {
 		topicLower := strings.ToLower(topic)
 		if strings.Contains(topicLower, "balance") ||
 			strings.Contains(topicLower, "allowance") ||
@@ -107,7 +107,7 @@ func (sa *SecurityAnalyzer) isSACPattern(events []simulator.CategorizedEvent, wr
 		}
 	}
 
-	dataLower := strings.ToLower(event.Data)
+	dataLower := strings.ToLower(event.Data())
 	if strings.Contains(dataLower, "stellar_asset") ||
 		strings.Contains(dataLower, "sac_") {
 		return true

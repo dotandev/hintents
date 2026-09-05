@@ -381,10 +381,13 @@ func BenchmarkCategorizedEventProcessing(b *testing.B) {
 
 			for i := 0; i < tt.numEvents; i++ {
 				events[i] = CategorizedEvent{
-					EventType:  "contract",
-					ContractID: &contractID,
-					Topics:     []string{"topic1", "topic2"},
-					Data:       strings.Repeat("d", 100),
+					Category: "Contract",
+					Event: DiagnosticEvent{
+						EventType:  "contract",
+						ContractID: &contractID,
+						Topics:     []string{"topic1", "topic2"},
+						Data:       strings.Repeat("d", 100),
+					},
 				}
 			}
 

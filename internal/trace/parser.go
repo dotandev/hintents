@@ -6,24 +6,14 @@ package trace
 import (
 	"fmt"
 	"strings"
+
+	"github.com/dotandev/hintents/internal/simulator"
 )
 
-// SimulationResponse represents a simulation response (to avoid import cycle)
-type SimulationResponse struct {
-	Status           string
-	Error            string
-	Events           []string
-	Logs             []string
-	DiagnosticEvents []DiagnosticEvent
-}
-
-type DiagnosticEvent struct {
-	EventType       string   `json:"event_type"`
-	ContractID      *string  `json:"contract_id,omitempty"`
-	Topics          []string `json:"topics"`
-	Data            string   `json:"data"`
-	WasmInstruction *string  `json:"wasm_instruction,omitempty"`
-}
+// SimulationResponse is an alias for the canonical simulator IPC response type.
+// (The earlier local duplicate claimed an import cycle that does not exist:
+// internal/trace already imports internal/simulator in navigation.go.)
+type SimulationResponse = simulator.SimulationResponse
 
 // ParseSimulationResponse converts a simulation response into a trace tree
 func ParseSimulationResponse(resp *SimulationResponse) (*TraceNode, error) {
