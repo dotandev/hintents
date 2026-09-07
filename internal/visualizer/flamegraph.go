@@ -210,8 +210,10 @@ const interactiveHTML = `<!DOCTYPE html>
     svg {
       display: block;
       margin: 0 auto;
-      cursor: default;
-      transition: transform 0.3s ease-out;
+      cursor: grab;
+    }
+    svg.panning {
+      cursor: grabbing;
     }
     rect[data-highlighted="true"] {
       stroke: #d20f39;
@@ -261,7 +263,9 @@ const interactiveHTML = `<!DOCTYPE html>
   <div class="container">
     <div class="toolbar">
       <div class="toolbar-group">
-        <button id="resetBtn" title="Reset view to original size">Reset View</button>
+        <button id="zoomInBtn" title="Zoom in (+)">+ Zoom In</button>
+        <button id="zoomOutBtn" title="Zoom out (-)">&minus; Zoom Out</button>
+        <button id="resetBtn" title="Reset view to original size (0)">Reset View</button>
       </div>
       <div class="search-wrapper">
         <input type="text" id="searchInput" placeholder="Search frames, contracts, functions..." autocomplete="off">
@@ -278,6 +282,8 @@ const interactiveHTML = `<!DOCTYPE html>
       <div>
         <span class="kdb">Hover</span> Details &bull; 
         <span class="kdb">Click</span> Zoom &bull; 
+        <span class="kdb">Scroll</span> Zoom &bull; 
+        <span class="kdb">Drag</span> Pan &bull; 
         <span class="kdb">Ctrl+F</span> Search
       </div>
       <div>Flamegraph Visualizer</div>
@@ -292,6 +298,8 @@ const interactiveHTML = `<!DOCTYPE html>
       const svg = document.querySelector('svg');
       const tooltip = document.getElementById('tooltip');
       const resetBtn = document.getElementById('resetBtn');
+      const zoomInBtn = document.getElementById('zoomInBtn');
+      const zoomOutBtn = document.getElementById('zoomOutBtn');
       const searchInput = document.getElementById('searchInput');
       const clearBtn = document.getElementById('clearBtn');
       const matchCounter = document.getElementById('matchCounter');
@@ -300,6 +308,15 @@ const interactiveHTML = `<!DOCTYPE html>
       let originalViewBox = null;
       let cachedNodes = [];
       let debounceTimer = null;
+
+      // Free zoom/pan state: current viewBox split into numbers, plus
+      // drag-pan tracking so a drag is not mistaken for a click-to-zoom.
+      let panState = null;
+      let dragDistance = 0;
+
+      const ZOOM_STEP = 1.25;
+      const MIN_WIDTH = 10;   // minimum viewBox width in user units
+      const PAN_STEP = 40;    // px per keyboard pan
 
       // Initialize
       if (svg) {
@@ -327,8 +344,14 @@ const interactiveHTML = `<!DOCTYPE html>
         svg.addEventListener('mouseout', handleMouseOut);
         svg.addEventListener('mousemove', handleMouseMove);
         svg.addEventListener('click', handleClick);
+        svg.addEventListener('wheel', handleWheel, { passive: false });
+        svg.addEventListener('mousedown', handleMouseDown);
+        window.addEventListener('mousemove', handlePanMove);
+        window.addEventListener('mouseup', handlePanEnd);
 
         resetBtn.addEventListener('click', resetZoom);
+        zoomInBtn.addEventListener('click', () => zoomByFactor(ZOOM_STEP));
+        zoomOutBtn.addEventListener('click', () => zoomByFactor(1 / ZOOM_STEP));
         clearBtn.addEventListener('click', () => {
           searchInput.value = '';
           performSearch();
@@ -344,8 +367,123 @@ const interactiveHTML = `<!DOCTYPE html>
           if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
             e.preventDefault();
             searchInput.focus();
+            return;
+          }
+          // Ignore zoom/pan shortcuts while typing in the search box.
+          if (document.activeElement === searchInput) return;
+          switch (e.key) {
+            case '+':
+            case '=':
+              e.preventDefault();
+              zoomByFactor(ZOOM_STEP);
+              break;
+            case '-':
+            case '_':
+              e.preventDefault();
+              zoomByFactor(1 / ZOOM_STEP);
+              break;
+            case '0':
+              resetZoom();
+              break;
+            case 'ArrowLeft':
+              e.preventDefault();
+              panBy(-PAN_STEP, 0);
+              break;
+            case 'ArrowRight':
+              e.preventDefault();
+              panBy(PAN_STEP, 0);
+              break;
+            case 'ArrowUp':
+              e.preventDefault();
+              panBy(0, -PAN_STEP);
+              break;
+            case 'ArrowDown':
+              e.preventDefault();
+              panBy(0, PAN_STEP);
+              break;
           }
         });
+      }
+
+      // ── Free zoom / pan ────────────────────────────────────────────────
+
+      // currentViewBox returns the active viewBox as numbers, falling back to
+      // the original when the SVG carries no viewBox attribute.
+      function currentViewBox() {
+        const vb = svg.getAttribute('viewBox');
+        if (!vb) return null;
+        const parts = vb.split(/\\s+|,/).map(Number);
+        if (parts.length !== 4 || parts.some(n => !isFinite(n))) return null;
+        return parts;
+      }
+
+      // zoomAt scales the viewBox by factor while keeping the SVG user-space
+      // point under client coordinates (cx, cy) visually fixed.
+      function zoomAt(cx, cy, factor) {
+        const vb = currentViewBox();
+        if (!vb) return;
+        const rect = svg.getBoundingClientRect();
+        // SVG user-space point under the cursor before the zoom.
+        const ux = vb[0] + ((cx - rect.left) / rect.width) * vb[2];
+        const uy = vb[1] + ((cy - rect.top) / rect.height) * vb[3];
+
+        let newW = vb[2] / factor;
+        let newH = vb[3] / factor;
+        if (newW < MIN_WIDTH || newW > 1e6) return;
+
+        // Adjust origin so (ux, uy) stays under the cursor.
+        const newX = ux - ((cx - rect.left) / rect.width) * newW;
+        const newY = uy - ((cy - rect.top) / rect.height) * newH;
+        svg.setAttribute('viewBox', newX + ' ' + newY + ' ' + newW + ' ' + newH);
+      }
+
+      function zoomByFactor(factor) {
+        const rect = svg.getBoundingClientRect();
+        zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
+      }
+
+      // panBy shifts the viewBox by dx/dy screen pixels converted to
+      // SVG user units.
+      function panBy(dx, dy) {
+        const vb = currentViewBox();
+        if (!vb) return;
+        const rect = svg.getBoundingClientRect();
+        const scaleX = vb[2] / rect.width;
+        const scaleY = vb[3] / rect.height;
+        svg.setAttribute('viewBox', (vb[0] + dx * scaleX) + ' ' + (vb[1] + dy * scaleY) + ' ' + vb[2] + ' ' + vb[3]);
+      }
+
+      function handleWheel(e) {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+        zoomAt(e.clientX, e.clientY, factor);
+      }
+
+      function handleMouseDown(e) {
+        if (e.button !== 0) return;
+        panState = { x: e.clientX, y: e.clientY };
+        dragDistance = 0;
+      }
+
+      function handlePanMove(e) {
+        if (!panState) return;
+        const dx = e.clientX - panState.x;
+        const dy = e.clientY - panState.y;
+        if (dx === 0 && dy === 0) return;
+        dragDistance += Math.abs(dx) + Math.abs(dy);
+        if (dragDistance > 3 && !svg.classList.contains('panning')) {
+          svg.classList.add('panning');
+          tooltip.style.display = 'none';
+        }
+        panState = { x: e.clientX, y: e.clientY };
+        if (svg.classList.contains('panning')) {
+          panBy(-dx, -dy);
+        }
+      }
+
+      function handlePanEnd() {
+        panState = null;
+        svg.classList.remove('panning');
       }
 
       function handleMouseOver(e) {
@@ -387,6 +525,12 @@ const interactiveHTML = `<!DOCTYPE html>
           if (g) target = g.querySelector('rect');
         }
         if (!target || target.tagName !== 'rect') return;
+
+        // A drag that ends on a frame is a pan, not a click-to-zoom.
+        if (dragDistance > 3) {
+          dragDistance = 0;
+          return;
+        }
 
         zoomToRect(target);
       }
