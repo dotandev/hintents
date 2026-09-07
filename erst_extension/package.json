@@ -172,7 +172,7 @@
     "test:unit": "npm run compile && node --test out/traceExport.test.js"
   },
   "dependencies": {
-    "vscode-jsonrpc": "^8.2.1"
+    "vscode-jsonrpc": "^9.0.2"
   },
   "devDependencies": {
     "@vscode/debugprotocol": "^1.68.0",
