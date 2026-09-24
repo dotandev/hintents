@@ -143,15 +143,44 @@ export class FootprintExtractor {
         return keys;
     }
 
-    /**
-     * Extract from SorobanTransactionMeta
-     */
     private static extractFromSorobanMeta(sorobanMeta: xdr.SorobanTransactionMeta): Array<{ key: LedgerKey; isReadOnly: boolean }> {
         const keys: Array<{ key: LedgerKey; isReadOnly: boolean }> = [];
 
-        // TODO: Extract contract data/code keys from Soroban events
-        // For now, the contract state changes are already captured in the
-        // txChangesBefore/After and operation changes above
+        const events = sorobanMeta.events();
+        for (const event of events) {
+            const contractId = event.contractId();
+            if (contractId) {
+                // Extract contract code key from event
+                const codeKey = xdr.LedgerKey.contractCode(
+                    new xdr.LedgerKeyContractCode({ hash: contractId })
+                );
+                keys.push({
+                    key: {
+                        type: codeKey.switch(),
+                        key: XDRDecoder.decodeLedgerKey(codeKey),
+                        hash: XDRDecoder.hashLedgerKey(codeKey),
+                    },
+                    isReadOnly: true,
+                });
+
+                // Extract contract instance key from event
+                const instanceKey = xdr.LedgerKey.contractData(
+                    new xdr.LedgerKeyContractData({
+                        contract: xdr.ScAddress.scAddressTypeContract(contractId),
+                        key: xdr.ScVal.scvLedgerKeyContractInstance(),
+                        durability: xdr.ContractDataDurability.persistent(),
+                    })
+                );
+                keys.push({
+                    key: {
+                        type: instanceKey.switch(),
+                        key: XDRDecoder.decodeLedgerKey(instanceKey),
+                        hash: XDRDecoder.hashLedgerKey(instanceKey),
+                    },
+                    isReadOnly: true,
+                });
+            }
+        }
 
         return keys;
     }

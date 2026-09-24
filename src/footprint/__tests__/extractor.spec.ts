@@ -203,4 +203,44 @@ describe('FootprintExtractor', () => {
             expect(supportedTypes).toHaveLength(10);
         });
     });
+
+    describe('Soroban events extraction', () => {
+        it('should extract contract code and data keys from events', () => {
+            const mockContractId = Buffer.alloc(32, 1);
+            
+            const mockEvent = {
+                contractId: () => mockContractId,
+            };
+            
+            const mockSorobanMeta = {
+                events: () => [mockEvent],
+            };
+            
+            const keys = (FootprintExtractor as any).extractFromSorobanMeta(mockSorobanMeta);
+            
+            expect(keys).toHaveLength(2);
+            
+            // First key should be contractCode
+            expect(keys[0].isReadOnly).toBe(true);
+            expect(keys[0].key.type.name).toBe('contractCode');
+            
+            // Second key should be contractData (instance)
+            expect(keys[1].isReadOnly).toBe(true);
+            expect(keys[1].key.type.name).toBe('contractData');
+        });
+        
+        it('should handle events without contractId', () => {
+            const mockEvent = {
+                contractId: () => undefined,
+            };
+            
+            const mockSorobanMeta = {
+                events: () => [mockEvent],
+            };
+            
+            const keys = (FootprintExtractor as any).extractFromSorobanMeta(mockSorobanMeta);
+            
+            expect(keys).toHaveLength(0);
+        });
+    });
 });
