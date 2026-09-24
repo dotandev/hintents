@@ -3,9 +3,11 @@
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { open, type FileHandle } from 'fs/promises';
+import { Readable } from 'stream';
 import { RPCConfig } from '../config/rpc-config';
 import { getLogger, LogCategory } from '../utils/logger';
 import { SDKContext, SDKResponse, SDKMiddleware, NextFn, composeMiddleware } from '../xdr/types';
+import { XDRDecoder } from '../xdr/decoder';
 import type { SendTransactionOptions } from './types-v2';
 
 interface RPCEndpoint {

@@ -152,7 +152,7 @@ export class FootprintExtractor {
             if (contractId) {
                 // Extract contract code key from event
                 const codeKey = xdr.LedgerKey.contractCode(
-                    new xdr.LedgerKeyContractCode({ hash: contractId })
+                    new xdr.LedgerKeyContractCode({ hash: contractId as unknown as Buffer })
                 );
                 keys.push({
                     key: {
