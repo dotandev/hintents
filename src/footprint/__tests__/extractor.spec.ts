@@ -3,6 +3,7 @@
 
 import { FootprintExtractor } from '../extractor';
 import { xdr } from '@stellar/stellar-sdk';
+import { Buffer } from 'buffer';
 
 describe('FootprintExtractor', () => {
     describe('extractFootprint', () => {
