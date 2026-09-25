@@ -1,6 +1,6 @@
 import './globals.css';
 import React from 'react';
-import WalletConnect from '@/components/WalletConnect';
+import WalletConnect from '../components/WalletConnect';
 
 export const metadata = {
   title: 'Stellar Packages Explorer',
