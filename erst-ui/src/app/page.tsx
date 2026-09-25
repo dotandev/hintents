@@ -19,7 +19,7 @@ export default function LandingPage() {
             <a href="https://dotandev-hintents-75.mintlify.app/" target="_blank" rel="noopener noreferrer">
               Documentation
             </a>
-            <Link href="/playground">Playground</Link>
+            <Link href="https://playground.erstt.xyz">Playground</Link>
             <a href="https://crates.io/crates/simulator" target="_blank" rel="noopener noreferrer">
               Packages
             </a>
@@ -49,7 +49,7 @@ export default function LandingPage() {
               <a href="https://dotandev-hintents-75.mintlify.app/" className={styles.btnPrimary}>
                 Read the Docs
               </a>
-              <Link href="/playground" className={styles.btnSecondary}>
+              <Link href="https://playground.erstt.xyz" className={styles.btnSecondary}>
                 Open Playground
               </Link>
             </div>
