@@ -1,5 +1,6 @@
 import './globals.css';
 import React from 'react';
+import WalletConnect from '@/components/WalletConnect';
 
 export const metadata = {
   title: 'Stellar Packages Explorer',
@@ -16,10 +17,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span className="font-bold text-xl tracking-tight">Erst Registry</span>
               <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 ml-2 border border-zinc-700">TESTNET</span>
             </div>
-            <div className="hidden md:flex items-center gap-8 text-sm font-medium text-zinc-400">
+            <div className="hidden md:flex items-center gap-6 text-sm font-medium text-zinc-400">
               <a href="#" className="hover:text-zinc-50 transition-colors">Contracts</a>
               <a href="#" className="hover:text-zinc-50 transition-colors">Publish</a>
               <a href="#" className="hover:text-zinc-50 transition-colors">Docs</a>
+              <WalletConnect />
             </div>
           </div>
         </nav>
