@@ -99,7 +99,7 @@ echo "JavaScript/TypeScript files:"
 while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   check_or_fix "$f" "$JS_TS_HEADER" "// Copyright" || MISSING=$((MISSING + 1))
-done < <({ list_files js; list_files ts; list_files mjs; list_files cjs; })
+done < <({ list_files js; list_files ts; list_files tsx; list_files jsx; list_files mjs; list_files cjs; })
 
 echo ""
 echo "=== Summary ==="
