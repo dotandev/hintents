@@ -278,6 +278,17 @@ fn execute_operations(
     Ok(logs)
 }
 
+fn rollback_failed_execution(
+    sim_host: &mut runner::SimHost,
+    before: &snapshot::LedgerSnapshot,
+    failed: bool,
+) -> Result<(), runner::SimHostError> {
+    if failed {
+        sim_host.restore_from_snapshot(before)?;
+    }
+    Ok(())
+}
+
 /// Encode an ScVal to base64-encoded XDR, matching Soroban CLI output format.
 fn scval_to_xdr_base64(val: &soroban_env_host::xdr::ScVal) -> String {
     base64::engine::general_purpose::STANDARD.encode(
@@ -616,8 +627,6 @@ fn main() {
             }
         }
     }
-    let host = &sim_host.inner;
-
     let operations = match &envelope {
         soroban_env_host::xdr::TransactionEnvelope::Tx(tx_v1) => &tx_v1.tx.operations,
         soroban_env_host::xdr::TransactionEnvelope::TxV0(tx_v0) => &tx_v0.tx.operations,
@@ -626,7 +635,17 @@ fn main() {
         },
     };
 
-    // Wrap the operation execution in panic protection
+    // A multi-operation transaction must be atomic even if a later operation
+    // fails after an earlier one has changed the host's storage.
+    let transaction_snapshot = match sim_host.capture_snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            send_error(format!("Failed to snapshot transaction state: {error}"));
+            return;
+        }
+    };
+
+    // Wrap the operation execution in panic protection.
     let mut coverage = CoverageTracker::default();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         execute_operations(&sim_host, operations, &request, &mut coverage)
@@ -635,12 +654,25 @@ fn main() {
     let mut lcov_report = None;
     let mut lcov_report_path = None;
 
-    let (budget, cpu_insns, mem_bytes) = match catch_unwind_safe(|| {
-        let budget = host.budget_cloned();
+    let budget_result = catch_unwind_safe(|| {
+        let budget = sim_host.inner.budget_cloned();
         let cpu_insns = budget.get_cpu_insns_consumed().unwrap_or(0);
         let mem_bytes = budget.get_mem_bytes_consumed().unwrap_or(0);
         (budget, cpu_insns, mem_bytes)
-    }) {
+    });
+
+    // Capture resource use before discarding the failed host. This also runs
+    // when budget inspection panics, so no error path leaves mutated state.
+    if let Err(error) = rollback_failed_execution(
+        &mut sim_host,
+        &transaction_snapshot,
+        !matches!(&result, Ok(Ok(_))) || budget_result.is_err(),
+    ) {
+        send_error(format!("Failed to roll back transaction state: {error}"));
+        return;
+    }
+
+    let (budget, cpu_insns, mem_bytes) = match budget_result {
         Ok(values) => values,
         Err(panic_msg) => {
             emit_panic_response(
@@ -1627,6 +1659,70 @@ mod tests {
         let mut sim_host = runner::SimHost::new(HostConfig::default());
         let count = load_ledger_entries(&mut sim_host, &entries).expect("failed to load entries");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn failed_transaction_restores_prior_ledger_and_discards_partial_writes() {
+        use soroban_env_host::xdr::{
+            ContractDataDurability, ContractDataEntry, ContractId, Hash, LedgerEntry,
+            LedgerEntryData, LedgerEntryExt, LedgerKey, LedgerKeyContractData, Limits, ScAddress,
+            ScVal, WriteXdr,
+        };
+
+        let entry = |id: u8| {
+            let contract = ScAddress::Contract(ContractId(Hash([id; 32])));
+            let key = LedgerKey::ContractData(LedgerKeyContractData {
+                contract: contract.clone(),
+                key: ScVal::U32(id as u32),
+                durability: ContractDataDurability::Persistent,
+            });
+            let value = LedgerEntry {
+                last_modified_ledger_seq: 1,
+                data: LedgerEntryData::ContractData(ContractDataEntry {
+                    ext: soroban_env_host::xdr::ExtensionPoint::V0,
+                    contract,
+                    key: ScVal::U32(id as u32),
+                    durability: ContractDataDurability::Persistent,
+                    val: ScVal::U32(id as u32),
+                }),
+                ext: LedgerEntryExt::V0,
+            };
+            (key, value)
+        };
+
+        let mut host = runner::SimHost::new(HostConfig::default());
+        let (original_key, original_entry) = entry(1);
+        host.set_ledger_entry(original_key.clone(), original_entry)
+            .expect("initial state should load");
+        let before = host.capture_snapshot().expect("snapshot should succeed");
+
+        let (partial_key, partial_entry) = entry(2);
+        host.set_ledger_entry(partial_key.clone(), partial_entry)
+            .expect("first operation should write");
+        host.push_event("partial event".to_string());
+        rollback_failed_execution(&mut host, &before, true).expect("rollback should succeed");
+
+        let restored = host
+            .capture_snapshot()
+            .expect("restored state should capture");
+        assert!(restored
+            .get(&original_key.to_xdr(Limits::none()).unwrap())
+            .is_some());
+        assert!(restored
+            .get(&partial_key.to_xdr(Limits::none()).unwrap())
+            .is_none());
+        assert!(host.drain_events_for_snapshot().is_empty());
+
+        let (_, successful_entry) = entry(2);
+        host.set_ledger_entry(partial_key.clone(), successful_entry)
+            .expect("successful operation should write");
+        rollback_failed_execution(&mut host, &before, false)
+            .expect("successful transaction should keep its changes");
+        assert!(host
+            .capture_snapshot()
+            .unwrap()
+            .get(&partial_key.to_xdr(Limits::none()).unwrap())
+            .is_some());
     }
 }
 
