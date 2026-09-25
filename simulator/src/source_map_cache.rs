@@ -5,14 +5,13 @@
 //!
 //! This module provides caching of parsed source map mappings to speed up
 //! repetitive debugging sessions. Cached mappings are stored in
-//! ~/.erst/cache/sourcemaps indexed by WASM SHA256 hash, optionally combined
+//! ~/.erst/cache/sourcemaps indexed by WASM BLAKE3 hash, optionally combined
 //! with the source file's modification time when loading from disk.
 
 #![allow(dead_code)]
 
 use crate::source_mapper::SourceLocation;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -249,12 +248,14 @@ impl SourceMapCache {
         Ok(temp_cache)
     }
 
-    /// Computes SHA256 hash of WASM bytes (content only, no mtime).
+    /// Computes the BLAKE3 hash of WASM bytes (content only, no mtime).
+    ///
+    /// BLAKE3 is used instead of SHA-256 because this is an internal,
+    /// non-cryptographic cache key and BLAKE3 is substantially faster on the
+    /// memory-bound hashing performed for every cache lookup. The digest is
+    /// still 32 bytes, so the hex-encoded key stays 64 characters long.
     pub fn compute_wasm_hash(wasm_bytes: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(wasm_bytes);
-        let result = hasher.finalize();
-        hex::encode(result)
+        blake3::hash(wasm_bytes).to_hex().to_string()
     }
 
     /// Reads the modification time of a WASM file as seconds since Unix epoch.
@@ -279,10 +280,10 @@ impl SourceMapCache {
         match wasm_mtime {
             None => content_hash,
             Some(mtime) => {
-                let mut hasher = Sha256::new();
+                let mut hasher = blake3::Hasher::new();
                 hasher.update(content_hash.as_bytes());
-                hasher.update(mtime.to_le_bytes());
-                hex::encode(hasher.finalize())
+                hasher.update(&mtime.to_le_bytes());
+                hasher.finalize().to_hex().to_string()
             }
         }
     }
