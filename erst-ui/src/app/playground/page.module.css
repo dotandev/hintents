@@ -1,0 +1,145 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: #09090b;
+  color: #fafafa;
+  font-family: 'Inter', sans-serif;
+}
+
+.header {
+  height: 3.5rem;
+  border-bottom: 1px solid #27272a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.5rem;
+  background-color: #09090b;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.badge {
+  background-color: #27272a;
+  color: #a1a1aa;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.btnRun {
+  background-color: #fafafa;
+  color: #09090b;
+  border: none;
+  border-radius: 4px;
+  padding: 0.375rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  transition: opacity 0.2s;
+}
+
+.btnRun:hover {
+  opacity: 0.9;
+}
+
+.btnSecondary {
+  background-color: transparent;
+  color: #a1a1aa;
+  border: 1px solid #27272a;
+  border-radius: 4px;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btnSecondary:hover {
+  color: #fafafa;
+  border-color: #3f3f46;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+.editorPane {
+  border-right: 1px solid #27272a;
+  display: flex;
+  flex-direction: column;
+}
+
+.paneHeader {
+  height: 2.5rem;
+  background-color: #121214;
+  border-bottom: 1px solid #27272a;
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  font-size: 0.75rem;
+  color: #a1a1aa;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.editor {
+  flex-grow: 1;
+  background-color: #09090b;
+  color: #d4d4d8;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  padding: 1rem;
+  border: none;
+  resize: none;
+  outline: none;
+}
+
+.outputPane {
+  display: flex;
+  flex-direction: column;
+  background-color: #0d0d12;
+}
+
+.terminal {
+  padding: 1rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: #a1a1aa;
+  flex-grow: 1;
+  overflow-y: auto;
+}
+
+.termLine {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.termTime {
+  color: #52525b;
+}
+
+.termSuccess { color: #22c55e; }
+.termInfo { color: #3b82f6; }
+.termWarn { color: #eab308; }
+.termError { color: #ef4444; }
+

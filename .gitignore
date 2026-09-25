@@ -130,3 +130,4 @@ Resource.rc
 *.trace.json
 *.flamegraph.svg
 *.flamegraph.html
+.npm-cache/
