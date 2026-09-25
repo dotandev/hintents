@@ -51,7 +51,7 @@ export default function Playground() {
     <div className={styles.container}>
       <header className={styles.header}>
         <div className={styles.title}>
-          <Link href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Erst.</Link>
+          <a href="http://localhost:3000" style={{ color: 'inherit', textDecoration: 'none' }}>Erst.</a>
           <span style={{ color: '#52525b', margin: '0 0.5rem' }}>/</span>
           Playground <span className={styles.badge}>BETA</span>
         </div>
