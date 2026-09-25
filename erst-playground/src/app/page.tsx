@@ -27,24 +27,36 @@ export default function Playground() {
     { time: "00:00:00", level: "info", msg: "Ready for simulation." }
   ]);
 
-  const handleRun = () => {
+  const handleRun = async () => {
     setIsRunning(true);
-    setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), level: "info", msg: "Compiling WASM target..." }]);
+    setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), level: "info", msg: "Compiling WASM target via Erst Backend..." }]);
     
-    setTimeout(() => {
-      setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), level: "success", msg: "Build successful (124ms)." }]);
-      setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), level: "info", msg: "Deploying to local simulation environment..." }]);
-    }, 800);
-
-    setTimeout(() => {
-      setLogs(prev => [...prev, 
-        { time: new Date().toLocaleTimeString(), level: "success", msg: "Contract deployed at C_..." },
-        { time: new Date().toLocaleTimeString(), level: "info", msg: "Invoking 'hello'..." },
-        { time: new Date().toLocaleTimeString(), level: "success", msg: "Result: [\"Hello\", \"World\"]" },
-        { time: new Date().toLocaleTimeString(), level: "info", msg: "Simulation finished. 41 instructions executed." }
-      ]);
+    try {
+      const response = await fetch('http://localhost:8080/api/compile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), level: "success", msg: "Build successful." }]);
+        setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), level: "info", msg: `WASM binary generated (${data.wasmSize} bytes).` }]);
+        if (data.logs) {
+          setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), level: "info", msg: data.logs }]);
+        }
+      } else {
+        setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), level: "error", msg: `Compilation failed: ${data.error}` }]);
+        if (data.details) {
+          setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), level: "error", msg: data.details }]);
+        }
+      }
+    } catch (e: any) {
+      setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), level: "error", msg: `Network Error: Could not connect to compile server.` }]);
+    } finally {
       setIsRunning(false);
-    }, 1800);
+    }
   };
 
   return (

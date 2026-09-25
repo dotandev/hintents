@@ -19,7 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
             <div className="hidden md:flex items-center gap-6 text-sm font-medium text-zinc-400">
               <a href="#" className="hover:text-zinc-50 transition-colors">Contracts</a>
-              <a href="#" className="hover:text-zinc-50 transition-colors">Publish</a>
+              <a href="/publish" className="hover:text-zinc-50 transition-colors">Publish</a>
               <a href="#" className="hover:text-zinc-50 transition-colors">Docs</a>
               <WalletConnect />
             </div>
