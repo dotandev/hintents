@@ -95,7 +95,7 @@ export default function RegistryHome() {
             </thead>
             <tbody className="text-sm divide-y divide-zinc-800/50">
               {MOCK_PACKAGES.map((pkg, i) => (
-                <tr key={i} className="hover:bg-zinc-800/20 transition-colors cursor-pointer">
+                <tr key={i} onClick={() => window.location.href = `/package/${pkg.id}`} className="hover:bg-zinc-800/20 transition-colors cursor-pointer">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-zinc-100">{pkg.name}</span>
