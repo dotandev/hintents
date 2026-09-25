@@ -16,8 +16,9 @@ Each ADR follows the standard format:
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
-| [001](001-snapshot-caching-strategy.md) | Snapshot Caching Strategy using Bincode and SHA256 | Accepted | 2026-02-26 |
+| [001](001-snapshot-caching-strategy.md) | Snapshot Caching Strategy using Bincode and SHA256 | Superseded by [003](003-blake3-cache-keys.md) | 2026-02-26 |
 | [002](002-hsm-integration.md) | HSM Integration for Cryptographic Operations | Accepted | 2026-02-26 |
+| [003](003-blake3-cache-keys.md) | BLAKE3 for Internal Cache Keys | Accepted | 2026-09-26 |
 
 ## ADR Process
 
