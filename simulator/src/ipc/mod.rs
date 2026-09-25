@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod decompress;
+pub mod response;
 pub mod types;
 pub mod validate;
 
+#[allow(unused_imports)]
+pub use response::{emit_response, serialize_response, validate_response_bounds};
 #[allow(unused_imports)]
 pub use types::{emit_chunk_frame, emit_chunk_raw, stream_to_stdout, IpcError, ResponseStreamer};
 
