@@ -25,6 +25,48 @@ pub enum SimHostError {
     Panic(String),
 }
 
+/// Runtime failure message fragments that represent an arithmetic trap inside
+/// a contract. They are matched case-insensitively against the panic payload
+/// or the raw VM trap text produced by the engine.
+const ARITHMETIC_TRAP_PATTERNS: &[&str] = &[
+    "divide by zero",
+    "division by zero",
+    "remainder by zero",
+    "divide by 0",
+];
+
+/// Returns `true` when a runtime failure message describes a WASM arithmetic
+/// trap (divide-by-zero or remainder-by-zero).
+pub(crate) fn is_arithmetic_trap(message: &str) -> bool {
+    let lowered = message.to_ascii_lowercase();
+    ARITHMETIC_TRAP_PATTERNS
+        .iter()
+        .any(|pattern| lowered.contains(pattern))
+}
+
+/// Builds the standard Soroban contract failure used for arithmetic traps.
+fn arithmetic_trap_error() -> SimHostError {
+    SimHostError::Host(EnvError::from_type_and_code(ScErrorType::Context, ScErrorCode::ArithDomain).into())
+}
+
+/// Translates engine-level arithmetic traps into a standard contract failure
+/// code so a faulty contract surfaces as a normal `HostError` instead of a
+/// fatal host crash. Every other error is returned unchanged, preserving the
+/// existing diagnostics.
+pub(crate) fn normalize_execution_error(err: SimHostError) -> SimHostError {
+    let message = match &err {
+        SimHostError::Panic(message) => message.clone(),
+        SimHostError::Host(host_error) => host_error.to_string(),
+        SimHostError::Snapshot(_) => return err,
+    };
+
+    if is_arithmetic_trap(&message) {
+        arithmetic_trap_error()
+    } else {
+        err
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct HostConfig {
     budget_limits: Option<(u64, u64)>,
@@ -90,9 +132,18 @@ impl SimHost {
         }
     }
 
+    /// Invokes a contract entry point and normalises engine level failures.
+    ///
+    /// A raw WASM arithmetic trap (for example an integer divide-by-zero)
+    /// surfaces from the runtime either as a Rust panic or as a raw VM trap
+    /// error. [`normalize_execution_error`] converts those into the standard
+    /// Soroban contract failure code (`ScErrorType::Context` /
+    /// `ScErrorCode::ArithDomain`) so callers see a normal contract failure
+    /// instead of a fatal host crash.
     pub fn invoke_function(&self, host_function: HostFunction) -> Result<ScVal, SimHostError> {
         self.with_panic_recovery(|| self.inner.invoke_function(host_function))
             .and_then(|result| result.map_err(SimHostError::Host))
+            .map_err(normalize_execution_error)
     }
 
     /// Initialize a new Host with optional budget settings and resource calibration.
@@ -465,5 +516,68 @@ mod tests {
             host.events().expect("events should read").0.is_empty(),
             "fresh host should not retain post-rollback host events"
         );
+    }
+
+    #[test]
+    fn test_arithmetic_trap_patterns_are_recognised() {
+        for message in [
+            "integer divide by zero",
+            "attempt to divide by zero",
+            "division by zero",
+            "remainder by zero",
+            "wasm trap: integer divide by 0",
+        ] {
+            assert!(is_arithmetic_trap(message), "{message} should be an arithmetic trap");
+        }
+
+        for message in [
+            "memory out of bounds",
+            "unreachable executed",
+            "index out of bounds",
+            "attempt to multiply with overflow",
+        ] {
+            assert!(!is_arithmetic_trap(message), "{message} should not be an arithmetic trap");
+        }
+    }
+
+    #[test]
+    fn test_divide_by_zero_panic_becomes_arith_domain_error() {
+        let normalized =
+            normalize_execution_error(SimHostError::Panic("integer divide by zero".to_string()));
+
+        match normalized {
+            SimHostError::Host(host_error) => {
+                let rendered = host_error.to_string().to_ascii_lowercase();
+                assert!(
+                    rendered.contains("arith"),
+                    "expected ArithDomain contract failure, got: {rendered}"
+                );
+            }
+            other => panic!("expected a host error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_non_arithmetic_panic_is_preserved() {
+        let normalized =
+            normalize_execution_error(SimHostError::Panic("memory violation".to_string()));
+
+        assert!(
+            matches!(normalized, SimHostError::Panic(message) if message.contains("memory violation"))
+        );
+    }
+
+    #[test]
+    fn test_invoke_function_normalizes_traps() {
+        // `invoke_function` applies `normalize_execution_error` to failures
+        // captured by `with_panic_recovery`, so the recovery path must yield
+        // the standard contract failure for an arithmetic trap.
+        let host = SimHost::new(HostConfig::default());
+        let caught = host
+            .with_panic_recovery::<(), _>(|| panic!("attempt to divide by zero"))
+            .expect_err("panic should be captured");
+
+        assert!(matches!(caught, SimHostError::Panic(ref m) if m.contains("divide by zero")));
+        assert!(matches!(normalize_execution_error(caught), SimHostError::Host(_)));
     }
 }
