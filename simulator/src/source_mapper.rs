@@ -7,10 +7,12 @@ use object::{Object, ObjectSection};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 pub struct SourceMapper {
     has_symbols: bool,
-    line_cache: Vec<CachedLineEntry>,
+    wasm_bytes: Vec<u8>,
+    line_cache: OnceLock<Vec<CachedLineEntry>>,
     git_repo: Option<GitRepository>,
 }
 
@@ -37,24 +39,23 @@ impl SourceMapper {
         Self::new_with_options(wasm_bytes, false)
     }
 
-    /// Creates a new SourceMapper, bypassing the cache when `no_cache` is true.
-    /// When `no_cache` is true, WASM debug symbols are always re-parsed from scratch.
+    /// Creates a new SourceMapper, deferring DWARF parsing until the first
+    /// source lookup. `no_cache` is retained for API compatibility; it still
+    /// disables the persistent cache at the call site, while this mapper's
+    /// in-memory parse is initialized once on demand.
     pub fn new_with_options(wasm_bytes: Vec<u8>, no_cache: bool) -> Self {
         if no_cache {
-            tracing::debug!("--no-cache: skipping cache, re-parsing WASM symbols from scratch.");
+            tracing::debug!(
+                "--no-cache: source maps will be parsed lazily without persistent cache."
+            );
         }
         let has_symbols = Self::check_debug_symbols(&wasm_bytes);
         let git_repo = Self::detect_git_repository();
 
-        let line_cache = if has_symbols {
-            Self::build_line_cache(&wasm_bytes).unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-
         Self {
             has_symbols,
-            line_cache,
+            wasm_bytes,
+            line_cache: OnceLock::new(),
             git_repo,
         }
     }
@@ -231,20 +232,23 @@ impl SourceMapper {
     }
 
     pub fn map_wasm_offset_to_source(&self, wasm_offset: u64) -> Option<SourceLocation> {
-        if !self.has_symbols || self.line_cache.is_empty() {
+        if !self.has_symbols {
+            return None;
+        }
+        let line_cache = self
+            .line_cache
+            .get_or_init(|| Self::build_line_cache(&self.wasm_bytes).unwrap_or_default());
+        if line_cache.is_empty() {
             return None;
         }
 
-        let idx = match self
-            .line_cache
-            .binary_search_by_key(&wasm_offset, |entry| entry.start)
-        {
+        let idx = match line_cache.binary_search_by_key(&wasm_offset, |entry| entry.start) {
             Ok(index) => index,
             Err(0) => return None,
             Err(index) => index.saturating_sub(1),
         };
 
-        let entry = self.line_cache.get(idx)?;
+        let entry = line_cache.get(idx)?;
         if let Some(end) = entry.end {
             if wasm_offset >= end {
                 return None;
@@ -296,7 +300,8 @@ mod tests {
     fn mapper_with_cache(entries: Vec<CachedLineEntry>) -> SourceMapper {
         SourceMapper {
             has_symbols: true,
-            line_cache: entries,
+            wasm_bytes: Vec::new(),
+            line_cache: OnceLock::from(entries),
             git_repo: None,
         }
     }

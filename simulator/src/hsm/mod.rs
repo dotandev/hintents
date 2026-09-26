@@ -12,6 +12,7 @@ pub mod pkcs11;
 pub mod software;
 
 use async_trait::async_trait;
+use ed25519_dalek::{verify_batch, Signature as Ed25519Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
@@ -45,6 +46,50 @@ pub struct Signature {
     pub algorithm: String,
     /// Signature bytes
     pub bytes: Vec<u8>,
+}
+
+/// Verify multiple Ed25519 signatures using dalek's batch equation. The
+/// inputs are validated before calling the batch verifier so malformed
+/// entries cannot be mistaken for a valid batch.
+pub fn verify_ed25519_batch(
+    messages: &[&[u8]],
+    signatures: &[Signature],
+    public_keys: &[PublicKey],
+) -> Result<(), SignerError> {
+    if messages.len() != signatures.len() || messages.len() != public_keys.len() {
+        return Err(SignerError::InvalidSignature(
+            "batch inputs must have equal lengths".to_string(),
+        ));
+    }
+
+    let signatures: Vec<Ed25519Signature> = signatures
+        .iter()
+        .map(|signature| {
+            if signature.algorithm != "ed25519" || signature.bytes.len() != 64 {
+                return Err(SignerError::InvalidSignature(
+                    "batch contains a non-Ed25519 or malformed signature".to_string(),
+                ));
+            }
+            let bytes: [u8; 64] = signature.bytes.as_slice().try_into().unwrap();
+            Ok(Ed25519Signature::from_bytes(&bytes))
+        })
+        .collect::<Result<_, _>>()?;
+    let public_keys: Vec<VerifyingKey> = public_keys
+        .iter()
+        .map(|key| {
+            if key.algorithm != "ed25519" || key.spki_bytes.len() != 32 {
+                return Err(SignerError::InvalidSignature(
+                    "batch contains a non-Ed25519 or malformed public key".to_string(),
+                ));
+            }
+            let bytes: [u8; 32] = key.spki_bytes.as_slice().try_into().unwrap();
+            VerifyingKey::from_bytes(&bytes)
+                .map_err(|error| SignerError::InvalidSignature(error.to_string()))
+        })
+        .collect::<Result<_, _>>()?;
+
+    verify_batch(messages, &signatures, &public_keys)
+        .map_err(|error| SignerError::InvalidSignature(error.to_string()))
 }
 
 /// Information about a signer implementation
@@ -319,6 +364,42 @@ mod tests {
             bytes: vec![0x04, 0x05, 0x06],
         };
         assert_eq!(sig.to_string(), "ed25519:040506");
+    }
+
+    #[test]
+    fn test_ed25519_batch_verification() {
+        use ed25519_dalek::{Signer as _, SigningKey};
+
+        let first = SigningKey::from_bytes(&[1; 32]);
+        let second = SigningKey::from_bytes(&[2; 32]);
+        let messages: [&[u8]; 2] = [b"first", b"second"];
+        let signatures = [
+            Signature {
+                algorithm: "ed25519".into(),
+                bytes: first.sign(messages[0]).to_bytes().to_vec(),
+            },
+            Signature {
+                algorithm: "ed25519".into(),
+                bytes: second.sign(messages[1]).to_bytes().to_vec(),
+            },
+        ];
+        let public_keys = [
+            PublicKey {
+                algorithm: "ed25519".into(),
+                spki_bytes: first.verifying_key().to_bytes().to_vec(),
+            },
+            PublicKey {
+                algorithm: "ed25519".into(),
+                spki_bytes: second.verifying_key().to_bytes().to_vec(),
+            },
+        ];
+
+        assert!(verify_ed25519_batch(&messages, &signatures, &public_keys).is_ok());
+    }
+
+    #[test]
+    fn test_ed25519_batch_rejects_mismatched_lengths() {
+        assert!(verify_ed25519_batch(&[b"message"], &[], &[]).is_err());
     }
 
     #[test]
