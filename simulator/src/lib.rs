@@ -26,3 +26,6 @@ mod memory_limit_test;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod endian_test;
