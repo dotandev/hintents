@@ -7,6 +7,49 @@ use object::{Object, ObjectSection};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+/// Global string interner for file paths to deduplicate memory usage.
+/// Uses a thread-safe registry with Arc<str> for shared ownership across threads.
+#[derive(Debug, Default)]
+struct PathInterner {
+    map: Mutex<HashMap<String, Arc<str>>>,
+}
+
+impl PathInterner {
+    /// Get or intern a file path, returning a shared Arc<str>.
+    fn intern(&self, path: String) -> Arc<str> {
+        let mut map = self.map.lock().unwrap();
+        if let Some(existing) = map.get(&path) {
+            return existing.clone();
+        }
+        let interned: Arc<str> = path.clone().into();
+        map.insert(path, interned.clone());
+        interned
+    }
+
+    /// Get the number of unique paths interned (for testing/debugging).
+    #[allow(dead_code)]
+    fn len(&self) -> usize {
+        self.map.lock().unwrap().len()
+    }
+}
+
+/// Global path interner instance.
+static PATH_INTERNER: OnceLock<PathInterner> = OnceLock::new();
+
+/// Get the global path interner.
+fn get_path_interner() -> &'static PathInterner {
+    PATH_INTERNER.get_or_init(PathInterner::default)
+}
+
+/// Intern a file path using the global interner.
+fn intern_path(path: String) -> Arc<str> {
+    get_path_interner().intern(path)
+}
 
 pub struct SourceMapper {
     has_symbols: bool,
@@ -17,11 +60,35 @@ pub struct SourceMapper {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SourceLocation {
-    pub file: String,
+    /// File path (interned via global PathInterner for memory efficiency)
+    #[serde(with = "arc_str_serde")]
+    pub file: Arc<str>,
     pub line: u32,
     pub column: Option<u32>,
     pub column_end: Option<u32>,
+    /// Optional GitHub link (not interned as it's rarely duplicated)
     pub github_link: Option<String>,
+}
+
+/// Serde serialization for Arc<str> - serializes as a plain string.
+mod arc_str_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::sync::Arc;
+
+    pub fn serialize<S>(value: &Arc<str>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(value.as_ref())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<str>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: String = Deserialize::deserialize(deserializer)?;
+        Ok(s.into())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -170,7 +237,7 @@ impl SourceMapper {
                     };
 
                     let location = SourceLocation {
-                        file: file_name,
+                        file: intern_path(file_name),
                         line: line.get() as u32,
                         column,
                         column_end: None,
@@ -274,7 +341,7 @@ impl SourceMapper {
             .and_then(|repo| repo.generate_file_link(&file, line));
 
         SourceLocation {
-            file,
+            file: intern_path(file),
             line,
             column,
             column_end: None,
@@ -375,7 +442,7 @@ mod tests {
     #[test]
     fn test_source_location_serialization() {
         let location = SourceLocation {
-            file: "test.rs".to_string(),
+            file: "test.rs".into(),
             line: 42,
             column: Some(10),
             column_end: Some(15),
@@ -390,7 +457,7 @@ mod tests {
     #[test]
     fn test_source_location_with_github_link() {
         let location = SourceLocation {
-            file: "test.rs".to_string(),
+            file: "test.rs".into(),
             line: 42,
             column: Some(10),
             column_end: None,
@@ -424,7 +491,7 @@ mod tests {
         mappings.insert(
             0x1234,
             SourceLocation {
-                file: "test.rs".to_string(),
+                file: "test.rs".into(),
                 line: 42,
                 column: Some(10),
                 column_end: None,
