@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -250,5 +251,98 @@ func TestImportNetworkState_ServerErrorPropagates(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error from failing RPC server")
+	}
+}
+
+// Dry-run must never create the output file or its parent directories.
+func TestImportNetworkState_DryRunDoesNotWrite(t *testing.T) {
+	var (
+		mu        sync.Mutex
+		requested []string
+	)
+	server := newImportMockServer(t, &mu, &requested)
+	defer server.Close()
+
+	outPath := filepath.Join(t.TempDir(), "dry-run-dir", "snapshot.json")
+
+	result, err := ImportNetworkState(context.Background(), ImportConfig{
+		LedgerKeys: []string{makeImportTestLedgerKey(t, 130)},
+		OutputPath: outPath,
+		Network:    "testnet",
+		RPCURL:     server.URL,
+		DryRun:     true,
+	})
+	if err != nil {
+		t.Fatalf("ImportNetworkState: %v", err)
+	}
+
+	if !result.DryRun {
+		t.Error("expected result.DryRun to be true")
+	}
+	if result.Entries != 1 || result.FetchedKeys != 1 {
+		t.Errorf("expected 1 entry / 1 fetched, got %d / %d", result.Entries, result.FetchedKeys)
+	}
+	if result.Fingerprint == "" {
+		t.Error("expected non-empty fingerprint for the simulated snapshot")
+	}
+	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
+		t.Errorf("dry-run must not create %s (stat err: %v)", outPath, err)
+	}
+	if _, err := os.Stat(filepath.Dir(outPath)); !os.IsNotExist(err) {
+		t.Errorf("dry-run must not create %s", filepath.Dir(outPath))
+	}
+}
+
+// Dry-run must leave a pre-existing snapshot byte-for-byte unchanged.
+func TestImportNetworkState_DryRunLeavesExistingSnapshotUntouched(t *testing.T) {
+	var (
+		mu        sync.Mutex
+		requested []string
+	)
+	server := newImportMockServer(t, &mu, &requested)
+	defer server.Close()
+
+	outPath := filepath.Join(t.TempDir(), "snapshot.json")
+
+	seedKey := makeImportTestLedgerKey(t, 120)
+	seed := snapshot.FromMap(map[string]string{seedKey: makeImportTestEntry(t, seedKey)})
+	if err := snapshot.Save(outPath, seed); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	before, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read seed snapshot: %v", err)
+	}
+
+	result, err := ImportNetworkState(context.Background(), ImportConfig{
+		LedgerKeys: []string{makeImportTestLedgerKey(t, 121)},
+		OutputPath: outPath,
+		Network:    "testnet",
+		RPCURL:     server.URL,
+		DryRun:     true,
+	})
+	if err != nil {
+		t.Fatalf("ImportNetworkState: %v", err)
+	}
+
+	// 1 existing + 1 fetched, previewed only.
+	if result.Entries != 2 || result.FetchedKeys != 1 {
+		t.Errorf("expected 2 entries / 1 fetched, got %d / %d", result.Entries, result.FetchedKeys)
+	}
+
+	after, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read snapshot after dry-run: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Error("dry-run modified the existing snapshot file")
+	}
+
+	snap, err := snapshot.Load(outPath)
+	if err != nil {
+		t.Fatalf("snapshot.Load: %v", err)
+	}
+	if len(snap.LedgerEntries) != 1 {
+		t.Errorf("expected 1 entry still on disk, got %d", len(snap.LedgerEntries))
 	}
 }
