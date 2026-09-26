@@ -794,7 +794,7 @@ mod tests {
         mappings.insert(
             0x1234,
             SourceLocation {
-                file: "test.rs".to_string(),
+                file: "test.rs".into(),
                 line: 42,
                 column: Some(10),
                 column_end: None,
@@ -892,7 +892,7 @@ mod tests {
         mappings.insert(
             0x1234,
             SourceLocation {
-                file: "test.rs".to_string(),
+                file: "test.rs".into(),
                 line: 42,
                 column: Some(10),
                 column_end: None,
@@ -953,7 +953,7 @@ mod tests {
         mappings1.insert(
             0x1234,
             SourceLocation {
-                file: "test1.rs".to_string(),
+                file: "test1.rs".into(),
                 line: 1,
                 column: Some(1),
                 column_end: None,
@@ -982,7 +982,7 @@ mod tests {
             mappings2.insert(
                 i,
                 SourceLocation {
-                    file: "test2.rs".to_string(),
+                    file: "test2.rs".into(),
                     line: i as u32,
                     column: Some(i as u32),
                     column_end: None,
@@ -1027,7 +1027,7 @@ mod tests {
                 mappings.insert(
                     j,
                     SourceLocation {
-                        file: format!("test{}.rs", i),
+                        file: format!("test{}.rs", i).into(),
                         line: j as u32,
                         column: Some(j as u32),
                         column_end: None,
@@ -1129,17 +1129,17 @@ mod tests {
             let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d, i as u8];
             let wasm_hash = SourceMapCache::compute_wasm_hash(&wasm_bytes);
 
-            let mut mappings = HashMap::new();
-            mappings.insert(
-                0,
-                SourceLocation {
-                    file: "test.rs".to_string(),
-                    line: 1,
-                    column: Some(1),
-                    column_end: None,
-                    github_link: None,
-                },
-            );
+let mut mappings = HashMap::new();
+        mappings.insert(
+            0x1234,
+SourceLocation {
+                file: "test.rs".into(),
+                line: 42,
+                column: Some(10),
+                column_end: None,
+                github_link: None,
+            },
+        );
 
             let entry = SourceMapCacheEntry {
                 wasm_hash,

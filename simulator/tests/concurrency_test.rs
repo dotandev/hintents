@@ -37,7 +37,7 @@ fn test_concurrency_source_map_cache() {
                     mappings.insert(
                         t * 1000 + i,
                         SourceLocation {
-                            file: format!("file_{t}_{i}.rs"),
+                            file: format!("file_{t}_{i}.rs").into(),
                             #[allow(clippy::cast_possible_truncation)]
                             line: i as u32,
                             column: Some(0),
