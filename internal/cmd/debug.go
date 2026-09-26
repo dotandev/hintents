@@ -66,6 +66,7 @@ var (
 	hotReloadFlag        bool
 	hotReloadInterval    time.Duration
 	snapshotsFlag        bool
+	keepArtifactsFlag    bool
 	protocolVersionFlag  uint32
 	auditKeyFlag         string
 	publishIPFSFlag      bool
@@ -128,6 +129,11 @@ Example:
 
 func (d *DebugCommand) runDebug(cmd *cobra.Command, cmdArgs []string) error {
 	txHash := cmdArgs[0]
+
+	snapshotPath := filepath.Join(".erst", "snapshots", fmt.Sprintf("debug-%s.json", txHash))
+	if !keepArtifactsFlag {
+		defer os.Remove(snapshotPath)
+	}
 
 	token := rpcTokenFlag
 	if token == "" {
@@ -1730,6 +1736,7 @@ func init() {
 	debugCmd.Flags().BoolVar(&hotReloadFlag, "hot-reload", false, "Hot reload local WASM changes during debug session (requires --wasm)")
 	debugCmd.Flags().DurationVar(&hotReloadInterval, "hot-reload-interval", 500*time.Millisecond, "Polling interval fallback for hot reload (e.g. 500ms)")
 	debugCmd.Flags().BoolVar(&snapshotsFlag, "snapshots", false, "Enable simulator snapshot capture (default: disabled)")
+	debugCmd.Flags().BoolVar(&keepArtifactsFlag, "keep-artifacts", false, "Keep temporary snapshot artifacts")
 	debugCmd.Flags().Uint32Var(&mockBaseFeeFlag, "mock-base-fee", 0, "Override base fee (stroops) for local fee sufficiency checks")
 	debugCmd.Flags().Uint64Var(&mockGasPriceFlag, "mock-gas-price", 0, "Override gas price multiplier for local fee sufficiency checks")
 	debugCmd.Flags().StringVar(&themeFlag, "theme", "", "Color theme override (dark, light, none)")
