@@ -9,6 +9,7 @@ mod debug_host_fn;
 mod events;
 mod gas_optimizer;
 mod git_detector;
+mod indexer;
 mod ipc;
 mod memory;
 mod profiler;

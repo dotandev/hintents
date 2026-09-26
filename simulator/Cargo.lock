@@ -858,6 +858,7 @@ dependencies = [
  "bincode",
  "clap",
  "colored",
+ "dashmap",
  "dirs",
  "ed25519-dalek",
  "gimli 0.31.1",
