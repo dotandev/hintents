@@ -82,9 +82,11 @@ var (
 	// request dump). It accepts both the plain "Authorization: <value>" form
 	// and the JSON-encoded `"authorization":"<value>"` form, and masks the
 	// entire value up to the end of the line, closing quote, or JSON object
-	// boundary.
+	// boundary. The leading \b keeps it from matching inside unrelated words
+	// such as "reauthorization", which would otherwise mask the rest of the
+	// line even though no header/value pair is present.
 	authHeaderRe = regexp.MustCompile(
-		`(?i)((?:proxy-)?(?:authorization|www-authenticate)"?[[:space:]]*[:=][[:space:]]*"?)[^"\r\n}]*`)
+		`(?i)\b((?:proxy-)?(?:authorization|www-authenticate)"?[[:space:]]*[:=][[:space:]]*"?)[^"\r\n}]*`)
 
 	// bearerRe masks RFC 6750 bearer tokens that appear without a labelled
 	// header name (e.g. an error message that quotes the raw token). The
@@ -96,12 +98,14 @@ var (
 	// "key=value", "key: value", or JSON `"key": "value"` forms. It covers
 	// env-var style assignments (ERST_PKCS11_PIN=..., ERST_SOFTWARE_PRIVATE_KEY_HEX=...),
 	// structured log fields and JSON payloads. The value capture stops at
-	// whitespace, quotes and common delimiters so surrounding context is
+	// whitespace, quotes and common delimiters (including closing ')' and ']'
+	// so a value like "(token=abc)" or "[pin=123]" doesn't swallow the
+	// surrounding punctuation into the redaction) so surrounding context is
 	// preserved; long hexadecimal private keys are only masked here, when
 	// labelled, to keep legitimate transaction and contract hashes visible in
 	// the logs.
 	labeledSecretRe = regexp.MustCompile(
-		`(?i)("?(?:api[-_]?key|client[-_]?secret|pass(?:word)?|pin|private[-_]?key|secret|seed|signing[-_]?key|signature|token)(?:[-_](?:hex|pem|b64|base64|env|var|file|path|phrase|id))?"?[[:space:]]*[:=][[:space:]]*["']?)([^"'[:space:],;&}\r\n]*)`)
+		`(?i)("?(?:api[-_]?key|client[-_]?secret|pass(?:word)?|pin|private[-_]?key|secret|seed|signing[-_]?key|signature|token)(?:[-_](?:hex|pem|b64|base64|env|var|file|path|phrase|id))?"?[[:space:]]*[:=][[:space:]]*["']?)([^"'[:space:],;&})\]\[\r\n]*)`)
 )
 
 // SanitizeLogString masks sensitive authorization data and private key

@@ -291,3 +291,34 @@ func TestSanitizeLogString_KeepsLongWordsUnrelatedToSecrets(t *testing.T) {
 	input := "ledger hash 64HEXSTRINGVALUECOUNTEDTOEXACTLYFIFTYSIXCHARS ok"
 	assert.Equal(t, input, SanitizeLogString(input))
 }
+
+// ---------------------------------------------------------------------------
+// Regression: authHeaderRe / labeledSecretRe must not corrupt unrelated text
+// ---------------------------------------------------------------------------
+
+func TestSanitizeLogString_DoesNotMatchInsideUnrelatedWord(t *testing.T) {
+	// "authorization" appearing as a substring of a larger word (not a
+	// header/value pair) must not be treated as an Authorization header and
+	// must not mask the rest of the line.
+	input := "reauthorization: header ignored"
+	assert.Equal(t, input, SanitizeLogString(input),
+		"a word merely containing \"authorization\" must not trigger redaction")
+}
+
+func TestSanitizeLogString_PreservesTrailingParen(t *testing.T) {
+	input := "config error (token=ghp_16C7e42F292c6912E7710c838347Ae178B4a)"
+	got := SanitizeLogString(input)
+
+	assert.Equal(t, "config error (token="+RedactedPlaceholder+")", got,
+		"the closing paren must survive redaction")
+	assert.NotContains(t, got, "ghp_16C7e42F292c6912E7710c838347Ae178B4a")
+}
+
+func TestSanitizeLogString_PreservesTrailingBracket(t *testing.T) {
+	input := "pin check failed [pin=123456]"
+	got := SanitizeLogString(input)
+
+	assert.Equal(t, "pin check failed [pin="+RedactedPlaceholder+"]", got,
+		"the closing bracket must survive redaction")
+	assert.NotContains(t, got, "123456")
+}
