@@ -221,6 +221,19 @@ Local WASM Replay Mode:
 			return errors.WrapValidationError("--hot-reload requires --wasm")
 		}
 
+		// Validate --wasm path against directory traversal before any file I/O.
+		if wasmPath != "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return errors.WrapValidationError(fmt.Sprintf("failed to determine working directory: %v", err))
+			}
+			safe, err := safeWasmPath(wasmPath, cwd)
+			if err != nil {
+				return errors.WrapValidationError(fmt.Sprintf("--wasm: %v", err))
+			}
+			wasmPath = safe
+		}
+
 		// Demo mode, local WASM replay, and offline registry load don't need a
 		// transaction hash or network connectivity.
 		if demoMode || wasmPath != "" || loadSnapshotsFlag != "" {
