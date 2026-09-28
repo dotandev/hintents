@@ -102,14 +102,7 @@ jobs:
       - name: Run Clippy (strict mode)
         run: |
           echo "Running Clippy with strict warnings..."
-          cargo clippy --all-targets --all-features -- \
-            -D warnings \
-            -D clippy::all \
-            -D unused-variables \
-            -D unused-imports \
-            -D unused-mut \
-            -D dead-code \
-            -D unused-assignments || {
+          cargo clippy --all-targets --all-features -- -D warnings || {
             echo "[FAIL] Clippy found issues that must be fixed"
             exit 1
           }
