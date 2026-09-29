@@ -4,7 +4,7 @@
 use soroban_env_host::xdr::{LedgerEntry, LedgerEntryChange};
 use std::collections::HashMap;
 
-fn merge_storage_state(before: &[LedgerEntry], changes: &[LedgerEntryChange]) -> Vec<LedgerEntry> {
+pub fn merge_storage_state(before: &[LedgerEntry], changes: &[LedgerEntryChange]) -> Vec<LedgerEntry> {
     let mut state: HashMap<String, LedgerEntry> = HashMap::new();
 
     // Load BEFORE state
@@ -26,4 +26,8 @@ fn merge_storage_state(before: &[LedgerEntry], changes: &[LedgerEntryChange]) ->
     }
 
     state.into_values().collect()
+}
+
+pub fn garbage_collect(state: &mut HashMap<String, LedgerEntry>, active_keys: &[String]) {
+    state.retain(|key, _| active_keys.contains(key));
 }
