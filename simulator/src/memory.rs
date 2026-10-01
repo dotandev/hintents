@@ -3,7 +3,7 @@
 
 //! Memory-limit enforcement for the simulator runtime.
 //!
-//! Provides the [`check_memory_limit`] helper used by the runtime to panic when
+//! Provides the [`check_memory_limit`] helper used by the runtime to return an error when
 //! the configured hard memory limit is exceeded (mimicking live Soroban network
 //! constraints).
 //!
@@ -14,13 +14,18 @@
 
 /// Checks whether the current memory consumption exceeds the configured hard limit.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics with a diagnostic message when `consumed > limit`.
-pub fn check_memory_limit(consumed: u64, limit: u64) {
+/// Returns `HostError` with `ScErrorCode::MemoryLimitExceeded` when `consumed > limit`.
+pub fn check_memory_limit(consumed: u64, limit: u64) -> Result<(), soroban_env_host::HostError> {
     if consumed > limit {
-        panic!("ERR_MEMORY_LIMIT_EXCEEDED: consumed {consumed} bytes, limit {limit} bytes");
+        return Err(soroban_env_host::Error::from_type_and_code(
+            soroban_env_host::xdr::ScErrorType::WasmVm,
+            soroban_env_host::xdr::ScErrorCode::MemoryLimitExceeded,
+        )
+        .into());
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -29,19 +34,17 @@ mod tests {
 
     #[test]
     fn test_check_memory_limit_within_bounds() {
-        // Should not panic
-        check_memory_limit(500, 1000);
+        assert!(check_memory_limit(500, 1000).is_ok());
     }
 
     #[test]
     fn test_check_memory_limit_at_boundary() {
-        // Should not panic — exactly at limit
-        check_memory_limit(1000, 1000);
+        assert!(check_memory_limit(1000, 1000).is_ok());
     }
 
     #[test]
     fn test_check_memory_limit_exceeded_panics() {
-        let result = std::panic::catch_unwind(|| check_memory_limit(1001, 1000));
-        assert!(result.is_err(), "expected panic when memory exceeds limit");
+        let result = check_memory_limit(1001, 1000);
+        assert!(result.is_err(), "expected error when memory exceeds limit");
     }
 }
