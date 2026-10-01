@@ -46,7 +46,9 @@ pub(crate) fn is_arithmetic_trap(message: &str) -> bool {
 
 /// Builds the standard Soroban contract failure used for arithmetic traps.
 fn arithmetic_trap_error() -> SimHostError {
-    SimHostError::Host(EnvError::from_type_and_code(ScErrorType::Context, ScErrorCode::ArithDomain).into())
+    SimHostError::Host(
+        EnvError::from_type_and_code(ScErrorType::Context, ScErrorCode::ArithDomain).into(),
+    )
 }
 
 /// Translates engine-level arithmetic traps into a standard contract failure
@@ -527,7 +529,10 @@ mod tests {
             "remainder by zero",
             "wasm trap: integer divide by 0",
         ] {
-            assert!(is_arithmetic_trap(message), "{message} should be an arithmetic trap");
+            assert!(
+                is_arithmetic_trap(message),
+                "{message} should be an arithmetic trap"
+            );
         }
 
         for message in [
@@ -536,7 +541,10 @@ mod tests {
             "index out of bounds",
             "attempt to multiply with overflow",
         ] {
-            assert!(!is_arithmetic_trap(message), "{message} should not be an arithmetic trap");
+            assert!(
+                !is_arithmetic_trap(message),
+                "{message} should not be an arithmetic trap"
+            );
         }
     }
 
@@ -578,6 +586,9 @@ mod tests {
             .expect_err("panic should be captured");
 
         assert!(matches!(caught, SimHostError::Panic(ref m) if m.contains("divide by zero")));
-        assert!(matches!(normalize_execution_error(caught), SimHostError::Host(_)));
+        assert!(matches!(
+            normalize_execution_error(caught),
+            SimHostError::Host(_)
+        ));
     }
 }
