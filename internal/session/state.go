@@ -5,6 +5,7 @@ package session
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 // State represents the current session data
@@ -26,7 +27,7 @@ type Middleware func(next Dispatcher) Dispatcher
 type StateStore struct {
 	mu         sync.RWMutex
 	state      State
-	dispatch   Dispatcher
+	dispatch   atomic.Value // stores Dispatcher; keeps Dispatch lock-free
 	middleware []Middleware
 }
 
@@ -36,23 +37,26 @@ func NewStateStore() *StateStore {
 		state: make(State),
 	}
 	// The base dispatcher updates the actual state map
-	s.dispatch = s.baseDispatch
+	s.dispatch.Store(Dispatcher(s.baseDispatch))
 	return s
 }
 
 // Use injects custom middleware into the state management pipeline
 func (s *StateStore) Use(mw Middleware) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.middleware = append(s.middleware, mw)
+	middleware := append([]Middleware(nil), s.middleware...)
+	s.mu.Unlock()
 
-	// Re-chain the middleware (the "Optimize" operation)
+	// Build the chain without holding the state lock. Middleware factories may
+	// perform I/O or call back into the store; holding mu here used to deadlock
+	// those callbacks against baseDispatch/Get.
 	// We wrap the base dispatch with each middleware in reverse order
 	composed := s.baseDispatch
-	for i := len(s.middleware) - 1; i >= 0; i-- {
-		composed = s.middleware[i](composed)
+	for i := len(middleware) - 1; i >= 0; i-- {
+		composed = middleware[i](composed)
 	}
-	s.dispatch = composed
+	s.dispatch.Store(Dispatcher(composed))
 }
 
 func (s *StateStore) baseDispatch(action Action) {
@@ -63,7 +67,7 @@ func (s *StateStore) baseDispatch(action Action) {
 
 // Dispatch triggers a state change through the middleware chain
 func (s *StateStore) Dispatch(action Action) {
-	s.dispatch(action)
+	s.dispatch.Load().(Dispatcher)(action)
 }
 
 // Get safely retrieves session data

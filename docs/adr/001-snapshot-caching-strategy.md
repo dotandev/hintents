@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-003](003-blake3-cache-keys.md) for the hash-algorithm choice;
+the bincode serialization and filesystem-cache decisions below remain in effect.
 
 ## Context
 

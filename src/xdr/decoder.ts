@@ -9,6 +9,35 @@ import { xdr } from '@stellar/stellar-sdk';
 import { Buffer } from './buffer-shim';
 import * as crypto from 'crypto';
 
+const decodedBufferPool: Buffer[] = [];
+const MAX_POOLED_BUFFER_SIZE = 256 * 1024;
+
+function acquireDecodedBase64(value: string): Buffer {
+    const decodedLength = Math.floor((value.length * 3) / 4);
+    const reusable = decodedBufferPool.pop();
+    const output = reusable && reusable.length >= decodedLength
+        ? reusable
+        : Buffer.from(new Uint8Array(decodedLength));
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const lookup = (char: string) => alphabet.indexOf(char);
+    let outputOffset = 0;
+    for (let index = 0; index < value.length; index += 4) {
+        const a = lookup(value[index]);
+        const b = lookup(value[index + 1]);
+        const c = value[index + 2] === '=' ? 0 : lookup(value[index + 2]);
+        const d = value[index + 3] === '=' ? 0 : lookup(value[index + 3]);
+        if (a < 0 || b < 0 || c < 0 || d < 0) throw new Error('Invalid base64 input');
+        output[outputOffset++] = (a << 2) | (b >> 4);
+        if (value[index + 2] !== '=') output[outputOffset++] = ((b & 15) << 4) | (c >> 2);
+        if (value[index + 3] !== '=') output[outputOffset++] = ((c & 3) << 6) | d;
+    }
+    return output.subarray(0, outputOffset);
+}
+
+function releaseDecodedBase64(buffer: Buffer): void {
+    if (buffer.buffer.byteLength <= MAX_POOLED_BUFFER_SIZE) decodedBufferPool.push(buffer);
+}
+
 export enum TransactionMetaVersion {
     V1 = 1,
     V2 = 2,
@@ -41,9 +70,12 @@ export class XDRDecoder {
             const line = chunk.toString().trim();
             if (!line) continue;
             try {
-                const buffer = Buffer.from(line, 'base64');
-                const entry = decodeFn(buffer);
-                yield entry;
+                const buffer = acquireDecodedBase64(line);
+                try {
+                    yield decodeFn(buffer);
+                } finally {
+                    releaseDecodedBase64(buffer);
+                }
             } catch (error: any) {
                 // Optionally log or handle decode errors per entry
                 continue;
@@ -55,8 +87,12 @@ export class XDRDecoder {
      */
     static decodeTransactionMeta(base64Xdr: string): xdr.TransactionMeta {
         try {
-            const buffer = Buffer.from(base64Xdr, 'base64');
-            return xdr.TransactionMeta.fromXDR(buffer);
+            const buffer = acquireDecodedBase64(base64Xdr);
+            try {
+                return xdr.TransactionMeta.fromXDR(buffer);
+            } finally {
+                releaseDecodedBase64(buffer);
+            }
         } catch (error: any) {
             throw new Error(`Failed to decode TransactionMeta XDR: ${error.message}`);
         }

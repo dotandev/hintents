@@ -76,9 +76,21 @@ func (n *TraceNode) ToggleExpanded() {
 
 // ApplyHeuristics applies heuristics to detect and collapse repetitive patterns
 func (n *TraceNode) ApplyHeuristics() {
+	n.ApplyHeuristicsWith(nil)
+}
+
+// ApplyHeuristicsWith applies the same heuristics as ApplyHeuristics but
+// allocates any synthetic (collapsed) nodes through newNode, so a caller that
+// owns an arena can keep the whole tree inside one region. A nil newNode falls
+// back to NewTraceNode.
+func (n *TraceNode) ApplyHeuristicsWith(newNode traceNodeFactory) {
+	if newNode == nil {
+		newNode = NewTraceNode
+	}
+
 	if len(n.Children) <= 10 {
 		for _, child := range n.Children {
-			child.ApplyHeuristics()
+			child.ApplyHeuristicsWith(newNode)
 		}
 		return
 	}
@@ -103,12 +115,12 @@ func (n *TraceNode) ApplyHeuristics() {
 			for k := 0; k < 5; k++ {
 				child := n.Children[i+k]
 				newChildren = append(newChildren, child)
-				child.ApplyHeuristics()
+				child.ApplyHeuristicsWith(newNode)
 			}
 
 			// Create collapsed node for the rest
 			collapsedCount := count - 5
-			collapsed := NewTraceNode(fmt.Sprintf("%s-collapsed-%d", n.ID, i), "collapsed")
+			collapsed := newNode(fmt.Sprintf("%s-collapsed-%d", n.ID, i), "collapsed")
 			collapsed.EventData = fmt.Sprintf("Show %d more elements", collapsedCount)
 			collapsed.Expanded = false
 			collapsed.Depth = n.Depth + 1
@@ -118,14 +130,14 @@ func (n *TraceNode) ApplyHeuristics() {
 			for k := 5; k < count; k++ {
 				child := n.Children[i+k]
 				collapsed.AddChild(child)
-				child.ApplyHeuristics()
+				child.ApplyHeuristicsWith(newNode)
 			}
 			newChildren = append(newChildren, collapsed)
 			i += count
 		} else {
 			child := n.Children[i]
 			newChildren = append(newChildren, child)
-			child.ApplyHeuristics()
+			child.ApplyHeuristicsWith(newNode)
 			i++
 		}
 	}

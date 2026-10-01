@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use soroban_env_host::events::HostEvent;
 use soroban_env_host::xdr::{LedgerEntry, LedgerKey};
 
+use crate::indexer::EventIndexer;
 use crate::runner::{SimHost, SimHostError};
 use crate::snapshot::LedgerSnapshot;
 use crate::types::SimulationRequest;
@@ -89,7 +90,7 @@ pub enum SimulationContextError {
 pub struct SimulationContext {
     host: SimHost,
     snapshots: HashMap<String, SnapshotState>,
-    committed_events: Vec<HostEvent>,
+    committed_events: EventIndexer,
     synced_host_event_count: usize,
 }
 
@@ -99,7 +100,7 @@ impl SimulationContext {
         Self {
             host,
             snapshots: HashMap::new(),
-            committed_events: Vec::new(),
+            committed_events: EventIndexer::default(),
             synced_host_event_count: 0,
         }
     }
@@ -160,7 +161,7 @@ impl SimulationContext {
 
     #[allow(dead_code)]
     pub fn events(&self) -> Result<Vec<HostEvent>, SimulationContextError> {
-        let mut events = self.committed_events.clone();
+        let mut events = self.committed_events.snapshot();
         let host_events = self.host.event_log()?;
         events.extend(host_events.into_iter().skip(self.synced_host_event_count));
         Ok(events)
@@ -171,8 +172,9 @@ impl SimulationContext {
         let host_events = self.host.event_log()?;
         if self.synced_host_event_count < host_events.len() {
             let host_event_count = host_events.len();
-            self.committed_events
-                .extend(host_events.into_iter().skip(self.synced_host_event_count));
+            for event in host_events.into_iter().skip(self.synced_host_event_count) {
+                self.committed_events.insert(event);
+            }
             self.synced_host_event_count = host_event_count;
         }
         Ok(())

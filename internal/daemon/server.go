@@ -220,21 +220,27 @@ func (s *Server) Start(ctx context.Context, port string) error {
 		return errors.WrapValidationError(fmt.Sprintf("failed to register service: %v", err))
 	}
 
-	http.Handle("/rpc", server)
+	// Use a dedicated mux instead of the global DefaultServeMux so that
+	// repeated Start calls (for example in tests) cannot panic on duplicate
+	// route registration, and so every route can be wrapped by the gzip
+	// middleware without touching global state.
+	mux := http.NewServeMux()
+	mux.Handle("/rpc", gzipHandler(server))
 
 	// Health check endpoint
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/health", gzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
+	})))
 
 	// Prometheus metrics endpoint
-	http.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", gzipHandler(promhttp.Handler()))
 
 	logger.Logger.Info("Starting JSON-RPC server", "port", port)
 
 	srv := &http.Server{
-		Addr: ":" + port,
+		Addr:    ":" + port,
+		Handler: mux,
 	}
 
 	// Start server in goroutine

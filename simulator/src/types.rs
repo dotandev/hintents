@@ -3,6 +3,8 @@
 
 #![allow(dead_code)]
 
+pub mod symbol;
+
 use crate::asset_tracker::AssetAnomaly;
 use crate::gas_optimizer::OptimizationReport;
 use crate::source_mapper::SourceLocation;

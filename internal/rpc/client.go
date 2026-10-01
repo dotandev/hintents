@@ -8,6 +8,7 @@ import (
 	stdErrors "errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
@@ -55,8 +56,9 @@ type Client struct {
 	// rotateCount tracks how many times rotateURL has successfully switched
 	// the active provider.  This is useful for metrics/observability when the
 	// client is operating in a multi‑URL failover configuration.
-	rotateCount     int
-	healthCollector *HealthCollector
+	rotateCount       int
+	healthCollector   *HealthCollector
+	ledgerRetryConfig RetryConfig
 }
 
 func (c *Client) startMethodTimer(ctx context.Context, method string, attributes map[string]string) MethodTimer {
@@ -188,11 +190,27 @@ func (c *Client) GetNetworkName() string {
 	return "custom"
 }
 
-// GetLedgerHeader fetches ledger header details for a specific sequence with automatic fallback.
+// GetLedgerHeader fetches ledger header details for a specific sequence with automatic fallback
+// and exponential backoff on retryable failures.
 func (c *Client) GetLedgerHeader(ctx context.Context, sequence uint32) (*LedgerHeaderResponse, error) {
-	attempts := c.endpointAttempts()
+	c.mu.RLock()
+	cfg := c.ledgerRetryConfig
+	altURLsCount := len(c.AltURLs)
+	c.mu.RUnlock()
+
+	maxRetries := cfg.MaxRetries
+	maxAttempts := maxRetries + 1
+	if altURLsCount > maxAttempts {
+		maxAttempts = altURLsCount
+	}
+
+	backoff := cfg.InitialBackoff
+	if backoff == 0 && maxRetries > 0 {
+		backoff = 500 * time.Millisecond
+	}
+
 	var failures []NodeFailure
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		resp, err := c.getLedgerHeaderAttempt(ctx, sequence)
 		if err == nil {
 			c.markSuccess(c.HorizonURL)
@@ -200,26 +218,139 @@ func (c *Client) GetLedgerHeader(ctx context.Context, sequence uint32) (*LedgerH
 		}
 
 		c.markFailure(c.HorizonURL)
-
 		failures = append(failures, NodeFailure{URL: c.HorizonURL, Reason: err})
 
-		if attempt < attempts-1 && len(c.AltURLs) > 1 {
-			logger.Logger.Warn("Retrying ledger header fetch with fallback RPC...", "error", err)
-			if !c.rotateURL() {
-				break
+		// Do not retry if the error is non-retryable (404, 410, 413, or context canceled).
+		if !isRetryableLedgerError(ctx, err) {
+			break
+		}
+
+		if attempt < maxAttempts-1 {
+			if backoff > 0 {
+				logger.Logger.Warn("Retrying ledger header fetch with exponential backoff...",
+					"attempt", attempt+1,
+					"backoff", backoff,
+					"url", c.HorizonURL,
+					"error", err,
+				)
+				if err := waitWithContext(ctx, backoff); err != nil {
+					return nil, err
+				}
+				backoff = c.calculateNextLedgerBackoff(backoff)
+			}
+
+			// If multiple endpoints are configured, rotate to the fallback node.
+			if altURLsCount > 1 {
+				logger.Logger.Warn("Retrying ledger header fetch with fallback RPC...", "error", err)
+				if !c.rotateURL() {
+					break
+				}
 			}
 			continue
 		}
-
-		if len(c.AltURLs) <= 1 {
-			return nil, err
-		}
 	}
+
 	// Single-node path: return the typed error directly so callers can use Is/As.
+	if altURLsCount <= 1 && len(failures) > 0 {
+		return nil, failures[len(failures)-1].Reason
+	}
 	if len(failures) == 1 {
 		return nil, failures[0].Reason
 	}
 	return nil, &AllNodesFailedError{Failures: failures}
+}
+
+// isRetryableLedgerError reports whether an error from fetching a ledger header can be retried.
+func isRetryableLedgerError(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return false
+	}
+	if stdErrors.Is(err, context.Canceled) || stdErrors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if IsLedgerNotFound(err) || IsLedgerArchived(err) || IsResponseTooLarge(err) {
+		return false
+	}
+
+	// Check if it's a non-retryable Horizon client error (4xx except 429)
+	var hErr *horizonclient.Error
+	if stdErrors.As(err, &hErr) {
+		if hErr.Problem.Status >= 400 && hErr.Problem.Status < 500 && hErr.Problem.Status != 429 {
+			return false
+		}
+	}
+
+	// Check if wrapped in ErstError
+	var erstErr *errors.ErstError
+	if stdErrors.As(err, &erstErr) {
+		switch erstErr.Code {
+		case errors.ErstLedgerNotFound, errors.ErstLedgerArchived:
+			return false
+		}
+	}
+
+	return true
+}
+
+// waitWithContext sleeps for duration d or returns early when ctx is done.
+func waitWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// calculateNextLedgerBackoff calculates the next wait duration for ledger retries.
+func (c *Client) calculateNextLedgerBackoff(current time.Duration) time.Duration {
+	c.mu.RLock()
+	cfg := c.ledgerRetryConfig
+	c.mu.RUnlock()
+
+	maxBackoff := cfg.MaxBackoff
+	if maxBackoff <= 0 {
+		maxBackoff = 2 * time.Second
+	}
+
+	next := current * 2
+	if next > maxBackoff {
+		next = maxBackoff
+	}
+
+	if cfg.JitterFraction > 0 {
+		maxJitter := float64(next) * (1.0 + cfg.JitterFraction)
+		minJitter := float64(next) * (1.0 - cfg.JitterFraction)
+		if minJitter < 0 {
+			minJitter = 0
+		}
+		next = time.Duration(minJitter + rand.Float64()*(maxJitter-minJitter))
+	}
+
+	return next
+}
+
+// GetLedgerRetryConfig returns the current retry configuration for ledger fetching.
+func (c *Client) GetLedgerRetryConfig() RetryConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ledgerRetryConfig
+}
+
+// SetLedgerRetryConfig updates the retry configuration for ledger fetching.
+func (c *Client) SetLedgerRetryConfig(cfg RetryConfig) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ledgerRetryConfig = cfg
 }
 
 func (c *Client) getLedgerHeaderAttempt(ctx context.Context, sequence uint32) (ledgerResp *LedgerHeaderResponse, err error) {

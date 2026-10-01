@@ -36,6 +36,18 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
+// DefaultLedgerRetryConfig returns the default retry configuration for ledger fetching.
+// Uses 3 retries with exponential backoff: 500ms, 1s, 2s.
+func DefaultLedgerRetryConfig() RetryConfig {
+	return RetryConfig{
+		MaxRetries:         3,
+		InitialBackoff:     500 * time.Millisecond,
+		MaxBackoff:         2 * time.Second,
+		JitterFraction:     0,
+		StatusCodesToRetry: []int{429, 500, 502, 503, 504},
+	}
+}
+
 // retryLogic holds the shared retry behavior used by both Retrier and RetryTransport.
 // Embedding this struct in either type promotes its methods, eliminating duplicated code
 // while keeping each type's transport/client wiring independent.

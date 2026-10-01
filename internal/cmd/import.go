@@ -21,6 +21,7 @@ var (
 	importRPCURLFlag      string
 	importRPCTokenFlag    string
 	importTimeoutFlag     time.Duration
+	importDryRunFlag      bool
 )
 
 // importCmd fetches contract state from a Soroban RPC endpoint and writes it
@@ -40,7 +41,8 @@ If the output file already exists, fetched entries are merged into it.
 Examples:
   erst import --contract CABC... -o snapshot.json --network mainnet
   erst import --contract CABC... --contract CDEF... -o snapshot.json
-  erst import --key AAAA... --key BBBB... -o snapshot.json --network testnet`,
+  erst import --key AAAA... --key BBBB... -o snapshot.json --network testnet
+  erst import --contract CABC... -o snapshot.json --dry-run`,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if importOutputFlag == "" {
 			return errors.WrapCliArgumentRequired("--output")
@@ -66,6 +68,7 @@ func init() {
 	importCmd.Flags().StringVar(&importRPCURLFlag, "rpc-url", "", "Custom Soroban RPC URL overriding the network default")
 	importCmd.Flags().StringVar(&importRPCTokenFlag, "rpc-token", "", "RPC authentication token (can also use ERST_RPC_TOKEN env var)")
 	importCmd.Flags().DurationVar(&importTimeoutFlag, "timeout", 60*time.Second, "Overall import timeout")
+	importCmd.Flags().BoolVar(&importDryRunFlag, "dry-run", false, "Run the import in memory and discard it: nothing is written to disk")
 
 	_ = importCmd.RegisterFlagCompletionFunc("network", completeNetworkFlag)
 
@@ -81,9 +84,14 @@ func runImport(cmd *cobra.Command, _ []string) error {
 		RPCURL:      importRPCURLFlag,
 		Token:       importRPCTokenFlag,
 		Timeout:     importTimeoutFlag,
+		DryRun:      importDryRunFlag,
 	}
 
-	fmt.Printf("Importing network state (%s) → %s\n", cfg.Network, cfg.OutputPath)
+	if importDryRunFlag {
+		fmt.Printf("Importing network state (%s) → %s [dry-run]\n", cfg.Network, cfg.OutputPath)
+	} else {
+		fmt.Printf("Importing network state (%s) → %s\n", cfg.Network, cfg.OutputPath)
+	}
 	result, err := cli.ImportNetworkState(cmd.Context(), cfg)
 	if err != nil {
 		return err
@@ -92,6 +100,10 @@ func runImport(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("Contracts imported: %d\n", len(result.Contracts))
 	fmt.Printf("Ledger entries: %d (%d newly fetched)\n", result.Entries, result.FetchedKeys)
 	fmt.Printf("Fingerprint: %s\n", result.Fingerprint)
+	if result.DryRun {
+		fmt.Printf("Dry run: no changes written to %s\n", result.OutputPath)
+		return nil
+	}
 	fmt.Printf("Snapshot written: %s\n", result.OutputPath)
 	return nil
 }
