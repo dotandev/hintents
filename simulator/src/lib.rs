@@ -19,6 +19,7 @@ pub mod source_map_cache;
 pub mod source_mapper;
 pub mod stack_trace;
 pub mod state;
+pub mod time;
 pub mod types;
 pub mod wasm_types;
 
