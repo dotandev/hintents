@@ -497,6 +497,10 @@ impl<A> TrackingAllocator<A> {
     }
 
     /// Accounts for `bytes` about to be allocated, or refuses them.
+    // `AtomicUsize::fetch_update` was renamed to `try_update` in Rust 1.99 and is
+    // deprecated there, which `-D warnings` rejects. The pinned 1.87 job builds
+    // this crate as well and has no `try_update`, so keep the old name here.
+    #[allow(deprecated)]
     fn reserve(&self, bytes: usize) -> bool {
         let order = Ordering::Relaxed;
         let claimed = self.live.fetch_update(order, order, |live| {
