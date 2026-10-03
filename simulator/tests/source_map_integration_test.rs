@@ -182,7 +182,7 @@ fn source_map_known_crash_wasm_yields_src_test_rs_42() {
         .map_wasm_offset_to_source(CRASH_ADDR)
         .expect("must resolve a source location for the known crash offset");
 
-    assert_eq!(loc.file, "src/test.rs", "wrong source file");
+    assert_eq!(loc.file.as_ref(), "src/test.rs", "wrong source file");
     assert_eq!(loc.line, 42, "wrong line number");
 }
 
