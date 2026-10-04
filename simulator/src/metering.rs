@@ -499,6 +499,8 @@ impl<A> TrackingAllocator<A> {
     /// Accounts for `bytes` about to be allocated, or refuses them.
     fn reserve(&self, bytes: usize) -> bool {
         let order = Ordering::Relaxed;
+        #[allow(deprecated)]
+        // fetch_update renamed to try_update in Rust 1.99; keep fetch_update for MSRV 1.87 compat
         let claimed = self.live.fetch_update(order, order, |live| {
             let next = live.saturating_add(bytes);
             if next > self.limit {
