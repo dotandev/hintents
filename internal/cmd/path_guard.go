@@ -30,9 +30,27 @@ func safeWasmPath(rawPath, baseDir string) (string, error) {
 		return "", fmt.Errorf("failed to resolve base directory: %w", err)
 	}
 
-	absPath, err := filepath.Abs(rawPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve path %q: %w", rawPath, err)
+	// Resolve rawPath to an absolute path anchored to absBase (not os.Getwd()).
+	//
+	// filepath.Abs(rawPath) would anchor relative paths to os.Getwd(), which
+	// differs from absBase when go test runs from the package directory.
+	//
+	// For paths that start with a separator character ("/", "\") but are not
+	// considered absolute by filepath.IsAbs (Windows drive-relative paths like
+	// "/etc/passwd") we treat them as escaping the workspace: prepend the
+	// volume name of absBase to make them fully absolute before the confinement
+	// check.  This mirrors what os.Getwd()-based code would do and ensures that
+	// "/etc/passwd" is rejected on Windows just as on Unix.
+	var absPath string
+	switch {
+	case filepath.IsAbs(rawPath):
+		absPath = filepath.Clean(rawPath)
+	case len(rawPath) > 0 && (rawPath[0] == '/' || rawPath[0] == '\\'):
+		// Drive-relative absolute on Windows (e.g. "/etc/passwd").
+		// Attach the volume from absBase so the Rel check catches the escape.
+		absPath = filepath.Clean(filepath.VolumeName(absBase) + rawPath)
+	default:
+		absPath = filepath.Join(absBase, rawPath)
 	}
 
 	// filepath.Rel returns a relative path from absBase to absPath.
