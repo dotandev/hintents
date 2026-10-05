@@ -10,8 +10,25 @@ import (
 )
 
 func TestParseContractWasmOverrideSpecs(t *testing.T) {
-	tmpDir := t.TempDir()
-	wasmPath := filepath.Join(tmpDir, "bridge.wasm")
+	// parseContractWasmOverrideSpecs calls os.Getwd() as the workspace root and
+	// passes the path through safeWasmPath, which rejects paths outside that
+	// root.  Write the wasm file inside the current working directory so the
+	// path is always within the workspace root, regardless of which directory
+	// the test binary was invoked from.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+
+	// Create a sub-directory inside the CWD so we clean up after ourselves
+	// without leaving files in the package directory.
+	dir, err := os.MkdirTemp(wd, "test-wasm-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	wasmPath := filepath.Join(dir, "bridge.wasm")
 	if err := os.WriteFile(wasmPath, []byte{0x00, 0x61, 0x73, 0x6d}, 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}

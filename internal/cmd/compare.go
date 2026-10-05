@@ -74,6 +74,15 @@ Examples:
 		if cmpLocalWasmFlag == "" {
 			return errors.WrapValidationError("--wasm flag is required for compare mode")
 		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("failed to determine working directory: %v", err))
+		}
+		safe, err := safeWasmPath(cmpLocalWasmFlag, cwd)
+		if err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("--wasm: %v", err))
+		}
+		cmpLocalWasmFlag = safe
 		if _, statErr := os.Stat(cmpLocalWasmFlag); os.IsNotExist(statErr) {
 			return errors.WrapValidationError(fmt.Sprintf("WASM file not found: %s", cmpLocalWasmFlag))
 		}
@@ -372,11 +381,20 @@ func parseContractWasmOverrideSpecs(specs []string) (map[string]string, error) {
 		if contractID == "" || wasmPath == "" {
 			return nil, fmt.Errorf("invalid --bridge-wasm value %q: contract id and path are required", spec)
 		}
-		if _, err := os.Stat(wasmPath); err != nil {
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine working directory: %w", err)
+		}
+		safeWasm, err := safeWasmPath(wasmPath, cwd)
+		if err != nil {
+			return nil, fmt.Errorf("--bridge-wasm %s: %w", contractID, err)
+		}
+		if _, err := os.Stat(safeWasm); err != nil {
 			return nil, fmt.Errorf("bridge WASM file not found for %s: %w", contractID, err)
 		}
 
-		overrides[contractID] = wasmPath
+		overrides[contractID] = safeWasm
 	}
 	return overrides, nil
 }

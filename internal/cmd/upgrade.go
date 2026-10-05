@@ -31,12 +31,25 @@ This allows verifying if a planned upgrade will break existing functionality.
 Example:
   erst simulate-upgrade 5c0a... --new-wasm ./new_v2.wasm --network mainnet`,
 	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		txHash := args[0]
-
+	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if newWasmPath == "" {
 			return errors.WrapCliArgumentRequired("new-wasm")
 		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("failed to determine working directory: %v", err))
+		}
+		safe, err := safeWasmPath(newWasmPath, cwd)
+		if err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("--new-wasm: %v", err))
+		}
+		newWasmPath = safe
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		txHash := args[0]
+
+		// newWasmPath has already been validated and resolved by PreRunE.
 
 		// 1. Read New WASM
 		newWasmBytes, err := os.ReadFile(newWasmPath)

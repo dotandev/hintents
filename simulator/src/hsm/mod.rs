@@ -18,6 +18,7 @@ use thiserror::Error;
 
 /// Generic signer interface for cryptographic operations
 #[async_trait]
+#[allow(clippy::double_must_use)]
 pub trait Signer: Send + Sync {
     /// Sign the provided data and return a signature
     async fn sign(&self, data: &[u8]) -> Result<Signature, SignerError>;
