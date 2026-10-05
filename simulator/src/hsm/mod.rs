@@ -17,6 +17,12 @@ use std::fmt;
 use thiserror::Error;
 
 /// Generic signer interface for cryptographic operations
+///
+/// `async_trait` expands each method into a `#[must_use]` function returning a
+/// boxed future, and `Result` is `#[must_use]` already, which Rust 1.99's
+/// `double_must_use` lint reports (`-D clippy::all`). The attribute comes from
+/// the macro expansion, so it has to be allowed here.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Signer: Send + Sync {
     /// Sign the provided data and return a signature
