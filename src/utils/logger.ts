@@ -2,29 +2,55 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import chalk from 'chalk';
+import * as fs from 'fs';
+import * as path from 'path';
 
-export enum LogLevel {
-    SILENT = 0,
-    STANDARD = 1,
-    VERBOSE = 2,
-}
+export const LogLevel = {
+    SILENT: 0,
+    STANDARD: 1,
+    VERBOSE: 2,
+} as const;
+export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
 
-export enum LogCategory {
-    RPC = 'RPC',
-    DATA = 'DATA',
-    SIM = 'SIM',
-    PERF = 'PERF',
-    ERROR = 'ERROR',
-    INFO = 'INFO',
+export const LogCategory = {
+    RPC: 'RPC',
+    DATA: 'DATA',
+    SIM: 'SIM',
+    PERF: 'PERF',
+    ERROR: 'ERROR',
+    INFO: 'INFO',
+} as const;
+export type LogCategory = (typeof LogCategory)[keyof typeof LogCategory];
+
+function getConfigFileLoggingEnabled(): boolean {
+    try {
+        const pkgPath = path.join(process.cwd(), 'package.json');
+        if (fs.existsSync(pkgPath)) {
+            const pkgContent = fs.readFileSync(pkgPath, 'utf8');
+            const pkg = JSON.parse(pkgContent);
+            if (pkg && pkg.config && typeof pkg.config.enableFileLogging === 'boolean') {
+                return pkg.config.enableFileLogging;
+            }
+        }
+    } catch {
+        // Fall back to enabled by default if config reading fails
+    }
+    return true;
 }
 
 export class Logger {
     private level: LogLevel;
     private startTime: number;
+    private fileLoggingEnabled: boolean;
+    private logDirPath: string;
+    private logFilePath: string;
 
-    constructor(level: LogLevel = LogLevel.STANDARD) {
+    constructor(level: LogLevel = LogLevel.STANDARD, fileLoggingEnabled?: boolean) {
         this.level = level;
         this.startTime = Date.now();
+        this.fileLoggingEnabled = fileLoggingEnabled ?? getConfigFileLoggingEnabled();
+        this.logDirPath = path.join(process.cwd(), '.erst');
+        this.logFilePath = path.join(this.logDirPath, 'extension.log');
     }
 
     /**
@@ -42,11 +68,59 @@ export class Logger {
     }
 
     /**
+     * Enable or disable persistent file logging
+     */
+    setFileLoggingEnabled(enabled: boolean): void {
+        this.fileLoggingEnabled = enabled;
+    }
+
+    /**
+     * Check if persistent file logging is enabled
+     */
+    isFileLoggingEnabled(): boolean {
+        return this.fileLoggingEnabled;
+    }
+
+    /**
+     * Set custom log file path (useful for testing or overrides)
+     */
+    setLogFilePath(customPath: string): void {
+        this.logFilePath = customPath;
+        this.logDirPath = path.dirname(customPath);
+    }
+
+    /**
+     * Append formatted message to persistent log file (.erst/extension.log)
+     */
+    private writeToFile(message: string): void {
+        if (!this.fileLoggingEnabled) {
+            return;
+        }
+
+        try {
+            if (!fs.existsSync(this.logDirPath)) {
+                fs.mkdirSync(this.logDirPath, { recursive: true });
+            }
+
+            const cleanMessage = message.replace(/\u001b\[\d+m/g, '');
+            const timestamp = this.getTimestamp();
+            const logEntry = `${timestamp} ${cleanMessage}\n`;
+
+            fs.appendFile(this.logFilePath, logEntry, (err: Error | null) => {
+                // Gracefully ignore filesystem write errors (e.g. read-only filesystem)
+            });
+        } catch {
+            // Gracefully ignore filesystem errors (e.g. read-only directory creation failure)
+        }
+    }
+
+    /**
      * Log standard message (always shown unless silent)
      */
     info(message: string): void {
         if (this.level >= LogLevel.STANDARD) {
             console.log(message);
+            this.writeToFile(`[INFO] ${message}`);
         }
     }
 
@@ -56,6 +130,7 @@ export class Logger {
     success(message: string): void {
         if (this.level >= LogLevel.STANDARD) {
             console.log(chalk.green(' ' + message));
+            this.writeToFile(`[SUCCESS] ${message}`);
         }
     }
 
@@ -65,6 +140,7 @@ export class Logger {
     warn(message: string): void {
         if (this.level >= LogLevel.STANDARD) {
             console.log(chalk.yellow('[WARN]  ' + message));
+            this.writeToFile(`[WARN] ${message}`);
         }
     }
 
@@ -73,11 +149,14 @@ export class Logger {
      */
     error(message: string, error?: Error): void {
         if (this.level >= LogLevel.STANDARD) {
-            console.error(chalk.red('[FAIL] ' + message + (error ? `: ${error.message}` : '')));
+            const errDetails = error ? `: ${error.message}` : '';
+            console.error(chalk.red('[FAIL] ' + message + errDetails));
+            this.writeToFile(`[FAIL] ${message}${errDetails}`);
 
             if (error && this.isVerbose()) {
                 console.error(chalk.red('   Stack trace:'));
                 console.error(chalk.gray(error.stack || error.message));
+                this.writeToFile(`   Stack trace: ${error.stack || error.message}`);
             }
         }
     }
@@ -92,6 +171,7 @@ export class Logger {
             const formattedCategory = chalk.bold(categoryColor(`[${category}]`));
 
             console.log(`${chalk.gray(timestamp)} ${formattedCategory} ${message}`);
+            this.writeToFile(`[${category}] ${message}`);
         }
     }
 
@@ -106,6 +186,7 @@ export class Logger {
             const spaces = '  '.repeat(indent);
 
             console.log(`${chalk.gray(timestamp)} ${formattedCategory}${spaces}${message}`);
+            this.writeToFile(`[${category}]${spaces}${message}`);
         }
     }
 
@@ -120,8 +201,6 @@ export class Logger {
 
         return `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(ms).padStart(3, '0')}]`;
     }
-
-    // TODO: Add support for logging to a file in the future
 
     /**
      * Get color for category
@@ -180,3 +259,4 @@ export function getLogger(): Logger {
 export function setLogLevel(level: LogLevel): void {
     getLogger().setLevel(level);
 }
+
