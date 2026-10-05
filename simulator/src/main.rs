@@ -18,6 +18,7 @@ mod snapshot;
 mod source_map_cache;
 mod source_mapper;
 mod stack_trace;
+mod time;
 mod types;
 mod vm;
 mod wasm;

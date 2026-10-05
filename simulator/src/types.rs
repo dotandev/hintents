@@ -64,6 +64,19 @@ pub struct SimulationRequest {
     /// to this path as a `.pb` file viewable with `go tool pprof`.
     #[serde(default)]
     pub pprof_output_path: Option<String>,
+    /// Optional ledger timestamp in seconds since Unix epoch to initialize the
+    /// simulated clock. If provided, the simulator's ledger clock will start at
+    /// this timestamp instead of the current system time.
+    /// Useful for testing time-bound contracts with a consistent time baseline.
+    #[serde(default)]
+    pub ledger_timestamp: Option<u64>,
+    /// Optional number of seconds to advance the simulated clock before
+    /// executing the simulation. Combined with `ledger_timestamp`, this allows
+    /// tests to verify time-bound contract behavior.
+    /// For example: timestamp=1700000000, advance_seconds=3600 means the
+    /// clock will be at 1700003600 when simulation starts.
+    #[serde(default)]
+    pub clock_advance_seconds: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
