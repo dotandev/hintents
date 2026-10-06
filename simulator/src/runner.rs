@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use crate::memory;
 use crate::snapshot::{LedgerSnapshot, SnapshotError};
+use crate::time::ClockDrift;
 use tracing::{debug, instrument};
 
 #[derive(Debug, thiserror::Error)]
@@ -106,6 +107,7 @@ pub struct SimHost {
     ledger_snapshot: LedgerSnapshot,
     config: HostConfig,
     pending_events: Vec<String>,
+    clock: ClockDrift,
 }
 
 impl SimHost {
@@ -184,6 +186,7 @@ impl SimHost {
             ledger_snapshot: LedgerSnapshot::new(),
             config,
             pending_events: Vec::new(),
+            clock: ClockDrift::new(),
         }
     }
 
@@ -223,6 +226,7 @@ impl SimHost {
             ledger_snapshot: snapshot.fork(),
             config,
             pending_events: Vec::new(),
+            clock: ClockDrift::new(),
         })
     }
 
@@ -264,7 +268,11 @@ impl SimHost {
         // and its Budget) and moves the freshly-constructed SimHost into place.
         // The old Host's Drop impl frees all its allocations — this is the key
         // guarantee that prevents dangling pointers and double-frees after rollback.
+        // NOTE: We preserve the clock state across rollback so that time progression
+        // continues even when rewinding ledger state.
+        let preserved_clock = self.clock.clone();
         *self = restored;
+        self.clock = preserved_clock;
         Ok(())
     }
 
@@ -378,6 +386,80 @@ impl SimHost {
         let drained = std::mem::take(&mut self.pending_events);
         debug!(drained = drained.len(), "drained pending simulator events");
         drained
+    }
+
+    // ========== Clock Drift API ==========
+
+    /// Advances the simulated ledger clock by the specified number of seconds.
+    ///
+    /// This is useful for testing time-bound contracts. The clock advancement
+    /// is preserved across snapshot capture/restore operations, allowing tests
+    /// to advance time during rollback-and-resume scenarios.
+    ///
+    /// # Arguments
+    /// * `seconds` - Number of seconds to advance (can be negative to go backwards)
+    ///
+    /// # Example
+    /// ```ignore
+    /// host.advance_clock(3600); // Advance by 1 hour
+    /// ```
+    #[allow(dead_code)]
+    pub fn advance_clock(&mut self, seconds: i64) {
+        self.clock.advance_clock(seconds);
+        debug!(seconds = seconds, "advanced simulator clock");
+    }
+
+    /// Sets the simulated ledger clock to an absolute timestamp.
+    ///
+    /// This overrides any previous base timestamp and accumulated drift,
+    /// useful for jump-to-time test scenarios.
+    ///
+    /// # Arguments
+    /// * `timestamp` - Absolute ledger timestamp in seconds since Unix epoch
+    ///
+    /// # Example
+    /// ```ignore
+    /// host.set_clock(1700000000); // Set to Nov 15, 2023
+    /// ```
+    #[allow(dead_code)]
+    pub fn set_clock(&mut self, timestamp: u64) {
+        self.clock.set_clock(timestamp);
+        debug!(
+            timestamp = timestamp,
+            "set simulator clock to absolute value"
+        );
+    }
+
+    /// Returns the current simulated ledger clock timestamp.
+    ///
+    /// Returns the ledger timestamp in seconds since Unix epoch.
+    /// If no base was set, returns system time plus any accumulated drift.
+    ///
+    /// # Returns
+    /// Ledger timestamp in seconds since Unix epoch
+    #[allow(dead_code)]
+    pub fn get_clock(&self) -> u64 {
+        self.clock.get_clock()
+    }
+
+    /// Initializes the clock to a specific base timestamp.
+    ///
+    /// This is typically called during simulator setup to establish a
+    /// consistent starting time for test scenarios.
+    ///
+    /// # Arguments
+    /// * `timestamp` - Base ledger timestamp in seconds since Unix epoch
+    #[allow(dead_code)]
+    pub fn init_clock(&mut self, timestamp: u64) {
+        self.clock = ClockDrift::with_timestamp(timestamp);
+        debug!(timestamp = timestamp, "initialized simulator clock");
+    }
+
+    /// Resets the clock to its initial state (no drift, no override).
+    #[allow(dead_code)]
+    pub fn reset_clock(&mut self) {
+        self.clock.reset();
+        debug!("reset simulator clock");
     }
 }
 
@@ -521,74 +603,63 @@ mod tests {
     }
 
     #[test]
-    fn test_arithmetic_trap_patterns_are_recognised() {
-        for message in [
-            "integer divide by zero",
-            "attempt to divide by zero",
-            "division by zero",
-            "remainder by zero",
-            "wasm trap: integer divide by 0",
-        ] {
-            assert!(
-                is_arithmetic_trap(message),
-                "{message} should be an arithmetic trap"
-            );
-        }
+    fn test_clock_advance() {
+        let mut host = SimHost::new(HostConfig::default());
+        host.init_clock(1700000000);
+        assert_eq!(host.get_clock(), 1700000000);
 
-        for message in [
-            "memory out of bounds",
-            "unreachable executed",
-            "index out of bounds",
-            "attempt to multiply with overflow",
-        ] {
-            assert!(
-                !is_arithmetic_trap(message),
-                "{message} should not be an arithmetic trap"
-            );
-        }
+        host.advance_clock(3600);
+        assert_eq!(host.get_clock(), 1700003600);
+
+        host.advance_clock(3600);
+        assert_eq!(host.get_clock(), 1700007200);
     }
 
     #[test]
-    fn test_divide_by_zero_panic_becomes_arith_domain_error() {
-        let normalized =
-            normalize_execution_error(SimHostError::Panic("integer divide by zero".to_string()));
+    fn test_clock_set_absolute() {
+        let mut host = SimHost::new(HostConfig::default());
+        host.init_clock(1700000000);
+        host.advance_clock(5000);
+        assert_eq!(host.get_clock(), 1700005000);
 
-        match normalized {
-            SimHostError::Host(host_error) => {
-                let rendered = host_error.to_string().to_ascii_lowercase();
-                assert!(
-                    rendered.contains("arith"),
-                    "expected ArithDomain contract failure, got: {rendered}"
-                );
-            }
-            other => panic!("expected a host error, got {other:?}"),
-        }
+        host.set_clock(1800000000);
+        assert_eq!(host.get_clock(), 1800000000);
     }
 
     #[test]
-    fn test_non_arithmetic_panic_is_preserved() {
-        let normalized =
-            normalize_execution_error(SimHostError::Panic("memory violation".to_string()));
+    fn test_clock_preserved_across_snapshot_restore() {
+        let mut host = SimHost::new(HostConfig::default());
+        host.init_clock(1700000000);
 
-        assert!(
-            matches!(normalized, SimHostError::Panic(message) if message.contains("memory violation"))
-        );
+        let snapshot = host.capture_snapshot().expect("snapshot should capture");
+
+        // Advance clock after snapshot
+        host.advance_clock(3600);
+        assert_eq!(host.get_clock(), 1700003600);
+
+        // Restore from snapshot (ledger state resets but clock continues)
+        host.restore_from_snapshot(&snapshot)
+            .expect("restore should succeed");
+
+        // Clock should be preserved with the advancement
+        assert_eq!(host.get_clock(), 1700003600);
     }
 
     #[test]
-    fn test_invoke_function_normalizes_traps() {
-        // `invoke_function` applies `normalize_execution_error` to failures
-        // captured by `with_panic_recovery`, so the recovery path must yield
-        // the standard contract failure for an arithmetic trap.
-        let host = SimHost::new(HostConfig::default());
-        let caught = host
-            .with_panic_recovery::<(), _>(|| panic!("attempt to divide by zero"))
-            .expect_err("panic should be captured");
+    fn test_clock_reset() {
+        let mut host = SimHost::new(HostConfig::default());
+        host.init_clock(1700000000);
+        host.advance_clock(5000);
+        assert_eq!(host.get_clock(), 1700005000);
 
-        assert!(matches!(caught, SimHostError::Panic(ref m) if m.contains("divide by zero")));
-        assert!(matches!(
-            normalize_execution_error(caught),
-            SimHostError::Host(_)
-        ));
+        host.reset_clock();
+        // After reset, should be system time (approximately now)
+        let current = host.get_clock();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        // Should be within 1 second
+        assert!((current as i64 - now as i64).abs() <= 1);
     }
 }

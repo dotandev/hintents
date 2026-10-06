@@ -16,6 +16,7 @@ import (
 
 	"github.com/dotandev/hintents/internal/errors"
 	"github.com/dotandev/hintents/internal/logger"
+	"github.com/dotandev/hintents/internal/state"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	_ "modernc.org/sqlite"
 )
@@ -168,11 +169,11 @@ func Get(key string) (string, bool, error) {
 	keyHash := getCacheKey(key)
 	now := time.Now().UnixNano()
 
-	var value string
+	var stored []byte
 	err = db.QueryRow(
 		"SELECT value FROM rpc_cache WHERE key_hash = ? AND expires_at > ?",
 		keyHash, now,
-	).Scan(&value)
+	).Scan(&stored)
 
 	if err == sql.ErrNoRows {
 		return "", false, nil
@@ -181,7 +182,45 @@ func Get(key string) (string, bool, error) {
 		return "", false, fmt.Errorf("cache read failed: %w", err)
 	}
 
+	value, err := decodeCacheValue(stored)
+	if err != nil {
+		// An undecodable entry (e.g. written with a retired dictionary) is
+		// treated as a miss so the caller refetches and overwrites it.
+		if logger.Logger != nil {
+			logger.Logger.Debug("Discarding undecodable cache entry", "key", key, "error", err)
+		}
+		return "", false, nil
+	}
+
 	return value, true, nil
+}
+
+// encodeCacheValue compresses value with the SEP-41 zstd dictionary codec.
+// If the codec is unavailable the value is stored uncompressed.
+func encodeCacheValue(value string) any {
+	codec, err := state.DefaultCodec()
+	if err != nil {
+		return value
+	}
+	encoded := codec.Encode(value)
+	if len(encoded) == 0 {
+		// Bind "" rather than an empty []byte, which drivers may store as NULL.
+		return ""
+	}
+	return encoded
+}
+
+// decodeCacheValue reverses encodeCacheValue. Rows written before
+// compression was introduced are plain text and are returned unchanged.
+func decodeCacheValue(stored []byte) (string, error) {
+	if !state.IsEncoded(stored) {
+		return string(stored), nil
+	}
+	codec, err := state.DefaultCodec()
+	if err != nil {
+		return "", err
+	}
+	return codec.Decode(stored)
 }
 
 // SetWithTTL stores a value in the cache with a specific TTL.
@@ -211,7 +250,7 @@ func SetWithTTLAndNetwork(key, value string, ttl time.Duration, network string) 
 		   network    = excluded.network,
 		   created_at = excluded.created_at,
 		   expires_at = excluded.expires_at`,
-		keyHash, key, value, network, now.UnixNano(), now.Add(ttl).UnixNano(),
+		keyHash, key, encodeCacheValue(value), network, now.UnixNano(), now.Add(ttl).UnixNano(),
 	)
 	if err != nil {
 		return fmt.Errorf("cache write failed: %w", err)

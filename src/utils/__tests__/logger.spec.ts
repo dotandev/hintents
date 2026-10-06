@@ -2,21 +2,38 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import { Logger, LogLevel, LogCategory } from '../logger';
+import * as fs from 'fs';
+import * as path from 'path';
 
 describe('Logger', () => {
     let logger: Logger;
     let consoleLogSpy: jest.SpyInstance;
     let consoleErrorSpy: jest.SpyInstance;
+    let appendFileSpy: jest.SpyInstance | undefined;
 
     beforeEach(() => {
-        logger = new Logger();
+        logger = new Logger(LogLevel.STANDARD, false); // disable default file logging for standard tests
         consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
         consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+        try {
+            appendFileSpy = jest.spyOn(fs, 'appendFile').mockImplementation((_path, _data, callback) => {
+                if (typeof callback === 'function') {
+                    callback(null);
+                }
+            });
+        } catch {
+            // Fallback if appendFile spy cannot be attached directly in environment
+            appendFileSpy = undefined;
+        }
     });
 
     afterEach(() => {
         consoleLogSpy.mockRestore();
         consoleErrorSpy.mockRestore();
+        if (appendFileSpy) {
+            appendFileSpy.mockRestore();
+            appendFileSpy = undefined;
+        }
     });
 
     describe('log levels', () => {
@@ -89,4 +106,57 @@ describe('Logger', () => {
             expect(consoleErrorSpy).toHaveBeenCalledTimes(3); // Error msg + "Stack trace:" + stack content
         });
     });
+
+    describe('file logging', () => {
+        const testLogDir = path.join(process.cwd(), '.erst_test_logs');
+        const testLogFile = path.join(testLogDir, 'test.log');
+
+        beforeEach(() => {
+            try {
+                if (fs.existsSync(testLogFile)) fs.unlinkSync(testLogFile);
+                if (fs.existsSync(testLogDir)) fs.rmdirSync(testLogDir);
+            } catch { }
+        });
+
+        afterEach(() => {
+            try {
+                if (fs.existsSync(testLogFile)) fs.unlinkSync(testLogFile);
+                if (fs.existsSync(testLogDir)) fs.rmdirSync(testLogDir);
+            } catch { }
+        });
+
+        it('should write logs to file when file logging is enabled', (done) => {
+            logger.setLogFilePath(testLogFile);
+            logger.setFileLoggingEnabled(true);
+            logger.info('File log message');
+
+            setTimeout(() => {
+                expect(fs.existsSync(testLogFile)).toBe(true);
+                const content = fs.readFileSync(testLogFile, 'utf8');
+                expect(content).toContain('[INFO] File log message');
+                done();
+            }, 100);
+        });
+
+        it('should not write logs to file when file logging is disabled', (done) => {
+            logger.setLogFilePath(testLogFile);
+            logger.setFileLoggingEnabled(false);
+            logger.info('File log message');
+
+            setTimeout(() => {
+                expect(fs.existsSync(testLogFile)).toBe(false);
+                done();
+            }, 100);
+        });
+
+        it('should handle filesystem errors gracefully without crashing', () => {
+            logger.setFileLoggingEnabled(true);
+            logger.setLogFilePath('\0invalid\path/extension.log');
+
+            expect(() => {
+                logger.info('Read-only test message');
+            }).not.toThrow();
+        });
+    });
 });
+
