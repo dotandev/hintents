@@ -75,6 +75,9 @@ Get started with 'erst debug --help' or visit the documentation.`,
 		// Ping version endpoint asynchronously for next run
 		checkForUpdatesAsync()
 
+		// Check system open file descriptor limits and warn if too low for network mode
+		WarnIfLowFDLimit(os.Stderr)
+
 		return nil
 	},
 	SilenceUsage:  true,
