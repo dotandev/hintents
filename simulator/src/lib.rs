@@ -13,6 +13,7 @@ pub mod indexer;
 pub mod ipc;
 pub mod memory;
 pub mod metering;
+pub mod module_cache;
 pub mod runner;
 pub mod snapshot;
 pub mod source_map_cache;

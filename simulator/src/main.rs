@@ -17,6 +17,7 @@ mod runner;
 mod snapshot;
 mod source_map_cache;
 mod source_mapper;
+mod module_cache;
 mod stack_trace;
 mod time;
 mod types;
@@ -565,6 +566,20 @@ fn main() {
                 if let Err(e) = vm::enforce_soroban_compatibility(&wasm_bytes) {
                     return send_error(format!("Strict VM enforcement failed: {}", e));
                 }
+                let _stripped_bytes = match module_cache::strip_non_essential_custom_sections(&wasm_bytes) {
+                    Ok(stripped) => {
+                        tracing::debug!(
+                            "Stripped non-essential custom sections: original {} bytes, stripped {} bytes",
+                            wasm_bytes.len(),
+                            stripped.len()
+                        );
+                        stripped
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to strip non-essential custom sections: {}", e);
+                        wasm_bytes.clone()
+                    }
+                };
                 let mapper = SourceMapper::new_with_options(wasm_bytes, request.no_cache);
                 if mapper.has_debug_symbols() {
                     tracing::info!("Debug symbols found in WASM");
@@ -592,7 +607,8 @@ fn main() {
     // --- START: Local WASM Loading Integration (Issue #70) ---
     if let Some(path) = &request.wasm_path {
         match wasm::load_wasm_from_path(path) {
-            Ok(_wasm_bytes) => {
+            Ok(wasm_bytes) => {
+                let _stripped = module_cache::strip_non_essential_custom_sections(&wasm_bytes).unwrap_or(wasm_bytes);
                 // `upload_contract_wasm` is crate-private in recent host versions.
                 // We still validate local WASM readability here.
                 eprintln!("Successfully loaded local WASM from path");
