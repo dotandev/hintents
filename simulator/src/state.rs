@@ -179,6 +179,50 @@ mod tests {
             "Frame too large to capture"
         );
     }
+
+    #[test]
+    fn test_ttl_valid_unexpired() {
+        let key_hash = [0xabu8; 32];
+        // live_until > replay_ledger
+        assert!(check_ttl_expiry(1000, 500, &key_hash).is_ok());
+        // live_until == replay_ledger
+        assert!(check_ttl_expiry(500, 500, &key_hash).is_ok());
+    }
+
+    #[test]
+    fn test_ttl_expired_archived_entry() {
+        let key_hash = [0xcdu8; 32];
+        let res = check_ttl_expiry(499, 500, &key_hash);
+        assert!(res.is_err());
+        match res.unwrap_err() {
+            TtlExpiryError::ArchivedEntry {
+                key_hash: hash_str,
+                live_until_ledger,
+                replay_ledger,
+            } => {
+                assert_eq!(hash_str, hex::encode(key_hash));
+                assert_eq!(live_until_ledger, 499);
+                assert_eq!(replay_ledger, 500);
+            }
+        }
+    }
+
+    #[test]
+    fn test_validate_replay_ttl_map() {
+        use std::collections::HashMap;
+        let mut map = HashMap::new();
+        let key1 = vec![1u8; 32];
+        let key2 = vec![2u8; 32];
+
+        map.insert(key1.clone(), 100);
+        map.insert(key2.clone(), 200);
+
+        // Sequence 90 -> all unexpired
+        assert!(validate_replay_ttl_map(&map, 90).is_ok());
+
+        // Sequence 150 -> key1 expired
+        assert!(validate_replay_ttl_map(&map, 150).is_err());
+    }
 }
 
 /// Represents the computed difference between two ledger snapshots,
@@ -204,4 +248,58 @@ pub fn diff_snapshots(before: &LedgerSnapshot, after: &LedgerSnapshot) -> StateD
         modified_keys: raw.modified.iter().map(hex::encode).collect(),
         deleted_keys: raw.deleted.iter().map(hex::encode).collect(),
     }
+}
+
+/// Error raised when a contract instance, code, or storage entry has expired
+/// (archived) relative to the target replay ledger sequence.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum TtlExpiryError {
+    #[error(
+        "contract entry with key hash {key_hash} has expired: live_until_ledger {live_until_ledger} < replay_ledger {replay_ledger}"
+    )]
+    ArchivedEntry {
+        key_hash: String,
+        live_until_ledger: u32,
+        replay_ledger: u32,
+    },
+}
+
+/// Validates whether a contract instance, code, or storage entry is expired
+/// based on its `live_until_ledger` and the target replay ledger sequence.
+///
+/// If `live_until_ledger < replay_ledger`, returns `TtlExpiryError::ArchivedEntry`.
+pub fn check_ttl_expiry(
+    live_until_ledger: u32,
+    replay_ledger: u32,
+    key_hash: &[u8],
+) -> Result<(), TtlExpiryError> {
+    if live_until_ledger < replay_ledger {
+        return Err(TtlExpiryError::ArchivedEntry {
+            key_hash: hex::encode(key_hash),
+            live_until_ledger,
+            replay_ledger,
+        });
+    }
+    Ok(())
+}
+
+/// Validates an entry's TTL against a replay ledger sequence.
+pub fn validate_entry_ttl(
+    key_hash: &[u8],
+    live_until_ledger_seq: u32,
+    replay_ledger_seq: u32,
+) -> Result<(), TtlExpiryError> {
+    check_ttl_expiry(live_until_ledger_seq, replay_ledger_seq, key_hash)
+}
+
+/// Inspects a collection of TTL records and validates them against the replay ledger sequence.
+/// Returns the first `TtlExpiryError` encountered if any contract entry has been archived.
+pub fn validate_replay_ttl_map(
+    ttl_map: &std::collections::HashMap<Vec<u8>, u32>,
+    replay_ledger_seq: u32,
+) -> Result<(), TtlExpiryError> {
+    for (key_hash, &live_until) in ttl_map {
+        check_ttl_expiry(live_until, replay_ledger_seq, key_hash)?;
+    }
+    Ok(())
 }
