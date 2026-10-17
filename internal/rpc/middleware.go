@@ -43,6 +43,8 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	resp, err := t.next.RoundTrip(req)
 	latencyMs := time.Since(start).Milliseconds()
 
+	cleanURL := SanitizeURL(req.URL.String())
+
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
@@ -55,17 +57,17 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 		logger.Logger.Error("http request failed",
 			"method", req.Method,
-			"url", req.URL.String(),
+			"url", cleanURL,
 			"latency_ms", latencyMs,
 			"status", statusCode,
-			"error", err,
+			"error", SanitizeError(err),
 		)
 		return resp, err
 	}
 
 	logger.Logger.Info("http request completed",
 		"method", req.Method,
-		"url", req.URL.String(),
+		"url", cleanURL,
 		"status", resp.StatusCode,
 		"latency_ms", latencyMs,
 	)
