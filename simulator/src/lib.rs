@@ -5,6 +5,7 @@
 
 pub mod asset_tracker;
 pub mod context;
+pub mod engine;
 pub mod gas_optimizer;
 pub mod git_detector;
 pub mod host;

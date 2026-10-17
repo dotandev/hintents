@@ -1,11 +1,12 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
-#![allow(clippy::pedantic, clippy::nursery)]
+#![allow(clippy::pedantic, clippy::nursery, dead_code)]
 mod asset_tracker;
 mod config;
 mod context;
 mod debug_host_fn;
+mod engine;
 mod events;
 mod gas_optimizer;
 mod git_detector;

@@ -107,6 +107,10 @@ impl SimHost {
             Ok(result) => Ok(result),
             Err(panic_info) => {
                 let message = Self::panic_payload_to_string(panic_info.as_ref());
+                if let Some(trap) = crate::engine::identify_arithmetic_trap(&message) {
+                    let host_err = HostError::from(trap);
+                    return Err(SimHostError::Host(host_err));
+                }
                 Err(SimHostError::Panic(message))
             }
         }
@@ -694,5 +698,22 @@ mod tests {
             Ok(99)
         });
         assert!(matches!(timed_out, Err(SimHostError::Timeout(t)) if t == timeout));
+    }
+
+    #[test]
+    fn test_runner_with_panic_recovery_divide_by_zero() {
+        let host = SimHost::new(HostConfig::default());
+        let res: Result<i32, SimHostError> = host.with_panic_recovery(|| {
+            panic!("wasm trap: integer division by zero");
+        });
+
+        assert!(res.is_err());
+        match res.unwrap_err() {
+            SimHostError::Host(host_err) => {
+                let expected = EnvError::from_type_and_code(ScErrorType::WasmVm, ScErrorCode::ArithDomain);
+                assert_eq!(host_err.error, expected);
+            }
+            other => panic!("expected SimHostError::Host, got {other:?}"),
+        }
     }
 }
