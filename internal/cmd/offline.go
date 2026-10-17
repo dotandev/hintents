@@ -23,6 +23,7 @@ var (
 	offlineRPCURLFlag  string
 	offlineDescFlag    string
 	offlineSourceFlag  string
+	offlineVerifySigsFlag bool
 )
 
 // offlineCmd is the parent command for the air-gapped signing workflow.
@@ -179,6 +180,12 @@ func runOfflineVerify(_ *cobra.Command, args []string) error {
 		return err
 	}
 
+	if offlineVerifySigsFlag {
+		if err := offline.VerifyEnvelopeSignatures(ef); err != nil {
+			return err
+		}
+	}
+
 	fmt.Printf("All %d signature(s) verified successfully\n", len(ef.Signatures))
 	for i, sig := range ef.Signatures {
 		fmt.Printf("  [%d] key=%s signed_at=%s\n", i, sig.PublicKey[:16]+"...", sig.SignedAt)
@@ -213,6 +220,12 @@ func runOfflineSubmit(cmd *cobra.Command, args []string) error {
 	// Verify before submitting.
 	if err := offline.VerifySignatures(ef); err != nil {
 		return fmt.Errorf("pre-submit verification failed: %w", err)
+	}
+
+	if offlineVerifySigsFlag {
+		if err := offline.VerifyEnvelopeSignatures(ef); err != nil {
+			return fmt.Errorf("pre-submit signature verification failed: %w", err)
+		}
 	}
 
 	rpcURL := offlineRPCURLFlag
@@ -287,6 +300,9 @@ func init() {
 
 	// sign flags
 	offlineSignCmd.Flags().StringVar(&offlineKeyFlag, "key", "", "Hex-encoded ed25519 private key (32-byte seed or 64-byte full key)")
+
+	// verify flags
+	offlineVerifyCmd.Flags().BoolVar(&offlineVerifySigsFlag, "verify-signatures", false, "Verify ed25519 envelope signatures against source accounts using the network passphrase")
 
 	// submit flags
 	offlineSubmitCmd.Flags().StringVar(&offlineRPCURLFlag, "rpc-url", "", "Custom Soroban RPC URL (overrides network default)")
