@@ -27,11 +27,15 @@ type CallNode struct {
 
 // DecodedEvent is a human-friendly representation of a DiagnosticEvent
 type DecodedEvent struct {
-	ContractID string   `json:"contract_id"`
-	Topics     []string `json:"topics"`
-	Data       string   `json:"data"`
-	CPU        uint64   `json:"cpu,omitempty"`
-	Memory     uint64   `json:"mem,omitempty"`
+	ContractID       string   `json:"contract_id"`
+	Topics           []string `json:"topics"`
+	Data             string   `json:"data"`
+	CPU              uint64   `json:"cpu,omitempty"`
+	Memory           uint64   `json:"mem,omitempty"`
+	ErrorType        string   `json:"error_type,omitempty"`
+	ErrorCode        *int     `json:"error_code,omitempty"`
+	ContractFunction string   `json:"contract_function,omitempty"`
+	ArgTypes         []string `json:"arg_types,omitempty"`
 }
 
 // DecodeEvents builds a call hierarchy from a list of base64-encoded XDR DiagnosticEvents.

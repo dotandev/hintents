@@ -440,3 +440,118 @@ func TestAnalyzeEvents_DuplicateRules(t *testing.T) {
 		t.Errorf("Expected rule to appear only once, got %d times", count)
 	}
 }
+
+func TestAnalyzeEvents_StructuredMatch_RewordedHostError(t *testing.T) {
+	engine := NewSuggestionEngine()
+
+	// Text message completely reworded (no 'auth' or 'permission' in topics/data)
+	code := 5
+	event := DecodedEvent{
+		ContractID: "C123",
+		Topics:     []string{"trap", "host_reworded_message_v2"},
+		Data:       "some arbitrary host string without keywords",
+		ErrorType:  "AuthError",
+		ErrorCode:  &code,
+	}
+
+	suggestions := engine.AnalyzeEvents([]DecodedEvent{event})
+	if len(suggestions) == 0 {
+		t.Fatal("Expected suggestion to fire via structured match despite reworded text")
+	}
+
+	found := false
+	for _, s := range suggestions {
+		if s.Rule == "missing_authorization" {
+			found = true
+			if s.Confidence != confidenceHigh {
+				t.Errorf("Expected confidence high, got: %s", s.Confidence)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("Expected missing_authorization rule to match structured AuthError")
+	}
+}
+
+func TestAnalyzeEvents_StructuredMatch_StorageError(t *testing.T) {
+	engine := NewSuggestionEngine()
+
+	code := 3
+	event := DecodedEvent{
+		ContractID: "C123",
+		Topics:     []string{"opaque_failure"},
+		Data:       "unknown internal trap",
+		ErrorType:  "StorageError",
+		ErrorCode:  &code,
+	}
+
+	suggestions := engine.AnalyzeEvents([]DecodedEvent{event})
+	found := false
+	for _, s := range suggestions {
+		if s.Rule == "uninitialized_contract" {
+			found = true
+			if !strings.Contains(s.Description, "initialize()") {
+				t.Errorf("Expected description to mention initialize(), got: %s", s.Description)
+			}
+		}
+	}
+	if !found {
+		t.Error("Expected uninitialized_contract to match structured StorageError")
+	}
+}
+
+func TestAnalyzeEvents_FallbackToStringPattern(t *testing.T) {
+	engine := NewSuggestionEngine()
+
+	// No structured error fields provided; relies purely on keyword string fallback
+	event := DecodedEvent{
+		ContractID: "C123",
+		Topics:     []string{"budget_exceeded"},
+		Data:       "quota limit reached",
+	}
+
+	suggestions := engine.AnalyzeEvents([]DecodedEvent{event})
+	found := false
+	for _, s := range suggestions {
+		if s.Rule == "resource_limit_exceeded" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Expected resource_limit_exceeded to match via keyword fallback")
+	}
+}
+
+func TestAnalyzeEvents_CustomStructuredRule_FunctionAndArgs(t *testing.T) {
+	engine := NewSuggestionEngine()
+
+	engine.AddCustomRule(ErrorPattern{
+		Name: "custom_transfer_type_error",
+		StructuredMatch: &StructuredCriteria{
+			ContractFunction: "transfer",
+			ArgTypes:         []string{"ScvAddress", "ScvI128"},
+		},
+		Suggestion: Suggestion{
+			Rule:        "custom_transfer_type_error",
+			Description: "Verify transfer amount is positive and recipient address is valid",
+			Confidence:  confidenceHigh,
+		},
+	})
+
+	event := DecodedEvent{
+		ContractID:       "CTOKEN",
+		ContractFunction: "transfer",
+		ArgTypes:         []string{"ScvAddress", "ScvI128"},
+	}
+
+	suggestions := engine.AnalyzeEvents([]DecodedEvent{event})
+	found := false
+	for _, s := range suggestions {
+		if s.Rule == "custom_transfer_type_error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Expected custom_transfer_type_error to match structured function and arguments")
+	}
+}
