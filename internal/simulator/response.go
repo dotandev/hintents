@@ -3,7 +3,13 @@
 
 package simulator
 
-import "github.com/dotandev/hintents/internal/authtrace"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/dotandev/hintents/internal/authtrace"
+	"github.com/dotandev/hintents/internal/errors"
+)
 
 type SimulationResponse struct {
 	Status             string               `json:"status"`
@@ -97,4 +103,39 @@ type SnapshotsPayload struct {
 type InlineSnapshot struct {
 	LedgerEntries [][]string `json:"ledger_entries,omitempty"`
 	LinearMemory  string     `json:"linear_memory,omitempty"`
+}
+
+// ClassifyError inspects the SimulationResponse status and error fields and returns a typed *errors.ErstError.
+// If status is "success" or "ok" and Error is empty, it returns nil.
+func (r *SimulationResponse) ClassifyError() *errors.ErstError {
+	if r == nil {
+		return nil
+	}
+	if (r.Status == "ok" || r.Status == "success") && r.Error == "" && r.ErrorCode == "" {
+		return nil
+	}
+	code := errors.MapSimulatorError(r.Error, r.ErrorCode)
+	msg := r.Error
+	if msg == "" {
+		msg = r.ErrorCode
+	}
+	if msg == "" {
+		msg = "simulation failed: " + r.Status
+	}
+	return &errors.ErstError{
+		Code:    code,
+		Message: msg,
+	}
+}
+
+// ParseSimulationResponse unmarshals JSON bytes into SimulationResponse and validates basic envelope.
+func ParseSimulationResponse(data []byte) (*SimulationResponse, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("empty simulation response payload")
+	}
+	var resp SimulationResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal simulation response: %w", err)
+	}
+	return &resp, nil
 }
