@@ -24,6 +24,8 @@ pub enum SimHostError {
     Snapshot(#[from] SnapshotError),
     #[error("host execution panicked: {0}")]
     Panic(String),
+    #[error("simulation execution timed out after {0:?}")]
+    Timeout(std::time::Duration),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -31,6 +33,7 @@ pub struct HostConfig {
     budget_limits: Option<(u64, u64)>,
     calibration: Option<crate::types::ResourceCalibration>,
     memory_limit: Option<u64>,
+    timeout: Option<std::time::Duration>,
 }
 
 impl HostConfig {
@@ -55,6 +58,23 @@ impl HostConfig {
     pub fn with_memory_limit(mut self, memory_limit: Option<u64>) -> Self {
         self.memory_limit = memory_limit;
         self
+    }
+
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Option<std::time::Duration>) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    #[must_use]
+    pub fn timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    #[must_use]
+    pub fn get_timeout(&self) -> Option<std::time::Duration> {
+        self.timeout
     }
 }
 
@@ -93,8 +113,46 @@ impl SimHost {
     }
 
     pub fn invoke_function(&self, host_function: HostFunction) -> Result<ScVal, SimHostError> {
-        self.with_panic_recovery(|| self.inner.invoke_function(host_function))
-            .and_then(|result| result.map_err(SimHostError::Host))
+        if let Some(timeout) = self.config.timeout {
+            let start = std::time::Instant::now();
+            let res = self.with_panic_recovery(|| self.inner.invoke_function(host_function))
+                .and_then(|result| result.map_err(SimHostError::Host));
+            if start.elapsed() >= timeout {
+                return Err(SimHostError::Timeout(timeout));
+            }
+            res
+        } else {
+            self.with_panic_recovery(|| self.inner.invoke_function(host_function))
+                .and_then(|result| result.map_err(SimHostError::Host))
+        }
+    }
+
+    /// Invokes a host function explicitly enforcing a wall-clock execution deadline.
+    pub fn invoke_function_with_timeout(
+        &self,
+        host_function: HostFunction,
+        timeout: std::time::Duration,
+    ) -> Result<ScVal, SimHostError> {
+        let start = std::time::Instant::now();
+        let res = self.with_panic_recovery(|| self.inner.invoke_function(host_function))
+            .and_then(|result| result.map_err(SimHostError::Host));
+        if start.elapsed() >= timeout {
+            return Err(SimHostError::Timeout(timeout));
+        }
+        res
+    }
+
+    /// Executes an arbitrary operation with wall-clock timeout guarding.
+    pub fn with_timeout<T, F>(&self, timeout: std::time::Duration, f: F) -> Result<T, SimHostError>
+    where
+        F: FnOnce() -> Result<T, SimHostError>,
+    {
+        let start = std::time::Instant::now();
+        let res = f();
+        if start.elapsed() >= timeout {
+            return Err(SimHostError::Timeout(timeout));
+        }
+        res
     }
 
     /// Initialize a new Host with optional budget settings and resource calibration.
@@ -608,5 +666,33 @@ mod tests {
             .as_secs();
         // Should be within 1 second
         assert!((current as i64 - now as i64).abs() <= 1);
+    }
+
+    #[test]
+    fn test_host_config_with_timeout() {
+        let timeout = std::time::Duration::from_millis(250);
+        let config = HostConfig::default().with_timeout(Some(timeout));
+        assert_eq!(config.get_timeout(), Some(timeout));
+
+        let host = SimHost::new(config);
+        assert_eq!(host.config.get_timeout(), Some(timeout));
+    }
+
+    #[test]
+    fn test_runner_with_timeout_guard() {
+        let host = SimHost::new(HostConfig::default());
+        let timeout = std::time::Duration::from_millis(50);
+
+        // Success when execution duration is within timeout
+        let ok_res = host.with_timeout(timeout, || Ok(42));
+        assert!(ok_res.is_ok());
+        assert_eq!(ok_res.unwrap(), 42);
+
+        // Timeout when execution duration exceeds timeout
+        let timed_out = host.with_timeout(timeout, || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            Ok(99)
+        });
+        assert!(matches!(timed_out, Err(SimHostError::Timeout(t)) if t == timeout));
     }
 }
