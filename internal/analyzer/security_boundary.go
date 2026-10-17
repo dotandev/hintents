@@ -38,6 +38,10 @@ func (c *SecurityBoundaryChecker) Analyze(events []string) ([]Violation, error) 
 	var violations []Violation
 
 	contractStates := make(map[string]*contractInvocationState)
+	// Events are flat, so invocation nesting is only knowable when the stream
+	// includes matching contract_call and contract_return events.
+	var activeCalls []string
+	reportedReentrancy := make(map[string]bool)
 
 	for _, eventStr := range events {
 		var event Event
@@ -58,11 +62,47 @@ func (c *SecurityBoundaryChecker) Analyze(events []string) ([]Violation, error) 
 		state := contractStates[event.Contract]
 
 		switch event.Type {
+		case "contract_call":
+			activeCalls = append(activeCalls, event.Contract)
+
+		case "contract_return", "contract_exit":
+			// Remove the returned invocation and any unclosed descendants. This
+			// keeps subsequent sibling calls from inheriting stale stack state.
+			for i := len(activeCalls) - 1; i >= 0; i-- {
+				if activeCalls[i] == event.Contract {
+					activeCalls = activeCalls[:i]
+					break
+				}
+			}
+
 		case "auth":
 			state.AuthChecked[event.Address] = true
 			state.HasAuth = true
 
 		case "storage_write":
+			seenOnPath := make(map[string]bool)
+			for _, contract := range activeCalls {
+				if seenOnPath[contract] && contract == event.Contract {
+					pathKey := strings.Join(activeCalls, "\x00") + "\x00" + contract
+					if reportedReentrancy[pathKey] {
+						break
+					}
+					reportedReentrancy[pathKey] = true
+					violations = append(violations, Violation{
+						Type:        "cross_contract_reentrancy",
+						Severity:    "high",
+						Description: "Reentrant contract invocation writes storage before the prior invocation returns",
+						Contract:    contract,
+						Details: map[string]interface{}{
+							"operation": "storage_write",
+							"path":      append([]string(nil), activeCalls...),
+						},
+					})
+					break
+				}
+				seenOnPath[contract] = true
+			}
+
 			if !state.HasAuth {
 				if !isSACPattern(event) {
 					violations = append(violations, Violation{
