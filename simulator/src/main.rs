@@ -10,6 +10,7 @@ mod events;
 mod gas_optimizer;
 mod git_detector;
 mod indexer;
+mod interner;
 mod ipc;
 mod memory;
 mod profiler;

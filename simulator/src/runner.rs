@@ -1,6 +1,8 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(dead_code)]
+
 use base64::Engine;
 use soroban_env_host::{
     budget::Budget,

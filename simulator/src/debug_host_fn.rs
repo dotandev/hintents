@@ -8,6 +8,8 @@
 //! is the symbol `"log"`. This module locates those events and decodes them
 //! into plain strings so the simulator can surface them in `SimulationResponse.logs`.
 
+#![allow(dead_code)]
+
 use crate::types::symbol;
 use serde::{Deserialize, Serialize};
 use soroban_env_host::events::Events;

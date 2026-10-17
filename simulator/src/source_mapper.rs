@@ -1,7 +1,10 @@
 // Copyright 2026 Erst Users
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(dead_code)]
+
 use crate::git_detector::GitRepository;
+use crate::interner::intern_path;
 use gimli::{
     self, AbbreviationsCacheStrategy, ColumnType, Dwarf, EndianSlice, Reader, RunTimeEndian,
     SectionId,
@@ -10,6 +13,7 @@ use object::{Object, ObjectSection};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub struct SourceMapper {
     has_symbols: bool,
@@ -18,13 +22,13 @@ pub struct SourceMapper {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct SourceLocation {
-    pub file: String,
+    pub file: Arc<str>,
     pub line: u32,
     pub column: Option<u32>,
     pub column_end: Option<u32>,
-    pub github_link: Option<String>,
+    pub github_link: Option<Arc<str>>,
 }
 
 impl std::fmt::Display for SourceLocation {
@@ -38,6 +42,41 @@ impl std::fmt::Display for SourceLocation {
 }
 
 impl SourceLocation {
+    /// Creates a new `SourceLocation` with automatic path interning.
+    pub fn new(file: impl AsRef<str>, line: u32, column: Option<u32>) -> Self {
+        Self {
+            file: intern_path(file.as_ref()),
+            line,
+            column,
+            column_end: None,
+            github_link: None,
+        }
+    }
+
+    /// Creates a new `SourceLocation` with a pre-interned path.
+    #[allow(dead_code)]
+    pub fn with_interned(file: Arc<str>, line: u32, column: Option<u32>) -> Self {
+        Self {
+            file,
+            line,
+            column,
+            column_end: None,
+            github_link: None,
+        }
+    }
+
+    /// Sets the GitHub link on this location.
+    #[allow(dead_code)]
+    pub fn with_github_link(mut self, link: impl AsRef<str>) -> Self {
+        self.github_link = Some(intern_path(link.as_ref()));
+        self
+    }
+
+    /// Returns the file path as a string slice.
+    pub fn file_str(&self) -> &str {
+        &self.file
+    }
+
     /// Formats this location as `file:line:column` or `file:line` if column is absent.
     pub fn format_line_col(&self) -> String {
         format!("{self}")
@@ -191,7 +230,7 @@ impl SourceMapper {
                     };
 
                     let location = SourceLocation {
-                        file: file_name,
+                        file: intern_path(&file_name),
                         line: line.get() as u32,
                         column,
                         column_end: None,
@@ -276,7 +315,9 @@ impl SourceMapper {
 
         // Add GitHub link if available
         if let Some(ref git_repo) = self.git_repo {
-            location.github_link = git_repo.generate_file_link(&location.file, location.line);
+            location.github_link = git_repo
+                .generate_file_link(&location.file, location.line)
+                .map(|link| intern_path(&link));
         }
 
         Some(location)
@@ -285,17 +326,19 @@ impl SourceMapper {
     #[allow(dead_code)]
     pub fn create_source_location(
         &self,
-        file: String,
+        file: impl AsRef<str>,
         line: u32,
         column: Option<u32>,
     ) -> SourceLocation {
+        let file_str = file.as_ref();
         let github_link = self
             .git_repo
             .as_ref()
-            .and_then(|repo| repo.generate_file_link(&file, line));
+            .and_then(|repo| repo.generate_file_link(file_str, line))
+            .map(|link| intern_path(&link));
 
         SourceLocation {
-            file,
+            file: intern_path(file_str),
             line,
             column,
             column_end: None,
@@ -406,7 +449,7 @@ mod tests {
     #[test]
     fn test_source_location_serialization() {
         let location = SourceLocation {
-            file: "test.rs".to_string(),
+            file: "test.rs".into(),
             line: 42,
             column: Some(10),
             column_end: Some(15),
@@ -416,22 +459,28 @@ mod tests {
         let json = serde_json::to_string(&location).unwrap();
         assert!(json.contains("test.rs"));
         assert!(json.contains("42"));
+
+        let deserialized: SourceLocation = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, location);
     }
 
     #[test]
     fn test_source_location_with_github_link() {
         let location = SourceLocation {
-            file: "test.rs".to_string(),
+            file: "test.rs".into(),
             line: 42,
             column: Some(10),
             column_end: None,
-            github_link: Some("https://github.com/user/repo/blob/abc123/test.rs#L42".to_string()),
+            github_link: Some("https://github.com/user/repo/blob/abc123/test.rs#L42".into()),
         };
 
         let json = serde_json::to_string(&location).unwrap();
         assert!(json.contains("test.rs"));
         assert!(json.contains("42"));
         assert!(json.contains("github.com"));
+
+        let deserialized: SourceLocation = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, location);
     }
 
     #[test]
@@ -455,7 +504,7 @@ mod tests {
         mappings.insert(
             0x1234,
             SourceLocation {
-                file: "test.rs".to_string(),
+                file: "test.rs".into(),
                 line: 42,
                 column: Some(10),
                 column_end: None,
@@ -488,7 +537,7 @@ mod tests {
     #[test]
     fn test_source_location_display_and_format() {
         let loc_with_col = SourceLocation {
-            file: "contracts/token.rs".to_string(),
+            file: "contracts/token.rs".into(),
             line: 42,
             column: Some(15),
             column_end: None,
@@ -498,7 +547,7 @@ mod tests {
         assert_eq!(loc_with_col.format_line_col(), "contracts/token.rs:42:15");
 
         let loc_without_col = SourceLocation {
-            file: "src/lib.rs".to_string(),
+            file: "src/lib.rs".into(),
             line: 100,
             column: None,
             column_end: None,
@@ -514,7 +563,7 @@ mod tests {
             start: 0x100,
             end: Some(0x200),
             location: SourceLocation {
-                file: "src/contract.rs".to_string(),
+                file: "src/contract.rs".into(),
                 line: 55,
                 column: Some(8),
                 column_end: None,
@@ -523,7 +572,7 @@ mod tests {
         }]);
 
         let loc = mapper.map_trapping_offset(0x150).unwrap();
-        assert_eq!(loc.file, "src/contract.rs");
+        assert_eq!(&*loc.file, "src/contract.rs");
         assert_eq!(loc.line, 55);
         assert_eq!(loc.column, Some(8));
 
@@ -531,5 +580,16 @@ mod tests {
         assert_eq!(line_col_str, "src/contract.rs:55:8");
 
         assert!(mapper.map_trapping_offset(0x250).is_none());
+    }
+
+    #[test]
+    fn test_source_location_new_and_interning() {
+        let loc1 = SourceLocation::new("contracts/staking.rs", 10, Some(4));
+        let loc2 = SourceLocation::new("contracts/staking.rs", 25, Some(12));
+
+        assert_eq!(loc1.file, loc2.file);
+        // Verify they share the exact same underlying interned pointer
+        assert!(Arc::ptr_eq(&loc1.file, &loc2.file));
+        assert_eq!(loc1.file_str(), "contracts/staking.rs");
     }
 }

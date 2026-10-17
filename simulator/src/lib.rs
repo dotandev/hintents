@@ -10,6 +10,7 @@ pub mod git_detector;
 pub mod host;
 pub mod hsm;
 pub mod indexer;
+pub mod interner;
 pub mod ipc;
 pub mod memory;
 pub mod metering;

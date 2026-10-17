@@ -8,7 +8,9 @@
 
 #![allow(dead_code)]
 
-use crate::source_mapper::{SourceLocation, SourceMapper};
+pub use crate::source_mapper::SourceLocation;
+use crate::interner::intern_path;
+use crate::source_mapper::SourceMapper;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Serialize;
@@ -130,13 +132,13 @@ pub fn extract_trapping_offset(text: &str) -> Option<u64> {
 pub fn parse_panic_location(text: &str) -> Option<SourceLocation> {
     for line in text.lines() {
         if let Some(caps) = RE_PANIC_LOCATION.captures(line) {
-            let file = caps.name("file")?.as_str().to_string();
+            let file = caps.name("file")?.as_str();
             let line = caps.name("line")?.as_str().parse::<u32>().ok()?;
             let column = caps
                 .name("col")
                 .and_then(|c| c.as_str().parse::<u32>().ok());
             return Some(SourceLocation {
-                file,
+                file: intern_path(file),
                 line,
                 column,
                 column_end: None,
@@ -808,7 +810,7 @@ mod tests {
     fn test_parse_panic_location() {
         let text = "panicked at 'index out of bounds', contracts/pool.rs:88:14";
         let loc = parse_panic_location(text).unwrap();
-        assert_eq!(loc.file, "contracts/pool.rs");
+        assert_eq!(&*loc.file, "contracts/pool.rs");
         assert_eq!(loc.line, 88);
         assert_eq!(loc.column, Some(14));
         assert_eq!(loc.to_string(), "contracts/pool.rs:88:14");
@@ -826,7 +828,7 @@ mod tests {
                 wasm_offset: Some(0x120),
                 module: None,
                 source_location: Some(SourceLocation {
-                    file: "src/contract.rs".to_string(),
+                    file: "src/contract.rs".into(),
                     line: 42,
                     column: Some(15),
                     column_end: None,
