@@ -158,6 +158,13 @@ impl Default for AllocTracker {
     }
 }
 
+/// Represents an active sub-invocation frame and its pre-call snapshot state.
+#[derive(Debug, Clone)]
+pub struct SubInvocationFrame {
+    pub call_id: String,
+    pub pre_state: LedgerSnapshot,
+}
+
 /// Manages snapshot capture around host function calls.
 pub struct HostSnapshotTracker {
     next_id: u64,
@@ -166,6 +173,8 @@ pub struct HostSnapshotTracker {
     pending_before: Option<CapturedSnapshot>,
     /// Optional allocator-state tracker for rollback safety.
     alloc_tracker: Option<AllocTracker>,
+    /// Stack of active sub-invocations for rollback verification.
+    sub_invocations: Vec<SubInvocationFrame>,
 }
 
 impl HostSnapshotTracker {
@@ -176,6 +185,7 @@ impl HostSnapshotTracker {
             pairs: Vec::new(),
             pending_before: None,
             alloc_tracker: None,
+            sub_invocations: Vec::new(),
         }
     }
 
@@ -188,6 +198,7 @@ impl HostSnapshotTracker {
             pairs: Vec::new(),
             pending_before: None,
             alloc_tracker: Some(alloc_tracker),
+            sub_invocations: Vec::new(),
         }
     }
 
@@ -304,6 +315,116 @@ impl HostSnapshotTracker {
             }
         }
         None
+    }
+
+    /// Records the pre-invocation storage state before executing a sub-invocation.
+    pub fn enter_sub_invocation(&mut self, call_id: &str, pre_state: LedgerSnapshot) {
+        self.sub_invocations.push(SubInvocationFrame {
+            call_id: call_id.to_string(),
+            pre_state,
+        });
+    }
+
+    /// Completes the most recent sub-invocation.
+    /// If `failed` is true, verifies that all storage writes were rolled back.
+    /// Returns `Some(RollbackDiagnosticEvent)` if un-rolled-back writes are detected.
+    pub fn exit_sub_invocation(
+        &mut self,
+        _call_id: &str,
+        post_state: &LedgerSnapshot,
+        failed: bool,
+    ) -> Option<RollbackDiagnosticEvent> {
+        let frame = self.sub_invocations.pop()?;
+        if failed {
+            let (_, diag) = verify_sub_invocation_rollback(&frame.call_id, &frame.pre_state, post_state);
+            diag
+        } else {
+            None
+        }
+    }
+
+    /// Returns the current depth of active sub-invocations.
+    pub fn active_sub_invocations_count(&self) -> usize {
+        self.sub_invocations.len()
+    }
+}
+
+/// Detailed information about an unrolled-back storage write leaked by a failed sub-invocation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeakedStorageWrite {
+    /// Hex-encoded key of the leaked storage entry.
+    pub key_hex: String,
+    /// Whether the key was freshly inserted (true) or mutated in-place (false).
+    pub is_new: bool,
+}
+
+/// Result of checking whether a failed sub-invocation rolled back all its storage writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RollbackCheckResult {
+    /// Rollback succeeded; no dirty writes remained.
+    Clean,
+    /// Dirty storage writes from the failed sub-invocation were leaked into the host state.
+    LeakedWrites(Vec<LeakedStorageWrite>),
+}
+
+/// A diagnostic event emitted when a failed sub-invocation leaves un-rolled-back writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RollbackDiagnosticEvent {
+    pub call_id: String,
+    pub leaked_count: usize,
+    pub leaked_keys: Vec<String>,
+    pub message: String,
+}
+
+impl RollbackDiagnosticEvent {
+    pub fn new(call_id: &str, leaked: &[LeakedStorageWrite]) -> Self {
+        let leaked_keys: Vec<String> = leaked.iter().map(|w| w.key_hex.clone()).collect();
+        let message = format!(
+            "[DIAGNOSTIC] failed sub-invocation '{}' leaked {} storage write(s) without rollback: {:?}",
+            call_id,
+            leaked.len(),
+            leaked_keys
+        );
+        Self {
+            call_id: call_id.to_string(),
+            leaked_count: leaked.len(),
+            leaked_keys,
+            message,
+        }
+    }
+}
+
+/// Verifies whether storage writes from a failed sub-invocation were completely rolled back.
+///
+/// Compares the ledger snapshot taken immediately before the sub-invocation (`pre_call_state`)
+/// with the ledger snapshot observed after the failure (`post_failure_state`).
+/// Any newly inserted or modified keys represent un-rolled-back storage mutations.
+pub fn verify_sub_invocation_rollback(
+    call_id: &str,
+    pre_call_state: &LedgerSnapshot,
+    post_failure_state: &LedgerSnapshot,
+) -> (RollbackCheckResult, Option<RollbackDiagnosticEvent>) {
+    let diff = crate::snapshot::diff_snapshots(pre_call_state, post_failure_state);
+
+    let mut leaked = Vec::new();
+    for inserted in diff.inserted {
+        leaked.push(LeakedStorageWrite {
+            key_hex: hex::encode(inserted),
+            is_new: true,
+        });
+    }
+    for modified in diff.modified {
+        leaked.push(LeakedStorageWrite {
+            key_hex: hex::encode(modified),
+            is_new: false,
+        });
+    }
+
+    if leaked.is_empty() {
+        (RollbackCheckResult::Clean, None)
+    } else {
+        let diag = RollbackDiagnosticEvent::new(call_id, &leaked);
+        (RollbackCheckResult::LeakedWrites(leaked), Some(diag))
     }
 }
 
@@ -482,5 +603,105 @@ mod tests {
     fn test_snapshot_id_display() {
         let id = SnapshotId(42);
         assert_eq!(format!("{}", id), "snap-42");
+    }
+
+    #[test]
+    fn test_sub_invocation_rollback_clean() {
+        let pre_state = empty_snapshot();
+        let post_state = empty_snapshot();
+
+        let (result, diag) = verify_sub_invocation_rollback("call_1", &pre_state, &post_state);
+        assert_eq!(result, RollbackCheckResult::Clean);
+        assert!(diag.is_none());
+    }
+
+    #[test]
+    fn test_sub_invocation_rollback_leaked_writes() {
+        use soroban_env_host::xdr::{
+            ContractDataDurability, ContractDataEntry, ContractId, Hash, LedgerEntry, LedgerEntryData,
+            LedgerEntryExt, ScAddress, ScVal,
+        };
+
+        let pre_state = empty_snapshot();
+        let mut post_state = empty_snapshot();
+
+        // Simulate dirty write leaked by failed sub-invocation
+        let dirty_entry = LedgerEntry {
+            last_modified_ledger_seq: 10,
+            data: LedgerEntryData::ContractData(ContractDataEntry {
+                ext: soroban_env_host::xdr::ExtensionPoint::V0,
+                contract: ScAddress::Contract(ContractId(Hash([7u8; 32]))),
+                key: ScVal::U32(1),
+                durability: ContractDataDurability::Persistent,
+                val: ScVal::U32(42),
+            }),
+            ext: LedgerEntryExt::V0,
+        };
+        post_state.insert(vec![1, 2, 3, 4], dirty_entry);
+
+        let (result, diag) = verify_sub_invocation_rollback("sub_call_42", &pre_state, &post_state);
+        match result {
+            RollbackCheckResult::LeakedWrites(writes) => {
+                assert_eq!(writes.len(), 1);
+                assert_eq!(writes[0].key_hex, "01020304");
+                assert!(writes[0].is_new);
+            }
+            RollbackCheckResult::Clean => panic!("expected leaked writes"),
+        }
+
+        assert!(diag.is_some());
+        let event = diag.unwrap();
+        assert_eq!(event.call_id, "sub_call_42");
+        assert_eq!(event.leaked_count, 1);
+        assert!(event.message.contains("sub_call_42"));
+        assert!(event.message.contains("01020304"));
+    }
+
+    #[test]
+    fn test_host_snapshot_tracker_sub_invocations() {
+        let mut tracker = HostSnapshotTracker::new();
+        assert_eq!(tracker.active_sub_invocations_count(), 0);
+
+        let pre_state = empty_snapshot();
+        tracker.enter_sub_invocation("call_nested", pre_state.clone());
+        assert_eq!(tracker.active_sub_invocations_count(), 1);
+
+        // Success path: no diagnostic
+        let clean_post = empty_snapshot();
+        let diag_ok = tracker.exit_sub_invocation("call_nested", &clean_post, false);
+        assert!(diag_ok.is_none());
+        assert_eq!(tracker.active_sub_invocations_count(), 0);
+
+        // Failure path with leaked write: triggers diagnostic
+        tracker.enter_sub_invocation("call_failed", pre_state.clone());
+        let mut dirty_post = empty_snapshot();
+        dirty_post.insert(
+            vec![0xaa, 0xbb],
+            soroban_env_host::xdr::LedgerEntry {
+                last_modified_ledger_seq: 1,
+                data: soroban_env_host::xdr::LedgerEntryData::Offer(
+                    soroban_env_host::xdr::OfferEntry {
+                        seller_id: soroban_env_host::xdr::AccountId(
+                            soroban_env_host::xdr::PublicKey::PublicKeyTypeEd25519(
+                                soroban_env_host::xdr::Uint256([0u8; 32]),
+                            ),
+                        ),
+                        offer_id: 1,
+                        selling: soroban_env_host::xdr::Asset::Native,
+                        buying: soroban_env_host::xdr::Asset::Native,
+                        amount: 100,
+                        price: soroban_env_host::xdr::Price { n: 1, d: 1 },
+                        flags: 0,
+                        ext: soroban_env_host::xdr::ExtensionPoint::V0,
+                    },
+                ),
+                ext: soroban_env_host::xdr::LedgerEntryExt::V0,
+            },
+        );
+
+        let diag_err = tracker.exit_sub_invocation("call_failed", &dirty_post, true);
+        assert!(diag_err.is_some());
+        assert_eq!(diag_err.unwrap().call_id, "call_failed");
+        assert_eq!(tracker.active_sub_invocations_count(), 0);
     }
 }
