@@ -231,6 +231,11 @@ Supports local file paths (including Windows absolute paths with drive letters,
 e.g. C:\contracts\token.wasm), relative paths, and remote URLs (http:// or https://).`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		resolvedArgs, err := ResolveContractArgs(runArgsFlag, cmd.InOrStdin())
+		if err != nil {
+			return err
+		}
+
 		target := args[0]
 		loc, err := ResolveContractPath(target)
 		if err != nil {
@@ -248,7 +253,7 @@ e.g. C:\contracts\token.wasm), relative paths, and remote URLs (http:// or https
 			fmt.Printf("%s Loaded contract (%d bytes) from %s\n", visualizer.Symbol("play"), len(contractBytes), loc.ResolvedPath)
 		}
 
-		return executeLoadedContract(cmd.Context(), loc.ResolvedPath, contractBytes, runArgsFlag, runNoCacheFlag)
+		return executeLoadedContract(cmd.Context(), loc.ResolvedPath, contractBytes, resolvedArgs, runNoCacheFlag)
 	},
 }
 
@@ -278,7 +283,7 @@ func executeLoadedContract(ctx context.Context, path string, wasmBytes []byte, e
 }
 
 func init() {
-	runCmd.Flags().StringSliceVar(&runArgsFlag, "args", nil, "Arguments to pass to the contract")
+	runCmd.Flags().StringSliceVar(&runArgsFlag, "args", nil, "Arguments to pass to the contract (use '-' to read from stdin)")
 	runCmd.Flags().BoolVar(&runNoCacheFlag, "no-cache", false, "Disable execution cache")
 	rootCmd.AddCommand(runCmd)
 }
