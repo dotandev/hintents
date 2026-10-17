@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 )
 
 var (
@@ -104,6 +105,28 @@ func NewParser(data []byte) (*Parser, error) {
 	}
 
 	return nil, ErrInvalidWASM
+}
+
+// NewParserFromDetachedFile loads and parses DWARF info from a separate symbol file (.dwp / .debug.wasm).
+func NewParserFromDetachedFile(path string) (*Parser, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read detached debug symbol file %q: %w", path, err)
+	}
+	return NewParser(data)
+}
+
+// NewParserWithDetached attempts to parse DWARF from wasmBytes first. If wasmBytes has no debug info
+// (ErrNoDebugInfo) and detachedPath is non-empty, it parses from the detached symbol file instead.
+func NewParserWithDetached(wasmBytes []byte, detachedPath string) (*Parser, error) {
+	p, err := NewParser(wasmBytes)
+	if err == nil {
+		return p, nil
+	}
+	if errors.Is(err, ErrNoDebugInfo) && detachedPath != "" {
+		return NewParserFromDetachedFile(detachedPath)
+	}
+	return nil, err
 }
 
 // parseWASM parses DWARF info from a WASM binary

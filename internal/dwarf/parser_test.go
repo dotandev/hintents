@@ -334,3 +334,28 @@ func TestInlinedSubroutineInfo_ZeroValues(t *testing.T) {
 		t.Errorf("expected zero CallSite.Line, got %d", info.CallSite.Line)
 	}
 }
+
+func TestNewParserFromDetachedFile_NotFound(t *testing.T) {
+	_, err := NewParserFromDetachedFile("/nonexistent/file.dwp")
+	if err == nil {
+		t.Fatal("expected error for missing detached file")
+	}
+}
+
+func TestNewParserWithDetached_Fallback(t *testing.T) {
+	// Minimal stripped WASM with magic number and version but no DWARF custom sections
+	strippedWasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+
+	// 1. Without detached path: returns ErrNoDebugInfo
+	_, err := NewParserWithDetached(strippedWasm, "")
+	if !errors.Is(err, ErrNoDebugInfo) {
+		t.Fatalf("expected ErrNoDebugInfo, got %v", err)
+	}
+
+	// 2. With invalid detached path: falls back to detached and fails with read error
+	_, err = NewParserWithDetached(strippedWasm, "/nonexistent/module.dwp")
+	if err == nil {
+		t.Fatal("expected read error on fallback")
+	}
+}
+
