@@ -107,7 +107,11 @@ impl SimHost {
             Ok(result) => Ok(result),
             Err(panic_info) => {
                 let message = Self::panic_payload_to_string(panic_info.as_ref());
-                Err(SimHostError::Panic(message))
+                if let Some(host_err) = crate::memory::catch_memory_trap_to_host_error(&message) {
+                    Err(SimHostError::Host(host_err))
+                } else {
+                    Err(SimHostError::Panic(message))
+                }
             }
         }
     }
@@ -513,6 +517,24 @@ mod tests {
         assert!(
             matches!(result, Err(SimHostError::Panic(message)) if message.contains("memory violation"))
         );
+    }
+
+    #[test]
+    fn test_panic_recovery_maps_out_of_bounds_to_host_error() {
+        let host = SimHost::new(HostConfig::default());
+        let result: Result<(), SimHostError> = host.with_panic_recovery(|| {
+            panic!("wasm trap: out of bounds memory access");
+        });
+
+        match result {
+            Err(SimHostError::Host(host_err)) => {
+                assert_eq!(
+                    host_err.error,
+                    EnvError::from_type_and_code(ScErrorType::WasmVm, ScErrorCode::IndexBounds)
+                );
+            }
+            other => panic!("expected SimHostError::Host, got {other:?}"),
+        }
     }
 
     #[test]
