@@ -11,6 +11,7 @@
 package offline
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -44,6 +45,9 @@ type EnvelopeFile struct {
 
 	// Metadata carries human-readable context.
 	Metadata EnvelopeMetadata `json:"metadata"`
+
+	// VerifySignatures specifies whether signature verification is enforced during offline replay/simulation.
+	VerifySignatures bool `json:"verify_signatures,omitempty"`
 }
 
 // SignatureEntry records a single signature and the public key that produced it.
@@ -148,3 +152,53 @@ func checksumOf(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
 }
+
+// VerifySimulationSignatures validates that the envelope contains valid Ed25519 signatures
+// when offline verification is requested. If verifySignatures is false and e.VerifySignatures is false,
+// verification is skipped.
+func (e *EnvelopeFile) VerifySimulationSignatures(verifySignatures bool) error {
+	if !verifySignatures && !e.VerifySignatures {
+		return nil
+	}
+
+	if len(e.Signatures) == 0 {
+		return errors.WrapValidationError("offline signature verification failed: no signatures present on envelope")
+	}
+
+	msg := []byte(e.EnvelopeXDR)
+	for i, entry := range e.Signatures {
+		pubBytes, err := hex.DecodeString(entry.PublicKey)
+		if err != nil {
+			return errors.WrapValidationError(
+				fmt.Sprintf("offline signature verification failed: signature %d has invalid public key hex: %v", i, err),
+			)
+		}
+		if len(pubBytes) != ed25519.PublicKeySize {
+			return errors.WrapValidationError(
+				fmt.Sprintf("offline signature verification failed: signature %d has invalid public key size %d", i, len(pubBytes)),
+			)
+		}
+		sigBytes, err := hex.DecodeString(entry.Signature)
+		if err != nil {
+			return errors.WrapValidationError(
+				fmt.Sprintf("offline signature verification failed: signature %d has invalid signature hex: %v", i, err),
+			)
+		}
+		if !ed25519.Verify(ed25519.PublicKey(pubBytes), msg, sigBytes) {
+			return errors.WrapValidationError(
+				fmt.Sprintf("offline signature verification failed: signature %d (key %s) failed Ed25519 verification", i, entry.PublicKey),
+			)
+		}
+	}
+
+	return nil
+}
+
+// VerifyOfflineSignatures is a helper to verify envelope signatures for offline simulation and replay.
+func VerifyOfflineSignatures(ef *EnvelopeFile, verifySignatures bool) error {
+	if ef == nil {
+		return errors.WrapValidationError("envelope file is nil")
+	}
+	return ef.VerifySimulationSignatures(verifySignatures)
+}
+
