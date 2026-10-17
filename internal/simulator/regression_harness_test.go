@@ -5,12 +5,15 @@ package simulator
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRegressionTestResult(t *testing.T) {
@@ -169,12 +172,130 @@ func TestExtractLedgerKeysFromXDR(t *testing.T) {
 		assert.Equal(t, 0, len(keys))
 	})
 
-	t.Run("returns empty slice for non-empty XDR", func(t *testing.T) {
-		// TODO: Implement full XDR parsing
-		// For now, returns empty as placeholder
-		keys, err := extractLedgerKeysFromXDR("AAAAAgAA...")
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(keys))
+	t.Run("returns error for invalid base64 or corrupt XDR", func(t *testing.T) {
+		_, err := extractLedgerKeysFromXDR("not-base64!@#$")
+		assert.Error(t, err)
+
+		_, err = extractLedgerKeysFromXDR("AAAAAgAA...")
+		assert.Error(t, err)
+	})
+
+	t.Run("parses valid TransactionResultMeta and extracts ledger keys", func(t *testing.T) {
+		accID1 := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
+		entry1 := xdr.LedgerEntry{
+			LastModifiedLedgerSeq: 100,
+			Data: xdr.LedgerEntryData{
+				Type: xdr.LedgerEntryTypeAccount,
+				Account: &xdr.AccountEntry{
+					AccountId: accID1,
+					Balance:   1000,
+					SeqNum:    10,
+				},
+			},
+		}
+
+		accID2 := xdr.MustAddress("GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN")
+		entry2 := xdr.LedgerEntry{
+			LastModifiedLedgerSeq: 101,
+			Data: xdr.LedgerEntryData{
+				Type: xdr.LedgerEntryTypeAccount,
+				Account: &xdr.AccountEntry{
+					AccountId: accID2,
+					Balance:   2000,
+					SeqNum:    20,
+				},
+			},
+		}
+
+		changes := xdr.LedgerEntryChanges{
+			{
+				Type:    xdr.LedgerEntryChangeTypeLedgerEntryCreated,
+				Created: &entry1,
+			},
+			{
+				Type:    xdr.LedgerEntryChangeTypeLedgerEntryUpdated,
+				Updated: &entry2,
+			},
+		}
+
+		txMeta, err := xdr.NewTransactionMeta(1, xdr.TransactionMetaV1{
+			TxChanges: changes,
+			Operations: []xdr.OperationMeta{
+				{
+					Changes: changes,
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		meta := xdr.TransactionResultMeta{
+			FeeProcessing:     changes,
+			TxApplyProcessing: txMeta,
+		}
+
+		metaBytes, err := meta.MarshalBinary()
+		require.NoError(t, err)
+		metaB64 := base64.StdEncoding.EncodeToString(metaBytes)
+
+		keys, err := extractLedgerKeysFromXDR(metaB64)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(keys), "should extract both unique account ledger keys")
+
+		for _, k := range keys {
+			rawKey, err := base64.StdEncoding.DecodeString(k)
+			require.NoError(t, err)
+			var lk xdr.LedgerKey
+			err = lk.UnmarshalBinary(rawKey)
+			require.NoError(t, err)
+			assert.Equal(t, xdr.LedgerEntryTypeAccount, lk.Type)
+		}
+	})
+
+	t.Run("extracts keys from transaction envelope", func(t *testing.T) {
+		srcID := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
+		dstID := xdr.MustAddress("GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN")
+
+		srcMux := xdr.MuxedAccount{
+			Type:    xdr.CryptoKeyTypeKeyTypeEd25519,
+			Ed25519: srcID.Ed25519,
+		}
+		dstMux := xdr.MuxedAccount{
+			Type:    xdr.CryptoKeyTypeKeyTypeEd25519,
+			Ed25519: dstID.Ed25519,
+		}
+
+		payment := xdr.PaymentOp{
+			Destination: dstMux,
+			Asset:       xdr.Asset{Type: xdr.AssetTypeAssetTypeNative},
+			Amount:      100,
+		}
+
+		env := xdr.TransactionEnvelope{
+			Type: xdr.EnvelopeTypeEnvelopeTypeTx,
+			V1: &xdr.TransactionV1Envelope{
+				Tx: xdr.Transaction{
+					SourceAccount: srcMux,
+					Fee:           100,
+					SeqNum:        1,
+					Operations: []xdr.Operation{
+						{
+							Body: xdr.OperationBody{
+								Type:      xdr.OperationTypePayment,
+								PaymentOp: &payment,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		rawEnv, err := env.MarshalBinary()
+		require.NoError(t, err)
+		envB64 := base64.StdEncoding.EncodeToString(rawEnv)
+
+		keys, err := ExtractLedgerKeysFromEnvelope(envB64)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(keys), "should extract source account and destination account keys")
 	})
 }
 

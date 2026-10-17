@@ -6,13 +6,16 @@ package simulator
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/dotandev/hintents/internal/logger"
 	"github.com/dotandev/hintents/internal/rpc"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // RegressionTestResult represents the outcome of a single transaction test
@@ -289,15 +292,185 @@ func (h *RegressionHarness) fetchFailedTransactions(
 	return txHashes, nil
 }
 
-// extractLedgerKeysFromXDR extracts ledger keys from transaction result meta XDR
+// extractLedgerKeysFromXDR extracts unique base64-encoded LedgerKey strings
+// from transaction result meta XDR by inspecting all ledger entry changes.
 func extractLedgerKeysFromXDR(resultMetaXdr string) ([]string, error) {
 	if resultMetaXdr == "" {
 		return []string{}, nil
 	}
 
-	// TODO: Parse XDR to extract actual ledger keys
-	// For now, return empty slice - actual parsing requires XDR decoder
-	return []string{}, nil
+	data, err := base64.StdEncoding.DecodeString(resultMetaXdr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode resultMetaXdr base64: %w", err)
+	}
+
+	var meta xdr.TransactionResultMeta
+	if err := xdr.SafeUnmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal TransactionResultMeta: %w", err)
+	}
+
+	keysMap := make(map[string]struct{})
+	addKey := func(k xdr.LedgerKey) {
+		b, err := k.MarshalBinary()
+		if err == nil {
+			keysMap[base64.StdEncoding.EncodeToString(b)] = struct{}{}
+		}
+	}
+
+	collectChanges := func(changes xdr.LedgerEntryChanges) {
+		for _, c := range changes {
+			switch c.Type {
+			case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
+				if c.Created != nil {
+					k, err := c.Created.LedgerKey()
+					if err == nil {
+						addKey(k)
+					}
+				}
+			case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+				if c.Updated != nil {
+					k, err := c.Updated.LedgerKey()
+					if err == nil {
+						addKey(k)
+					}
+				}
+			case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+				if c.Removed != nil {
+					addKey(*c.Removed)
+				}
+			case xdr.LedgerEntryChangeTypeLedgerEntryState:
+				if c.State != nil {
+					k, err := c.State.LedgerKey()
+					if err == nil {
+						addKey(k)
+					}
+				}
+			}
+		}
+	}
+
+	// 1. Collect fee processing changes
+	collectChanges(meta.FeeProcessing)
+
+	// 2. Collect transaction apply processing changes across versions V0..V3
+	switch meta.TxApplyProcessing.V {
+	case 0:
+		if meta.TxApplyProcessing.Operations != nil {
+			for _, op := range *meta.TxApplyProcessing.Operations {
+				collectChanges(op.Changes)
+			}
+		}
+	case 1:
+		if v1 := meta.TxApplyProcessing.V1; v1 != nil {
+			collectChanges(v1.TxChanges)
+			for _, op := range v1.Operations {
+				collectChanges(op.Changes)
+			}
+		}
+	case 2:
+		if v2 := meta.TxApplyProcessing.V2; v2 != nil {
+			collectChanges(v2.TxChangesBefore)
+			collectChanges(v2.TxChangesAfter)
+			for _, op := range v2.Operations {
+				collectChanges(op.Changes)
+			}
+		}
+	case 3:
+		if v3 := meta.TxApplyProcessing.V3; v3 != nil {
+			collectChanges(v3.TxChangesBefore)
+			collectChanges(v3.TxChangesAfter)
+			for _, op := range v3.Operations {
+				collectChanges(op.Changes)
+			}
+		}
+	}
+
+	res := make([]string, 0, len(keysMap))
+	for k := range keysMap {
+		res = append(res, k)
+	}
+	sort.Strings(res)
+	return res, nil
+}
+
+// ExtractLedgerKeysFromEnvelope parses a base64 XDR transaction envelope and extracts
+// the LedgerKey for the source account and operation target accounts.
+func ExtractLedgerKeysFromEnvelope(envelopeXdr string) ([]string, error) {
+	if envelopeXdr == "" {
+		return []string{}, nil
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(envelopeXdr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode envelope base64: %w", err)
+	}
+
+	var env xdr.TransactionEnvelope
+	if err := xdr.SafeUnmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal TransactionEnvelope: %w", err)
+	}
+
+	keysMap := make(map[string]struct{})
+	addAccountKey := func(accID xdr.AccountId) {
+		k := xdr.LedgerKey{
+			Type: xdr.LedgerEntryTypeAccount,
+			Account: &xdr.LedgerKeyAccount{
+				AccountId: accID,
+			},
+		}
+		if b, err := k.MarshalBinary(); err == nil {
+			keysMap[base64.StdEncoding.EncodeToString(b)] = struct{}{}
+		}
+	}
+
+	var txOperations []xdr.Operation
+	var sourceAccount xdr.MuxedAccount
+
+	switch env.Type {
+	case xdr.EnvelopeTypeEnvelopeTypeTxV0:
+		if env.V0 != nil {
+			sourceAccount = xdr.MuxedAccount{
+				Type:    xdr.CryptoKeyTypeKeyTypeEd25519,
+				Ed25519: &env.V0.Tx.SourceAccountEd25519,
+			}
+			txOperations = env.V0.Tx.Operations
+		}
+	case xdr.EnvelopeTypeEnvelopeTypeTx:
+		if env.V1 != nil {
+			sourceAccount = env.V1.Tx.SourceAccount
+			txOperations = env.V1.Tx.Operations
+		}
+	case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
+		if env.FeeBump != nil && env.FeeBump.Tx.InnerTx.Type == xdr.EnvelopeTypeEnvelopeTypeTx && env.FeeBump.Tx.InnerTx.V1 != nil {
+			addAccountKey(env.FeeBump.Tx.FeeSource.ToAccountId())
+			sourceAccount = env.FeeBump.Tx.InnerTx.V1.Tx.SourceAccount
+			txOperations = env.FeeBump.Tx.InnerTx.V1.Tx.Operations
+		}
+	}
+
+	addAccountKey(sourceAccount.ToAccountId())
+	for _, op := range txOperations {
+		if op.SourceAccount != nil {
+			addAccountKey(op.SourceAccount.ToAccountId())
+		}
+		switch op.Body.Type {
+		case xdr.OperationTypePayment:
+			if p := op.Body.PaymentOp; p != nil {
+				addAccountKey(p.Destination.ToAccountId())
+			}
+		case xdr.OperationTypeCreateAccount:
+			if ca := op.Body.CreateAccountOp; ca != nil {
+				addAccountKey(ca.Destination)
+			}
+		}
+	}
+
+	res := make([]string, 0, len(keysMap))
+	for k := range keysMap {
+		res = append(res, k)
+	}
+	sort.Strings(res)
+	return res, nil
 }
 
 // addResult adds a test result to the suite (thread-safe)
