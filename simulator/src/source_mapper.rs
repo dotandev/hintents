@@ -27,6 +27,23 @@ pub struct SourceLocation {
     pub github_link: Option<String>,
 }
 
+impl std::fmt::Display for SourceLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(col) = self.column {
+            write!(f, "{}:{}:{}", self.file, self.line, col)
+        } else {
+            write!(f, "{}:{}", self.file, self.line)
+        }
+    }
+}
+
+impl SourceLocation {
+    /// Formats this location as `file:line:column` or `file:line` if column is absent.
+    pub fn format_line_col(&self) -> String {
+        format!("{self}")
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CachedLineEntry {
     start: u64,
@@ -289,6 +306,16 @@ impl SourceMapper {
     pub fn has_debug_symbols(&self) -> bool {
         self.has_symbols
     }
+
+    /// Look up exact source location (`file:line:column`) for a trapping instruction's code offset.
+    pub fn map_trapping_offset(&self, offset: u64) -> Option<SourceLocation> {
+        self.map_wasm_offset_to_source(offset)
+    }
+
+    /// Look up and format exact `file:line:column` string for a trapping instruction's code offset.
+    pub fn map_trapping_offset_to_line_col(&self, offset: u64) -> Option<String> {
+        self.map_trapping_offset(offset).map(|loc| loc.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -456,5 +483,53 @@ mod tests {
         let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
         let hash = SourceMapCache::compute_wasm_hash(&wasm_bytes);
         assert_eq!(hash.len(), 64);
+    }
+
+    #[test]
+    fn test_source_location_display_and_format() {
+        let loc_with_col = SourceLocation {
+            file: "contracts/token.rs".to_string(),
+            line: 42,
+            column: Some(15),
+            column_end: None,
+            github_link: None,
+        };
+        assert_eq!(loc_with_col.to_string(), "contracts/token.rs:42:15");
+        assert_eq!(loc_with_col.format_line_col(), "contracts/token.rs:42:15");
+
+        let loc_without_col = SourceLocation {
+            file: "src/lib.rs".to_string(),
+            line: 100,
+            column: None,
+            column_end: None,
+            github_link: None,
+        };
+        assert_eq!(loc_without_col.to_string(), "src/lib.rs:100");
+        assert_eq!(loc_without_col.format_line_col(), "src/lib.rs:100");
+    }
+
+    #[test]
+    fn test_map_trapping_offset_exact() {
+        let mapper = mapper_with_cache(vec![CachedLineEntry {
+            start: 0x100,
+            end: Some(0x200),
+            location: SourceLocation {
+                file: "src/contract.rs".to_string(),
+                line: 55,
+                column: Some(8),
+                column_end: None,
+                github_link: None,
+            },
+        }]);
+
+        let loc = mapper.map_trapping_offset(0x150).unwrap();
+        assert_eq!(loc.file, "src/contract.rs");
+        assert_eq!(loc.line, 55);
+        assert_eq!(loc.column, Some(8));
+
+        let line_col_str = mapper.map_trapping_offset_to_line_col(0x150).unwrap();
+        assert_eq!(line_col_str, "src/contract.rs:55:8");
+
+        assert!(mapper.map_trapping_offset(0x250).is_none());
     }
 }

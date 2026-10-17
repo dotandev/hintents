@@ -111,7 +111,7 @@ fn emit_panic_response(
     lcov_report: &Option<String>,
     lcov_report_path: &Option<String>,
 ) {
-    let mut wasm_trace = WasmStackTrace::from_panic(&panic_msg);
+    let mut wasm_trace = WasmStackTrace::from_panic_with_mapper(&panic_msg, None, source_mapper);
     if let Some(mapper) = source_mapper {
         eprintln!("Attempting to resolve sources for Panic trace...");
         wasm_trace.resolve_sources(mapper);
@@ -1168,7 +1168,8 @@ fn main() {
                 "Unknown panic".to_string()
             };
 
-            let mut wasm_trace = WasmStackTrace::from_panic(&panic_msg);
+            let mut wasm_trace =
+                WasmStackTrace::from_panic_with_mapper(&panic_msg, None, source_mapper.as_ref());
             if let Some(ref mapper) = source_mapper {
                 eprintln!("Attempting to resolve sources for Panic trace...");
                 wasm_trace.resolve_sources(mapper);

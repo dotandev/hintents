@@ -336,7 +336,8 @@ impl HostSnapshotTracker {
     ) -> Option<RollbackDiagnosticEvent> {
         let frame = self.sub_invocations.pop()?;
         if failed {
-            let (_, diag) = verify_sub_invocation_rollback(&frame.call_id, &frame.pre_state, post_state);
+            let (_, diag) =
+                verify_sub_invocation_rollback(&frame.call_id, &frame.pre_state, post_state);
             diag
         } else {
             None
@@ -618,8 +619,8 @@ mod tests {
     #[test]
     fn test_sub_invocation_rollback_leaked_writes() {
         use soroban_env_host::xdr::{
-            ContractDataDurability, ContractDataEntry, ContractId, Hash, LedgerEntry, LedgerEntryData,
-            LedgerEntryExt, ScAddress, ScVal,
+            ContractDataDurability, ContractDataEntry, ContractId, Hash, LedgerEntry,
+            LedgerEntryData, LedgerEntryExt, ScAddress, ScVal,
         };
 
         let pre_state = empty_snapshot();
@@ -692,7 +693,7 @@ mod tests {
                         amount: 100,
                         price: soroban_env_host::xdr::Price { n: 1, d: 1 },
                         flags: 0,
-                        ext: soroban_env_host::xdr::ExtensionPoint::V0,
+                        ext: soroban_env_host::xdr::OfferEntryExt::V0,
                     },
                 ),
                 ext: soroban_env_host::xdr::LedgerEntryExt::V0,

@@ -75,18 +75,115 @@ static RE_FUNC_INDEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^func\[(?P<idx>\d+
 static RE_OFFSET: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"@\s*(?:0x(?P<hex>[0-9a-fA-F]+)|(?P<dec>\d+))\s*$").unwrap());
 
+/// Matches trapping instruction offset from errors/panics, e.g.:
+/// - `@ 0x1a2b` or `@ 1234`
+/// - `trapping instruction at 0x1a2b`
+/// - `trap at offset 0x1a2b`
+/// - `code_offset: 0x1a2b` or `code offset: 0x1a2b`
+/// - `wasm offset: 0x1a2b` or `wasm_offset: 0x1a2b`
+/// - `pc: 0x1a2b`
+/// - `offset: 0x1a2b`
+static RE_TRAPPING_OFFSET: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?ix)
+        (?:
+            @\s*(?:0x(?P<hex1>[0-9a-fA-F]+)|(?P<dec1>\d+))
+          | (?:trapping\s+instruction(?:\s+at)?(?:\s+offset)?|trap\s+at(?:\s+offset)?|code[_\s]offset|wasm[_\s]offset|pc|offset)\s*[:=]?\s*(?:0x(?P<hex2>[0-9a-fA-F]+)|(?P<dec2>\d+))
+        )",
+    )
+    .unwrap()
+});
+
+/// Matches Rust-style panic file:line:col pattern:
+/// e.g. `panicked at 'assertion failed', src/lib.rs:42:15` or `panicked at src/lib.rs:42:15`
+static RE_PANIC_LOCATION: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?x)
+        (?:panicked\s+at\s+.*?(?:,\s*|\s+))?
+        (?P<file>[a-zA-Z0-9_\-./\\]+\.rs)
+        :(?P<line>\d+)
+        (?::(?P<col>\d+))?
+        ",
+    )
+    .unwrap()
+});
+
+/// Extract the trapping instruction's code offset from raw error or panic strings.
+pub fn extract_trapping_offset(text: &str) -> Option<u64> {
+    for line in text.lines() {
+        if let Some(caps) = RE_TRAPPING_OFFSET.captures(line) {
+            if let Some(hex) = caps.name("hex1").or_else(|| caps.name("hex2")) {
+                if let Ok(offset) = u64::from_str_radix(hex.as_str(), 16) {
+                    return Some(offset);
+                }
+            } else if let Some(dec) = caps.name("dec1").or_else(|| caps.name("dec2")) {
+                if let Ok(offset) = dec.as_str().parse::<u64>() {
+                    return Some(offset);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Parse `file:line[:col]` directly from panic strings if present.
+pub fn parse_panic_location(text: &str) -> Option<SourceLocation> {
+    for line in text.lines() {
+        if let Some(caps) = RE_PANIC_LOCATION.captures(line) {
+            let file = caps.name("file")?.as_str().to_string();
+            let line = caps.name("line")?.as_str().parse::<u32>().ok()?;
+            let column = caps
+                .name("col")
+                .and_then(|c| c.as_str().parse::<u32>().ok());
+            return Some(SourceLocation {
+                file,
+                line,
+                column,
+                column_end: None,
+                github_link: None,
+            });
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 impl WasmStackTrace {
-    /// Build a stack trace by parsing a raw HostError debug representation.
+    /// Build a stack trace by parsing a raw HostError debug representation,
+    /// resolving the trapping instruction code offset to exact source line/col
+    /// via DWARF when a SourceMapper is provided.
     pub fn from_host_error(error_debug: &str, mapper: Option<&SourceMapper>) -> Self {
         let trap_kind = classify_trap(error_debug);
-        let frames = extract_frames(error_debug, mapper);
+        let mut frames = extract_frames(error_debug, mapper);
         let soroban_wrapped = error_debug.contains("HostError")
             || error_debug.contains("ScError")
             || error_debug.contains("Error(WasmVm");
+
+        if let Some(m) = mapper {
+            let trapping_offset = extract_trapping_offset(error_debug);
+            if let Some(top) = frames.first_mut() {
+                if top.source_location.is_none() {
+                    let offset = top.wasm_offset.or(trapping_offset);
+                    if let Some(off) = offset {
+                        top.wasm_offset = Some(off);
+                        top.source_location = m.map_wasm_offset_to_source(off);
+                    }
+                }
+            } else if let Some(off) = trapping_offset {
+                let loc = m.map_wasm_offset_to_source(off);
+                frames.push(StackFrame {
+                    index: 0,
+                    func_index: None,
+                    func_name: Some("<trap site>".to_string()),
+                    wasm_offset: Some(off),
+                    module: None,
+                    source_location: loc,
+                });
+            }
+        }
 
         WasmStackTrace {
             trap_kind,
@@ -97,13 +194,113 @@ impl WasmStackTrace {
     }
 
     /// Build a trace from a panic payload.
+    /// Also checks for embedded panic locations (e.g. `panicked at src/lib.rs:12:3`)
+    /// or trapping instruction code offsets.
     pub fn from_panic(message: &str) -> Self {
+        let mut frames = Vec::new();
+        if let Some(loc) = parse_panic_location(message) {
+            frames.push(StackFrame {
+                index: 0,
+                func_index: None,
+                func_name: Some("<panic site>".to_string()),
+                wasm_offset: extract_trapping_offset(message),
+                module: None,
+                source_location: Some(loc),
+            });
+        } else if let Some(offset) = extract_trapping_offset(message) {
+            frames.push(StackFrame {
+                index: 0,
+                func_index: None,
+                func_name: Some("<panic site>".to_string()),
+                wasm_offset: Some(offset),
+                module: None,
+                source_location: None,
+            });
+        }
+
         WasmStackTrace {
             trap_kind: TrapKind::Unknown(message.to_string()),
             raw_message: message.to_string(),
-            frames: vec![],
+            frames,
             soroban_wrapped: false,
         }
+    }
+
+    /// Build a trace from a panic payload with explicit DWARF SourceMapper and optional trapping code offset.
+    pub fn from_panic_with_mapper(
+        message: &str,
+        trapping_offset: Option<u64>,
+        mapper: Option<&SourceMapper>,
+    ) -> Self {
+        let mut trace = Self::from_panic(message);
+        let offset = trapping_offset
+            .or_else(|| trace.frames.first().and_then(|f| f.wasm_offset))
+            .or_else(|| extract_trapping_offset(message));
+
+        if let (Some(off), Some(m)) = (offset, mapper) {
+            trace.attach_trapping_location(off, m);
+        }
+        trace
+    }
+
+    /// Attach exact `file:line:column` source location to the top frame of the stack trace
+    /// using the trapping instruction's code offset and the provided DWARF SourceMapper.
+    ///
+    /// If no stack frames exist yet, a top frame representing the trap site is automatically created.
+    pub fn attach_trapping_location(&mut self, offset: u64, mapper: &SourceMapper) -> bool {
+        let location = mapper.map_wasm_offset_to_source(offset);
+        if let Some(top_frame) = self.frames.first_mut() {
+            if top_frame.wasm_offset.is_none() {
+                top_frame.wasm_offset = Some(offset);
+            }
+            top_frame.source_location = location;
+            true
+        } else {
+            self.frames.push(StackFrame {
+                index: 0,
+                func_index: None,
+                func_name: Some("<trap site>".to_string()),
+                wasm_offset: Some(offset),
+                module: None,
+                source_location: location,
+            });
+            true
+        }
+    }
+
+    /// Attach a pre-resolved SourceLocation directly to the top frame.
+    pub fn attach_top_frame_location(&mut self, location: SourceLocation, offset: Option<u64>) {
+        if let Some(top_frame) = self.frames.first_mut() {
+            if offset.is_some() {
+                top_frame.wasm_offset = offset;
+            }
+            top_frame.source_location = Some(location);
+        } else {
+            self.frames.push(StackFrame {
+                index: 0,
+                func_index: None,
+                func_name: Some("<trap site>".to_string()),
+                wasm_offset: offset,
+                module: None,
+                source_location: Some(location),
+            });
+        }
+    }
+
+    /// Retrieve the top frame's exact source location, if resolved.
+    pub fn top_source_location(&self) -> Option<&SourceLocation> {
+        self.frames.first().and_then(|f| f.source_location.as_ref())
+    }
+
+    /// Formats the top frame's source location as `file:line:column` (or `file:line`).
+    pub fn top_source_location_str(&self) -> Option<String> {
+        self.top_source_location().map(|loc| {
+            if let Some(col) = loc.column {
+                format!("{}:{}:{}", loc.file, loc.line, col)
+            } else {
+                format!("{}:{}", loc.file, loc.line)
+            }
+        })
     }
 
     /// Populate `source_location` on each frame using the provided `SourceMapper`.
@@ -146,7 +343,11 @@ impl WasmStackTrace {
                 }
 
                 if let Some(ref loc) = frame.source_location {
-                    out.push_str(&format!(" ({}:{})", loc.file, loc.line));
+                    if let Some(col) = loc.column {
+                        out.push_str(&format!(" ({}:{}:{})", loc.file, loc.line, col));
+                    } else {
+                        out.push_str(&format!(" ({}:{})", loc.file, loc.line));
+                    }
                 } else if let Some(offset) = frame.wasm_offset {
                     out.push_str(&format!(" @ 0x{:x}", offset));
                 }
@@ -580,5 +781,80 @@ mod tests {
         let input = "random noise\n  0: func[1] @ 0x1\nmore noise";
         let frames = extract_frames(input, None);
         assert_eq!(frames.len(), 1);
+    }
+
+    #[test]
+    fn test_extract_trapping_offset_formats() {
+        assert_eq!(
+            extract_trapping_offset("  0: func[1] @ 0x1a2b"),
+            Some(0x1a2b)
+        );
+        assert_eq!(
+            extract_trapping_offset("wasm trap at offset 0x200"),
+            Some(0x200)
+        );
+        assert_eq!(extract_trapping_offset("code_offset: 0x300"), Some(0x300));
+        assert_eq!(extract_trapping_offset("code offset = 0x400"), Some(0x400));
+        assert_eq!(
+            extract_trapping_offset("trapping instruction at 0x500"),
+            Some(0x500)
+        );
+        assert_eq!(extract_trapping_offset("wasm_offset: 0x600"), Some(0x600));
+        assert_eq!(extract_trapping_offset("pc: 0x700"), Some(0x700));
+        assert_eq!(extract_trapping_offset("no offset here"), None);
+    }
+
+    #[test]
+    fn test_parse_panic_location() {
+        let text = "panicked at 'index out of bounds', contracts/pool.rs:88:14";
+        let loc = parse_panic_location(text).unwrap();
+        assert_eq!(loc.file, "contracts/pool.rs");
+        assert_eq!(loc.line, 88);
+        assert_eq!(loc.column, Some(14));
+        assert_eq!(loc.to_string(), "contracts/pool.rs:88:14");
+    }
+
+    #[test]
+    fn test_display_includes_column_number() {
+        let trace = WasmStackTrace {
+            trap_kind: TrapKind::Unreachable,
+            raw_message: "unreachable".to_string(),
+            frames: vec![StackFrame {
+                index: 0,
+                func_index: Some(10),
+                func_name: Some("my_contract::panic_now".to_string()),
+                wasm_offset: Some(0x120),
+                module: None,
+                source_location: Some(SourceLocation {
+                    file: "src/contract.rs".to_string(),
+                    line: 42,
+                    column: Some(15),
+                    column_end: None,
+                    github_link: None,
+                }),
+            }],
+            soroban_wrapped: false,
+        };
+
+        let disp = trace.display();
+        assert!(disp.contains("(src/contract.rs:42:15)"));
+        assert_eq!(
+            trace.top_source_location_str(),
+            Some("src/contract.rs:42:15".to_string())
+        );
+    }
+
+    #[test]
+    fn test_from_panic_with_mapper_and_offset() {
+        let dummy_wasm = vec![0x00, 0x61, 0x73, 0x6d];
+        let mapper = SourceMapper::new(dummy_wasm);
+
+        let trace = WasmStackTrace::from_panic_with_mapper(
+            "panicked at 'fail' code_offset: 0x100",
+            None,
+            Some(&mapper),
+        );
+        assert_eq!(trace.frames.len(), 1);
+        assert_eq!(trace.frames[0].wasm_offset, Some(0x100));
     }
 }
