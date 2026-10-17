@@ -5,6 +5,7 @@
 mod asset_tracker;
 mod config;
 mod context;
+mod crypto;
 mod debug_host_fn;
 mod events;
 mod gas_optimizer;

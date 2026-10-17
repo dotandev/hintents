@@ -900,6 +900,7 @@ dependencies = [
  "memmap2",
  "object 0.38.1",
  "once_cell",
+ "p256",
  "pem-rfc7468",
  "pprof",
  "prost",
