@@ -25,6 +25,7 @@ type ruleMatch struct {
 	keywordMatches  int
 	exactKeywordHit bool
 	eventCheckMatch bool
+	structuredMatch bool
 }
 
 type scoredSuggestion struct {
@@ -37,7 +38,17 @@ type ErrorPattern struct {
 	Name        string
 	Keywords    []string
 	EventChecks []func(DecodedEvent) bool
-	Suggestion  Suggestion
+
+	// Structured matchers evaluated before the free-text fallback. Empty fields
+	// are ignored. EventTypes and ErrorCodes are alternatives (a rule matches if
+	// the event type or the error code is one of them), while Functions and
+	// ArgumentTypes further narrow the match.
+	EventTypes    []string // leading topic symbol, e.g. "fn_call", "storage_empty"
+	ErrorCodes    []string // error code carried by an "error" topic, e.g. "budget_exceeded"
+	Functions     []string // contract function name from fn_call/fn_return/log events
+	ArgumentTypes []string // required xdr type names, e.g. "ScvError"
+
+	Suggestion Suggestion
 }
 
 // SuggestionEngine provides heuristic-based error suggestions
@@ -58,8 +69,10 @@ func NewSuggestionEngine() *SuggestionEngine {
 func (e *SuggestionEngine) loadDefaultRules() {
 	// Rule 1: Uninitialized contract
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "uninitialized_contract",
-		Keywords: []string{"empty", "not found", "missing", "null"},
+		Name:       "uninitialized_contract",
+		Keywords:   []string{"empty", "not found", "missing", "null"},
+		EventTypes: []string{"storage_empty", "not_initialized", "uninitialized_contract"},
+		ErrorCodes: []string{"not_initialized", "uninitialized_contract"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -80,8 +93,10 @@ func (e *SuggestionEngine) loadDefaultRules() {
 
 	// Rule 2: Insufficient authorization
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "missing_authorization",
-		Keywords: []string{"auth", "unauthorized", "permission", "signature"},
+		Name:       "missing_authorization",
+		Keywords:   []string{"auth", "unauthorized", "permission", "signature"},
+		EventTypes: []string{"auth_failed", "unauthorized", "missing_authorization"},
+		ErrorCodes: []string{"auth_failed", "unauthorized", "permission_denied"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -102,8 +117,10 @@ func (e *SuggestionEngine) loadDefaultRules() {
 
 	// Rule 3: Insufficient balance
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "insufficient_balance",
-		Keywords: []string{"balance", "insufficient", "underfunded", "funds"},
+		Name:       "insufficient_balance",
+		Keywords:   []string{"balance", "insufficient", "underfunded", "funds"},
+		EventTypes: []string{"insufficient_balance", "underfunded"},
+		ErrorCodes: []string{"insufficient_balance", "underfunded"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -124,8 +141,10 @@ func (e *SuggestionEngine) loadDefaultRules() {
 
 	// Rule 4: Invalid parameters
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "invalid_parameters",
-		Keywords: []string{"invalid", "malformed", "bad", "parameter"},
+		Name:       "invalid_parameters",
+		Keywords:   []string{"invalid", "malformed", "bad", "parameter"},
+		EventTypes: []string{"invalid_parameter", "invalid_parameters", "invalid_argument"},
+		ErrorCodes: []string{"invalid_argument", "invalid_params"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -146,8 +165,10 @@ func (e *SuggestionEngine) loadDefaultRules() {
 
 	// Rule 5: Contract not found
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "contract_not_found",
-		Keywords: []string{"not found", "missing contract", "no contract"},
+		Name:       "contract_not_found",
+		Keywords:   []string{"not found", "missing contract", "no contract"},
+		EventTypes: []string{"contract_not_found", "no_such_contract"},
+		ErrorCodes: []string{"contract_not_found", "no_such_contract"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				return e.ContractID == "" || e.ContractID == "0000000000000000000000000000000000000000000000000000000000000000"
@@ -162,8 +183,10 @@ func (e *SuggestionEngine) loadDefaultRules() {
 
 	// Rule 6: Exceeded resource limits
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "resource_limit_exceeded",
-		Keywords: []string{"limit", "exceeded", "quota", "budget"},
+		Name:       "resource_limit_exceeded",
+		Keywords:   []string{"limit", "exceeded", "quota", "budget"},
+		EventTypes: []string{"limit_exceeded", "budget_exceeded", "resource_limit_exceeded"},
+		ErrorCodes: []string{"budget_exceeded", "resource_exceeded"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -184,8 +207,10 @@ func (e *SuggestionEngine) loadDefaultRules() {
 
 	// Rule 7: Reentrancy issue
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "reentrancy_detected",
-		Keywords: []string{"reentrant", "recursive", "loop"},
+		Name:       "reentrancy_detected",
+		Keywords:   []string{"reentrant", "recursive", "loop"},
+		EventTypes: []string{"reentrant", "reentrant_call", "recursive"},
+		ErrorCodes: []string{"reentrant_call"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -244,6 +269,14 @@ func (e *SuggestionEngine) AnalyzeEvents(events []DecodedEvent) []Suggestion {
 
 func (e *SuggestionEngine) matchRule(rule ErrorPattern, event DecodedEvent) (ruleMatch, bool) {
 	match := ruleMatch{}
+
+	// Structured matching runs first: these fields come from the stable shape of
+	// the decoded event, so a reworded host message cannot suppress a rule.
+	if matchesStructured(rule, event.signature()) {
+		match.structuredMatch = true
+	}
+
+	// Keyword/event-check matching is kept as a free-text fallback.
 	topics := make([]string, 0, len(event.Topics))
 	for _, topic := range event.Topics {
 		topics = append(topics, strings.ToLower(topic))
@@ -276,12 +309,145 @@ func (e *SuggestionEngine) matchRule(rule ErrorPattern, event DecodedEvent) (rul
 		}
 	}
 
-	return match, match.keywordMatches > 0 || match.eventCheckMatch
+	return match, match.keywordMatches > 0 || match.eventCheckMatch || match.structuredMatch
+}
+
+// eventSignature is a structured, positional view of a DecodedEvent. Unlike the
+// free-text fallback, it is derived from the event's stable shape (leading topic,
+// function-name topic and xdr type names), so it survives host message rewording.
+type eventSignature struct {
+	EventType     string
+	Function      string
+	ErrorCode     string
+	ArgumentTypes []string
+}
+
+// functionEvents are event types whose second topic holds the contract function.
+var functionEvents = map[string]bool{
+	"fn_call":   true,
+	"fn_return": true,
+	"log":       true,
+}
+
+// errorEvents are event types whose second topic holds the error code.
+var errorEvents = map[string]bool{
+	"error":            true,
+	"contract_error":   true,
+	"diagnostic_error": true,
+	"host_error":       true,
+}
+
+func (e DecodedEvent) signature() eventSignature {
+	sig := eventSignature{}
+
+	if len(e.Topics) > 0 {
+		sig.EventType = normalizeToken(e.Topics[0])
+		if len(e.Topics) > 1 {
+			switch {
+			case functionEvents[sig.EventType]:
+				sig.Function = strings.TrimSpace(e.Topics[1])
+			case errorEvents[sig.EventType]:
+				sig.ErrorCode = normalizeToken(e.Topics[1])
+			}
+		}
+	}
+
+	sig.ArgumentTypes = collectScValTypes(e)
+	return sig
+}
+
+// collectScValTypes gathers the xdr type names exposed by the decoder, which
+// renders non-symbol topics and the event data as their type name (for example
+// "ScvAddress" or "ScvError").
+func collectScValTypes(e DecodedEvent) []string {
+	types := make([]string, 0, len(e.Topics)+1)
+	add := func(raw string) {
+		if name := scValTypeName(raw); name != "" {
+			types = append(types, name)
+		}
+	}
+
+	add(e.Data)
+	for _, topic := range e.Topics {
+		add(topic)
+	}
+	return types
+}
+
+// scValTypeName returns the xdr type name for a decoded ScVal (for example
+// "ScvU32"), or an empty string when the token is not a type name.
+func scValTypeName(raw string) string {
+	token := strings.TrimSpace(raw)
+	if strings.HasPrefix(token, "Scv") {
+		return token
+	}
+	return ""
+}
+
+func normalizeToken(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+// matchesStructured reports whether the rule's structured fields all match the
+// event signature. EventTypes and ErrorCodes are alternatives; Functions and
+// ArgumentTypes narrow the match.
+func matchesStructured(rule ErrorPattern, sig eventSignature) bool {
+	hasTypeOrCode := len(rule.EventTypes) > 0 || len(rule.ErrorCodes) > 0
+	if !hasTypeOrCode && len(rule.Functions) == 0 && len(rule.ArgumentTypes) == 0 {
+		return false
+	}
+
+	if hasTypeOrCode {
+		matched := len(rule.EventTypes) > 0 && matchesAnyToken(rule.EventTypes, sig.EventType)
+		if !matched && len(rule.ErrorCodes) > 0 {
+			matched = matchesAnyToken(rule.ErrorCodes, sig.ErrorCode)
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	if !matchesAnyToken(rule.Functions, sig.Function) {
+		return false
+	}
+
+	return hasAllTokens(sig.ArgumentTypes, rule.ArgumentTypes)
+}
+
+// matchesAnyToken reports whether actual equals one of the allowed tokens.
+// An empty allowed list is not a constraint and always matches.
+func matchesAnyToken(allowed []string, actual string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, want := range allowed {
+		if strings.EqualFold(strings.TrimSpace(want), actual) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAllTokens reports whether every required token is present in the haystack.
+func hasAllTokens(haystack, required []string) bool {
+	for _, want := range required {
+		found := false
+		for _, have := range haystack {
+			if strings.EqualFold(want, have) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 func (m ruleMatch) specificityScore() int {
 	score := 0
-	if m.eventCheckMatch {
+	if m.eventCheckMatch || m.structuredMatch {
 		score += 2
 	}
 	if m.keywordMatches > 0 {

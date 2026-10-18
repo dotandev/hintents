@@ -440,3 +440,64 @@ func TestAnalyzeEvents_DuplicateRules(t *testing.T) {
 		t.Errorf("Expected rule to appear only once, got %d times", count)
 	}
 }
+
+func TestAnalyzeEvents_StructuredErrorCodeMatch(t *testing.T) {
+	engine := NewSuggestionEngine()
+
+	// The "error" topic carries a structured error code while the free-text data
+	// has been reworded, so none of the keyword fallbacks match.
+	events := []DecodedEvent{
+		{
+			ContractID: "abc123",
+			Topics:     []string{"error", "contract_not_found"},
+			Data:       "the requested instance is absent from the ledger",
+		},
+	}
+
+	suggestions := engine.AnalyzeEvents(events)
+
+	found := false
+	for _, s := range suggestions {
+		if s.Rule == "contract_not_found" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Error("Expected contract_not_found to fire from the structured error code")
+	}
+}
+
+func TestAddCustomRule_StructuredArgumentTypes(t *testing.T) {
+	engine := NewSuggestionEngine()
+	engine.AddCustomRule(ErrorPattern{
+		Name:          "host_error",
+		ArgumentTypes: []string{"ScvError"},
+		Suggestion: Suggestion{
+			Rule:        "host_error",
+			Description: "Potential Fix: Inspect the host error returned by the contract.",
+			Confidence:  confidenceMedium,
+		},
+	})
+
+	events := []DecodedEvent{
+		{
+			ContractID: "abc123",
+			Topics:     []string{"core_metrics"},
+			Data:       "ScvError",
+		},
+	}
+
+	suggestions := engine.AnalyzeEvents(events)
+
+	found := false
+	for _, s := range suggestions {
+		if s.Rule == "host_error" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Error("Expected custom rule to match on the structured argument type")
+	}
+}
