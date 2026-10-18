@@ -207,9 +207,30 @@ func (h *RegressionHarness) testTransaction(
 	// Extract ledger entries
 	keys, err := extractLedgerKeysFromXDR(resp.ResultMetaXdr)
 	if err != nil {
-		result.ErrorMessage = fmt.Sprintf("failed to extract ledger keys: %v", err)
+		result.ErrorMessage = fmt.Sprintf("failed to extract ledger keys from result meta: %v", err)
 		return result
 	}
+
+	// Result meta contains changed entries; the envelope also identifies accounts
+	// and Soroban inputs needed to reconstruct the pre-transaction state. Merge both
+	// sources before asking the RPC for ledger entries.
+	envelopeKeys, err := ExtractLedgerKeysFromEnvelope(resp.EnvelopeXdr)
+	if err != nil {
+		result.ErrorMessage = fmt.Sprintf("failed to extract ledger keys from envelope: %v", err)
+		return result
+	}
+	keySet := make(map[string]struct{}, len(keys)+len(envelopeKeys))
+	for _, key := range keys {
+		keySet[key] = struct{}{}
+	}
+	for _, key := range envelopeKeys {
+		keySet[key] = struct{}{}
+	}
+	keys = keys[:0]
+	for key := range keySet {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 
 	// Fetch ledger entries from network
 	ledgerEntries, err := h.RPCClient.GetLedgerEntries(ctx, keys)
@@ -293,7 +314,7 @@ func (h *RegressionHarness) fetchFailedTransactions(
 }
 
 // extractLedgerKeysFromXDR extracts unique base64-encoded LedgerKey strings
-// from transaction result meta XDR by inspecting all ledger entry changes.
+// from the RPC TransactionResultMeta XDR by inspecting all ledger entry changes.
 func extractLedgerKeysFromXDR(resultMetaXdr string) ([]string, error) {
 	if resultMetaXdr == "" {
 		return []string{}, nil
@@ -310,91 +331,109 @@ func extractLedgerKeysFromXDR(resultMetaXdr string) ([]string, error) {
 	}
 
 	keysMap := make(map[string]struct{})
-	addKey := func(k xdr.LedgerKey) {
-		b, err := k.MarshalBinary()
-		if err == nil {
-			keysMap[base64.StdEncoding.EncodeToString(b)] = struct{}{}
+	addKey := func(key xdr.LedgerKey) error {
+		encoded, err := key.MarshalBinary()
+		if err != nil {
+			return fmt.Errorf("failed to marshal ledger key: %w", err)
 		}
+		keysMap[base64.StdEncoding.EncodeToString(encoded)] = struct{}{}
+		return nil
 	}
-
-	collectChanges := func(changes xdr.LedgerEntryChanges) {
-		for _, c := range changes {
-			switch c.Type {
-			case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
-				if c.Created != nil {
-					k, err := c.Created.LedgerKey()
-					if err == nil {
-						addKey(k)
-					}
-				}
-			case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
-				if c.Updated != nil {
-					k, err := c.Updated.LedgerKey()
-					if err == nil {
-						addKey(k)
-					}
-				}
-			case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
-				if c.Removed != nil {
-					addKey(*c.Removed)
-				}
-			case xdr.LedgerEntryChangeTypeLedgerEntryState:
-				if c.State != nil {
-					k, err := c.State.LedgerKey()
-					if err == nil {
-						addKey(k)
-					}
-				}
+	collectChanges := func(changes xdr.LedgerEntryChanges) error {
+		for i := range changes {
+			key, err := changes[i].LedgerKey()
+			if err != nil {
+				return fmt.Errorf("failed to extract ledger key from change %d: %w", i, err)
+			}
+			if err := addKey(key); err != nil {
+				return err
 			}
 		}
+		return nil
+	}
+	collectOperations := func(operations []xdr.OperationMeta) error {
+		for i := range operations {
+			if err := collectChanges(operations[i].Changes); err != nil {
+				return fmt.Errorf("operation %d: %w", i, err)
+			}
+		}
+		return nil
 	}
 
-	// 1. Collect fee processing changes
-	collectChanges(meta.FeeProcessing)
+	if err := collectChanges(meta.FeeProcessing); err != nil {
+		return nil, fmt.Errorf("fee processing: %w", err)
+	}
 
-	// 2. Collect transaction apply processing changes across versions V0..V3
+	// TransactionMeta is a versioned union. RPC resultMetaXdr currently uses
+	// versions 0 through 4; keep every before/after and operation change.
 	switch meta.TxApplyProcessing.V {
 	case 0:
 		if meta.TxApplyProcessing.Operations != nil {
-			for _, op := range *meta.TxApplyProcessing.Operations {
-				collectChanges(op.Changes)
+			if err := collectOperations(*meta.TxApplyProcessing.Operations); err != nil {
+				return nil, fmt.Errorf("transaction operations: %w", err)
 			}
 		}
 	case 1:
 		if v1 := meta.TxApplyProcessing.V1; v1 != nil {
-			collectChanges(v1.TxChanges)
-			for _, op := range v1.Operations {
-				collectChanges(op.Changes)
+			if err := collectChanges(v1.TxChanges); err != nil {
+				return nil, fmt.Errorf("transaction changes: %w", err)
+			}
+			if err := collectOperations(v1.Operations); err != nil {
+				return nil, fmt.Errorf("transaction operations: %w", err)
 			}
 		}
 	case 2:
 		if v2 := meta.TxApplyProcessing.V2; v2 != nil {
-			collectChanges(v2.TxChangesBefore)
-			collectChanges(v2.TxChangesAfter)
-			for _, op := range v2.Operations {
-				collectChanges(op.Changes)
+			if err := collectChanges(v2.TxChangesBefore); err != nil {
+				return nil, fmt.Errorf("transaction changes before: %w", err)
+			}
+			if err := collectOperations(v2.Operations); err != nil {
+				return nil, fmt.Errorf("transaction operations: %w", err)
+			}
+			if err := collectChanges(v2.TxChangesAfter); err != nil {
+				return nil, fmt.Errorf("transaction changes after: %w", err)
 			}
 		}
 	case 3:
 		if v3 := meta.TxApplyProcessing.V3; v3 != nil {
-			collectChanges(v3.TxChangesBefore)
-			collectChanges(v3.TxChangesAfter)
-			for _, op := range v3.Operations {
-				collectChanges(op.Changes)
+			if err := collectChanges(v3.TxChangesBefore); err != nil {
+				return nil, fmt.Errorf("transaction changes before: %w", err)
+			}
+			if err := collectOperations(v3.Operations); err != nil {
+				return nil, fmt.Errorf("transaction operations: %w", err)
+			}
+			if err := collectChanges(v3.TxChangesAfter); err != nil {
+				return nil, fmt.Errorf("transaction changes after: %w", err)
 			}
 		}
+	case 4:
+		if v4 := meta.TxApplyProcessing.V4; v4 != nil {
+			if err := collectChanges(v4.TxChangesBefore); err != nil {
+				return nil, fmt.Errorf("transaction changes before: %w", err)
+			}
+			for i := range v4.Operations {
+				if err := collectChanges(v4.Operations[i].Changes); err != nil {
+					return nil, fmt.Errorf("operation %d: %w", i, err)
+				}
+			}
+			if err := collectChanges(v4.TxChangesAfter); err != nil {
+				return nil, fmt.Errorf("transaction changes after: %w", err)
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unsupported TransactionMeta version: %d", meta.TxApplyProcessing.V)
 	}
 
 	res := make([]string, 0, len(keysMap))
-	for k := range keysMap {
-		res = append(res, k)
+	for key := range keysMap {
+		res = append(res, key)
 	}
 	sort.Strings(res)
 	return res, nil
 }
 
 // ExtractLedgerKeysFromEnvelope parses a base64 XDR transaction envelope and extracts
-// the LedgerKey for the source account and operation target accounts.
+// the LedgerKeys required to reconstruct its account and Soroban input state.
 func ExtractLedgerKeysFromEnvelope(envelopeXdr string) ([]string, error) {
 	if envelopeXdr == "" {
 		return []string{}, nil
@@ -404,70 +443,108 @@ func ExtractLedgerKeysFromEnvelope(envelopeXdr string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode envelope base64: %w", err)
 	}
-
 	var env xdr.TransactionEnvelope
 	if err := xdr.SafeUnmarshal(raw, &env); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal TransactionEnvelope: %w", err)
 	}
 
 	keysMap := make(map[string]struct{})
-	addAccountKey := func(accID xdr.AccountId) {
-		k := xdr.LedgerKey{
-			Type: xdr.LedgerEntryTypeAccount,
-			Account: &xdr.LedgerKeyAccount{
-				AccountId: accID,
-			},
+	addKey := func(key xdr.LedgerKey) error {
+		encoded, err := key.MarshalBinary()
+		if err != nil {
+			return fmt.Errorf("failed to marshal envelope ledger key: %w", err)
 		}
-		if b, err := k.MarshalBinary(); err == nil {
-			keysMap[base64.StdEncoding.EncodeToString(b)] = struct{}{}
+		keysMap[base64.StdEncoding.EncodeToString(encoded)] = struct{}{}
+		return nil
+	}
+	addAccountKey := func(account xdr.AccountId) error {
+		return addKey(xdr.LedgerKey{
+			Type:    xdr.LedgerEntryTypeAccount,
+			Account: &xdr.LedgerKeyAccount{AccountId: account},
+		})
+	}
+	addFootprint := func(ext xdr.TransactionExt) error {
+		if ext.V != 1 || ext.SorobanData == nil {
+			return nil
 		}
+		for _, key := range ext.SorobanData.Resources.Footprint.ReadOnly {
+			if err := addKey(key); err != nil {
+				return err
+			}
+		}
+		for _, key := range ext.SorobanData.Resources.Footprint.ReadWrite {
+			if err := addKey(key); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
-	var txOperations []xdr.Operation
-	var sourceAccount xdr.MuxedAccount
-
+	var operations []xdr.Operation
+	var source xdr.MuxedAccount
+	var txExt *xdr.TransactionExt
 	switch env.Type {
 	case xdr.EnvelopeTypeEnvelopeTypeTxV0:
-		if env.V0 != nil {
-			sourceAccount = xdr.MuxedAccount{
-				Type:    xdr.CryptoKeyTypeKeyTypeEd25519,
-				Ed25519: &env.V0.Tx.SourceAccountEd25519,
-			}
-			txOperations = env.V0.Tx.Operations
+		if env.V0 == nil {
+			return nil, fmt.Errorf("transaction V0 envelope is missing its payload")
 		}
+		source = xdr.MuxedAccount{Type: xdr.CryptoKeyTypeKeyTypeEd25519, Ed25519: &env.V0.Tx.SourceAccountEd25519}
+		operations = env.V0.Tx.Operations
 	case xdr.EnvelopeTypeEnvelopeTypeTx:
-		if env.V1 != nil {
-			sourceAccount = env.V1.Tx.SourceAccount
-			txOperations = env.V1.Tx.Operations
+		if env.V1 == nil {
+			return nil, fmt.Errorf("transaction envelope is missing its payload")
 		}
+		source = env.V1.Tx.SourceAccount
+		operations = env.V1.Tx.Operations
+		txExt = &env.V1.Tx.Ext
 	case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
-		if env.FeeBump != nil && env.FeeBump.Tx.InnerTx.Type == xdr.EnvelopeTypeEnvelopeTypeTx && env.FeeBump.Tx.InnerTx.V1 != nil {
-			addAccountKey(env.FeeBump.Tx.FeeSource.ToAccountId())
-			sourceAccount = env.FeeBump.Tx.InnerTx.V1.Tx.SourceAccount
-			txOperations = env.FeeBump.Tx.InnerTx.V1.Tx.Operations
+		if env.FeeBump == nil || env.FeeBump.Tx.InnerTx.Type != xdr.EnvelopeTypeEnvelopeTypeTx || env.FeeBump.Tx.InnerTx.V1 == nil {
+			return nil, fmt.Errorf("unsupported or incomplete fee bump envelope")
 		}
+		if err := addAccountKey(env.FeeBump.Tx.FeeSource.ToAccountId()); err != nil {
+			return nil, err
+		}
+		inner := env.FeeBump.Tx.InnerTx.V1.Tx
+		source = inner.SourceAccount
+		operations = inner.Operations
+		txExt = &inner.Ext
+	default:
+		return nil, fmt.Errorf("unsupported transaction envelope type: %s", env.Type)
 	}
 
-	addAccountKey(sourceAccount.ToAccountId())
-	for _, op := range txOperations {
+	if err := addAccountKey(source.ToAccountId()); err != nil {
+		return nil, err
+	}
+	if txExt != nil {
+		if err := addFootprint(*txExt); err != nil {
+			return nil, err
+		}
+	}
+	for i, op := range operations {
 		if op.SourceAccount != nil {
-			addAccountKey(op.SourceAccount.ToAccountId())
+			if err := addAccountKey(op.SourceAccount.ToAccountId()); err != nil {
+				return nil, fmt.Errorf("operation %d source: %w", i, err)
+			}
 		}
 		switch op.Body.Type {
 		case xdr.OperationTypePayment:
-			if p := op.Body.PaymentOp; p != nil {
-				addAccountKey(p.Destination.ToAccountId())
+			if payment := op.Body.PaymentOp; payment != nil {
+				if err := addAccountKey(payment.Destination.ToAccountId()); err != nil {
+					return nil, fmt.Errorf("operation %d payment destination: %w", i, err)
+				}
 			}
 		case xdr.OperationTypeCreateAccount:
-			if ca := op.Body.CreateAccountOp; ca != nil {
-				addAccountKey(ca.Destination)
+			if create := op.Body.CreateAccountOp; create != nil {
+				if err := addAccountKey(create.Destination); err != nil {
+					return nil, fmt.Errorf("operation %d create-account destination: %w", i, err)
+				}
 			}
 		}
 	}
 
 	res := make([]string, 0, len(keysMap))
-	for k := range keysMap {
-		res = append(res, k)
+	for key := range keysMap {
+		res = append(res, key)
 	}
 	sort.Strings(res)
 	return res, nil

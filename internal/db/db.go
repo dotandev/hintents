@@ -15,36 +15,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// CurrentSchemaVersion defines the latest database schema version.
-const CurrentSchemaVersion = 1
-
-// migration represents a single schema version migration step.
-type migration struct {
-	version int
-	query   string
-}
-
-// migrations lists all ordered schema migrations.
-var migrations = []migration{
-	{
-		version: 1,
-		query: `
-		CREATE TABLE IF NOT EXISTS sessions (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			tx_hash TEXT NOT NULL,
-			network TEXT NOT NULL,
-			status TEXT,
-			error_msg TEXT,
-			events TEXT,
-			logs TEXT,
-			timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
-		CREATE INDEX IF NOT EXISTS idx_sessions_tx_hash ON sessions(tx_hash);
-		CREATE INDEX IF NOT EXISTS idx_sessions_error ON sessions(error_msg);
-		`,
-	},
-}
-
 // Session represents a debugging session result
 type Session struct {
 	ID        int64     `json:"id"`
@@ -87,58 +57,25 @@ func InitDB() (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// SchemaVersion returns the current PRAGMA user_version of the database.
-func (s *Store) SchemaVersion() (int, error) {
-	return getSchemaVersion(s.db)
-}
-
-func getSchemaVersion(db *sql.DB) (int, error) {
-	var version int
-	err := db.QueryRow("PRAGMA user_version;").Scan(&version)
-	if err != nil {
-		return 0, fmt.Errorf("failed to query schema version: %w", err)
-	}
-	return version, nil
-}
-
 func initSchema(db *sql.DB) error {
-	currentVersion, err := getSchemaVersion(db)
+	query := `
+	CREATE TABLE IF NOT EXISTS sessions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		tx_hash TEXT NOT NULL,
+		network TEXT NOT NULL,
+		status TEXT,
+		error_msg TEXT,
+		events TEXT,
+		logs TEXT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_sessions_tx_hash ON sessions(tx_hash);
+	CREATE INDEX IF NOT EXISTS idx_sessions_error ON sessions(error_msg);
+	`
+	_, err := db.Exec(query)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init schema: %w", err)
 	}
-
-	for _, m := range migrations {
-		if currentVersion < m.version {
-			if err := applyMigration(db, m); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func applyMigration(db *sql.DB, m migration) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction for migration %d: %w", m.version, err)
-	}
-
-	if _, err := tx.Exec(m.query); err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("failed to apply migration %d: %w", m.version, err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit migration %d: %w", m.version, err)
-	}
-
-	// Update PRAGMA user_version outside the transaction
-	setUserVersionQuery := fmt.Sprintf("PRAGMA user_version = %d;", m.version)
-	if _, err := db.Exec(setUserVersionQuery); err != nil {
-		return fmt.Errorf("failed to set user_version to %d: %w", m.version, err)
-	}
-
 	return nil
 }
 

@@ -3,10 +3,7 @@
 
 package errors
 
-import (
-	stdErrors "errors"
-	"strings"
-)
+import stdErrors "errors"
 
 // ErstErrorCode is a unified error code type for RPC and Simulator boundaries.
 type ErstErrorCode string
@@ -119,53 +116,5 @@ func ClassifyError(err error) *ErstError {
 		Code:    ErstUnknown,
 		Message: err.Error(),
 		OrigErr: err,
-	}
-}
-
-// MapSimulatorError converts raw simulator error payloads into standardized ErstErrorCode.
-// Handles trap, timeout, OOM, decode failure, and general simulation failures.
-func MapSimulatorError(msg string, rawCode string) ErstErrorCode {
-	// First check structured rawCode if present
-	switch strings.ToUpper(rawCode) {
-	case "WASM_TRAP", "CONTRACT_TRAP", "TRAP":
-		return ErstSimCrash
-	case "TIMEOUT", "EXECUTION_TIMEOUT", "WALL_CLOCK_TIMEOUT":
-		return ErstRPCTimeout
-	case "OOM", "OUT_OF_MEMORY", "MEMORY_LIMIT_EXCEEDED", "ERR_MEMORY_LIMIT_EXCEEDED":
-		return ErstSimulationFailed
-	case "DECODE_FAILURE", "DECODE_FAILED", "UNMARSHAL_FAILED", "INVALID_INPUT", "VALIDATION_ERROR":
-		return ErstValidationFailed
-	case "SIMULATION_FAILED", "EXECUTION_FAILED":
-		return ErstSimulationFailed
-	}
-
-	// Fallback: Inspect message payload text
-	lower := strings.ToLower(msg)
-	switch {
-	case strings.Contains(lower, "wasm trap"),
-		strings.Contains(lower, "unreachable"),
-		strings.Contains(lower, "stack overflow"),
-		strings.Contains(lower, "host error"),
-		strings.Contains(lower, "trap"):
-		return ErstSimCrash
-
-	case strings.Contains(lower, "timeout"),
-		strings.Contains(lower, "timed out"),
-		strings.Contains(lower, "deadline exceeded"):
-		return ErstRPCTimeout
-
-	case strings.Contains(lower, "out of memory"),
-		strings.Contains(lower, "memory limit exceeded"),
-		strings.Contains(lower, "oom"):
-		return ErstSimulationFailed
-
-	case strings.Contains(lower, "decode"),
-		strings.Contains(lower, "unmarshal"),
-		strings.Contains(lower, "invalid xdr"),
-		strings.Contains(lower, "malformed"):
-		return ErstValidationFailed
-
-	default:
-		return ErstSimulationFailed
 	}
 }

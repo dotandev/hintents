@@ -9,11 +9,8 @@
 //! into plain strings so the simulator can surface them in `SimulationResponse.logs`.
 
 use crate::types::symbol;
-use serde::{Deserialize, Serialize};
 use soroban_env_host::events::Events;
 use soroban_env_host::xdr::{ContractEventBody, ContractEventType, ScString, ScVal};
-use std::collections::HashMap;
-use std::path::Path;
 
 /// Extracts debug log strings emitted by contracts via `log_from_linear_memory`.
 ///
@@ -72,97 +69,6 @@ fn scval_to_display(val: &ScVal) -> String {
         ScVal::Bool(b) => b.to_string(),
         ScVal::Void => "void".to_string(),
         other => format!("{:?}", other),
-    }
-}
-
-/// A stub definition for overriding a specific host function during simulation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct HostFnStub {
-    /// Name of the host function (e.g. "get_ledger_timestamp", "prng_reseed", "get_sequence").
-    pub function_name: String,
-    /// Value to return when intercepted, represented as a generic JSON value.
-    pub return_value: serde_json::Value,
-    /// Optional limit on how many times the stub will fire. None = infinite.
-    pub max_calls: Option<usize>,
-}
-
-/// JSON configuration file schema for host function overrides.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct HostFnOverrideConfig {
-    pub overrides: Vec<HostFnStub>,
-}
-
-/// Registry for intercepting and overriding host functions in test and replay mode.
-#[derive(Debug, Clone, Default)]
-pub struct HostFunctionOverrideRegistry {
-    stubs: HashMap<String, HostFnStub>,
-    call_counts: HashMap<String, usize>,
-}
-
-impl HostFunctionOverrideRegistry {
-    /// Creates a new empty override registry.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Loads overrides from a JSON configuration string.
-    pub fn from_json(json_str: &str) -> Result<Self, serde_json::Error> {
-        let config: HostFnOverrideConfig = serde_json::from_str(json_str)?;
-        let mut registry = Self::new();
-        for stub in config.overrides {
-            registry.register_stub(stub);
-        }
-        Ok(registry)
-    }
-
-    /// Loads overrides from a JSON configuration file.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
-        let content = std::fs::read_to_string(path)?;
-        Self::from_json(&content).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-    }
-
-    /// Registers a new host function override stub.
-    pub fn register_stub(&mut self, stub: HostFnStub) {
-        self.stubs.insert(stub.function_name.clone(), stub);
-    }
-
-    /// Checks if a host function has an active override configured.
-    pub fn is_overridden(&self, function_name: &str) -> bool {
-        if let Some(stub) = self.stubs.get(function_name) {
-            if let Some(max) = stub.max_calls {
-                let current = self.call_counts.get(function_name).copied().unwrap_or(0);
-                return current < max;
-            }
-            return true;
-        }
-        false
-    }
-
-    /// Intercepts a host function call and returns its configured stub value, incrementing the counter.
-    /// Returns `None` if no override is configured or if `max_calls` has been reached.
-    pub fn intercept(&mut self, function_name: &str) -> Option<&serde_json::Value> {
-        if let Some(stub) = self.stubs.get(function_name) {
-            let count = self.call_counts.entry(function_name.to_string()).or_insert(0);
-            if let Some(max) = stub.max_calls {
-                if *count >= max {
-                    return None;
-                }
-            }
-            *count += 1;
-            Some(&stub.return_value)
-        } else {
-            None
-        }
-    }
-
-    /// Returns how many times a given stubbed host function has been intercepted.
-    pub fn get_call_count(&self, function_name: &str) -> usize {
-        self.call_counts.get(function_name).copied().unwrap_or(0)
-    }
-
-    /// Resets all invocation counts to zero.
-    pub fn reset_counts(&mut self) {
-        self.call_counts.clear();
     }
 }
 
@@ -278,48 +184,5 @@ mod tests {
     #[test]
     fn empty_events_produces_empty_log() {
         assert!(extract_debug_logs(&Events(vec![])).is_empty());
-    }
-
-    #[test]
-    fn test_override_registry_from_json() {
-        let json_config = r#"{
-            "overrides": [
-                {
-                    "function_name": "get_ledger_timestamp",
-                    "return_value": 1700000000,
-                    "max_calls": 2
-                },
-                {
-                    "function_name": "prng_reseed",
-                    "return_value": "mock_seed_12345"
-                }
-            ]
-        }"#;
-
-        let mut registry = HostFunctionOverrideRegistry::from_json(json_config)
-            .expect("valid JSON configuration");
-
-        assert!(registry.is_overridden("get_ledger_timestamp"));
-        assert!(registry.is_overridden("prng_reseed"));
-        assert!(!registry.is_overridden("unknown_fn"));
-
-        // Intercept get_ledger_timestamp
-        let val1 = registry.intercept("get_ledger_timestamp").expect("stubbed");
-        assert_eq!(val1, &serde_json::json!(1700000000));
-        assert_eq!(registry.get_call_count("get_ledger_timestamp"), 1);
-
-        let val2 = registry.intercept("get_ledger_timestamp").expect("stubbed second call");
-        assert_eq!(val2, &serde_json::json!(1700000000));
-        assert_eq!(registry.get_call_count("get_ledger_timestamp"), 2);
-
-        // Exceeded max_calls = 2
-        assert!(!registry.is_overridden("get_ledger_timestamp"));
-        assert!(registry.intercept("get_ledger_timestamp").is_none());
-
-        // Reset counts re-enables interception
-        registry.reset_counts();
-        assert_eq!(registry.get_call_count("get_ledger_timestamp"), 0);
-        assert!(registry.is_overridden("get_ledger_timestamp"));
-        assert!(registry.intercept("get_ledger_timestamp").is_some());
     }
 }

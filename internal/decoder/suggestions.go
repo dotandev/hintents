@@ -25,7 +25,6 @@ type ruleMatch struct {
 	keywordMatches  int
 	exactKeywordHit bool
 	eventCheckMatch bool
-	structuredMatch bool
 }
 
 type scoredSuggestion struct {
@@ -33,21 +32,12 @@ type scoredSuggestion struct {
 	score      int
 }
 
-// StructuredCriteria defines exact structured attributes to match on a DecodedEvent
-type StructuredCriteria struct {
-	ErrorType        string   `json:"error_type,omitempty"`
-	ErrorCode        *int     `json:"error_code,omitempty"`
-	ContractFunction string   `json:"contract_function,omitempty"`
-	ArgTypes         []string `json:"arg_types,omitempty"`
-}
-
-// ErrorPattern defines a heuristic or structured rule for error detection
+// ErrorPattern defines a heuristic rule for error detection
 type ErrorPattern struct {
-	Name            string
-	Keywords        []string
-	EventChecks     []func(DecodedEvent) bool
-	StructuredMatch *StructuredCriteria
-	Suggestion      Suggestion
+	Name        string
+	Keywords    []string
+	EventChecks []func(DecodedEvent) bool
+	Suggestion  Suggestion
 }
 
 // SuggestionEngine provides heuristic-based error suggestions
@@ -64,21 +54,12 @@ func NewSuggestionEngine() *SuggestionEngine {
 	return engine
 }
 
-// intPtr is a helper to return pointer to int
-func intPtr(i int) *int {
-	return &i
-}
-
 // loadDefaultRules initializes the default heuristic rules
 func (e *SuggestionEngine) loadDefaultRules() {
 	// Rule 1: Uninitialized contract
 	e.rules = append(e.rules, ErrorPattern{
 		Name:     "uninitialized_contract",
 		Keywords: []string{"empty", "not found", "missing", "null"},
-		StructuredMatch: &StructuredCriteria{
-			ErrorType: "StorageError",
-			ErrorCode: intPtr(3),
-		},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -101,10 +82,6 @@ func (e *SuggestionEngine) loadDefaultRules() {
 	e.rules = append(e.rules, ErrorPattern{
 		Name:     "missing_authorization",
 		Keywords: []string{"auth", "unauthorized", "permission", "signature"},
-		StructuredMatch: &StructuredCriteria{
-			ErrorType: "AuthError",
-			ErrorCode: intPtr(5),
-		},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -127,10 +104,6 @@ func (e *SuggestionEngine) loadDefaultRules() {
 	e.rules = append(e.rules, ErrorPattern{
 		Name:     "insufficient_balance",
 		Keywords: []string{"balance", "insufficient", "underfunded", "funds"},
-		StructuredMatch: &StructuredCriteria{
-			ErrorType: "BalanceError",
-			ErrorCode: intPtr(10),
-		},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -153,10 +126,6 @@ func (e *SuggestionEngine) loadDefaultRules() {
 	e.rules = append(e.rules, ErrorPattern{
 		Name:     "invalid_parameters",
 		Keywords: []string{"invalid", "malformed", "bad", "parameter"},
-		StructuredMatch: &StructuredCriteria{
-			ErrorType: "ParameterError",
-			ErrorCode: intPtr(1),
-		},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -179,10 +148,6 @@ func (e *SuggestionEngine) loadDefaultRules() {
 	e.rules = append(e.rules, ErrorPattern{
 		Name:     "contract_not_found",
 		Keywords: []string{"not found", "missing contract", "no contract"},
-		StructuredMatch: &StructuredCriteria{
-			ErrorType: "ContractNotFound",
-			ErrorCode: intPtr(2),
-		},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				return e.ContractID == "" || e.ContractID == "0000000000000000000000000000000000000000000000000000000000000000"
@@ -199,10 +164,6 @@ func (e *SuggestionEngine) loadDefaultRules() {
 	e.rules = append(e.rules, ErrorPattern{
 		Name:     "resource_limit_exceeded",
 		Keywords: []string{"limit", "exceeded", "quota", "budget"},
-		StructuredMatch: &StructuredCriteria{
-			ErrorType: "BudgetExceeded",
-			ErrorCode: intPtr(4),
-		},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -225,10 +186,6 @@ func (e *SuggestionEngine) loadDefaultRules() {
 	e.rules = append(e.rules, ErrorPattern{
 		Name:     "reentrancy_detected",
 		Keywords: []string{"reentrant", "recursive", "loop"},
-		StructuredMatch: &StructuredCriteria{
-			ErrorType: "ReentrancyError",
-			ErrorCode: intPtr(6),
-		},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
 				for _, topic := range e.Topics {
@@ -287,55 +244,6 @@ func (e *SuggestionEngine) AnalyzeEvents(events []DecodedEvent) []Suggestion {
 
 func (e *SuggestionEngine) matchRule(rule ErrorPattern, event DecodedEvent) (ruleMatch, bool) {
 	match := ruleMatch{}
-
-	// 1. First priority: Match on structured fields of the decoded diagnostic event
-	if rule.StructuredMatch != nil {
-		sm := rule.StructuredMatch
-		structuredHit := true
-		criteriaChecked := false
-
-		if sm.ErrorType != "" {
-			criteriaChecked = true
-			if !strings.EqualFold(event.ErrorType, sm.ErrorType) {
-				structuredHit = false
-			}
-		}
-
-		if sm.ErrorCode != nil {
-			criteriaChecked = true
-			if event.ErrorCode == nil || *event.ErrorCode != *sm.ErrorCode {
-				structuredHit = false
-			}
-		}
-
-		if sm.ContractFunction != "" {
-			criteriaChecked = true
-			if !strings.EqualFold(event.ContractFunction, sm.ContractFunction) {
-				structuredHit = false
-			}
-		}
-
-		if len(sm.ArgTypes) > 0 {
-			criteriaChecked = true
-			if len(event.ArgTypes) < len(sm.ArgTypes) {
-				structuredHit = false
-			} else {
-				for i, arg := range sm.ArgTypes {
-					if !strings.EqualFold(event.ArgTypes[i], arg) {
-						structuredHit = false
-						break
-					}
-				}
-			}
-		}
-
-		if criteriaChecked && structuredHit {
-			match.structuredMatch = true
-			return match, true
-		}
-	}
-
-	// 2. Fallback: String and keyword heuristic matching
 	topics := make([]string, 0, len(event.Topics))
 	for _, topic := range event.Topics {
 		topics = append(topics, strings.ToLower(topic))
@@ -373,9 +281,6 @@ func (e *SuggestionEngine) matchRule(rule ErrorPattern, event DecodedEvent) (rul
 
 func (m ruleMatch) specificityScore() int {
 	score := 0
-	if m.structuredMatch {
-		score += 10
-	}
 	if m.eventCheckMatch {
 		score += 2
 	}

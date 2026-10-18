@@ -248,36 +248,3 @@ func TestChecksumOf(t *testing.T) {
 	assert.NotEqual(t, c1, c3)
 	assert.Len(t, c1, 64) // SHA-256 hex = 64 chars
 }
-
-func TestVerifySimulationSignatures(t *testing.T) {
-	seedHex, _ := generateTestKey(t)
-	ef := NewEnvelopeFile("testnet", "Test SDF Network ; September 2015", "AAAA==", EnvelopeMetadata{})
-
-	// 1. When verification is disabled, it succeeds even with no signatures
-	assert.NoError(t, ef.VerifySimulationSignatures(false))
-	assert.NoError(t, VerifyOfflineSignatures(ef, false))
-
-	// 2. When verification is enabled but envelope has no signatures, it returns error
-	err := ef.VerifySimulationSignatures(true)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no signatures present")
-
-	// 3. Sign the envelope and verify it succeeds
-	require.NoError(t, SignEnvelope(ef, seedHex))
-	assert.NoError(t, ef.VerifySimulationSignatures(true))
-	assert.NoError(t, VerifyOfflineSignatures(ef, true))
-
-	// 4. Verify that setting VerifySignatures flag on struct enforces verification
-	ef.VerifySignatures = true
-	assert.NoError(t, ef.VerifySimulationSignatures(false)) // enabled via struct field
-
-	// 5. Tampered envelope fails verification when enabled
-	ef.EnvelopeXDR = "BBBB=="
-	err = ef.VerifySimulationSignatures(true)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed Ed25519 verification")
-
-	// 6. Nil envelope error
-	assert.Error(t, VerifyOfflineSignatures(nil, true))
-}
-

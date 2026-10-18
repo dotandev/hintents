@@ -251,6 +251,39 @@ func TestExtractLedgerKeysFromXDR(t *testing.T) {
 		}
 	})
 
+	t.Run("parses V4 restored changes", func(t *testing.T) {
+		accID := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
+		entry := xdr.LedgerEntry{
+			Data: xdr.LedgerEntryData{
+				Type:    xdr.LedgerEntryTypeAccount,
+				Account: &xdr.AccountEntry{AccountId: accID},
+			},
+		}
+		changes := xdr.LedgerEntryChanges{{
+			Type:     xdr.LedgerEntryChangeTypeLedgerEntryRestored,
+			Restored: &entry,
+		}}
+		txMeta, err := xdr.NewTransactionMeta(4, xdr.TransactionMetaV4{
+			TxChangesBefore: changes,
+		})
+		require.NoError(t, err)
+		result := xdr.TransactionResult{
+			Result: xdr.TransactionResultResult{
+				Code:    xdr.TransactionResultCodeTxFailed,
+				Results: &[]xdr.OperationResult{},
+			},
+		}
+		metaBytes, err := (xdr.TransactionResultMeta{
+			Result:            xdr.TransactionResultPair{Result: result},
+			TxApplyProcessing: txMeta,
+		}).MarshalBinary()
+		require.NoError(t, err)
+
+		keys, err := extractLedgerKeysFromXDR(base64.StdEncoding.EncodeToString(metaBytes))
+		require.NoError(t, err)
+		assert.Len(t, keys, 1)
+	})
+
 	t.Run("extracts keys from transaction envelope", func(t *testing.T) {
 		srcID := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
 		dstID := xdr.MustAddress("GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN")

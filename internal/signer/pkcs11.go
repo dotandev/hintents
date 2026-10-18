@@ -6,7 +6,6 @@ package signer
 import (
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"os"
 	"plugin"
 	"sync"
@@ -54,45 +53,6 @@ type Pkcs11Config struct {
 
 	// KeyIDHex selects a private key by its CKA_ID attribute (hex-encoded).
 	KeyIDHex string
-}
-
-// String implements fmt.Stringer to ensure the PIN is redacted in printed output.
-func (c Pkcs11Config) String() string {
-	return fmt.Sprintf("{ModulePath:%s PIN:[REDACTED] TokenLabel:%s SlotIndex:%d KeyLabel:%s KeyIDHex:%s}",
-		c.ModulePath, c.TokenLabel, c.SlotIndex, c.KeyLabel, c.KeyIDHex)
-}
-
-// Format implements fmt.Formatter to prevent PIN disclosure across %v, %+v, %#v, and %s formatting verbs.
-func (c Pkcs11Config) Format(f fmt.State, verb rune) {
-	switch verb {
-	case 's':
-		fmt.Fprint(f, c.String())
-	case 'v':
-		if f.Flag('+') {
-			fmt.Fprintf(f, "{ModulePath:%s PIN:[REDACTED] TokenLabel:%s SlotIndex:%d KeyLabel:%s KeyIDHex:%s}",
-				c.ModulePath, c.TokenLabel, c.SlotIndex, c.KeyLabel, c.KeyIDHex)
-		} else if f.Flag('#') {
-			fmt.Fprintf(f, "signer.Pkcs11Config{ModulePath:%q, PIN:%q, TokenLabel:%q, SlotIndex:%d, KeyLabel:%q, KeyIDHex:%q}",
-				c.ModulePath, "[REDACTED]", c.TokenLabel, c.SlotIndex, c.KeyLabel, c.KeyIDHex)
-		} else {
-			fmt.Fprintf(f, "{%s [REDACTED] %s %d %s %s}",
-				c.ModulePath, c.TokenLabel, c.SlotIndex, c.KeyLabel, c.KeyIDHex)
-		}
-	default:
-		fmt.Fprintf(f, "%%!%c(signer.Pkcs11Config=%s)", verb, c.String())
-	}
-}
-
-// LogValue implements slog.LogValuer to ensure PKCS#11 PIN is redacted in structured logs.
-func (c Pkcs11Config) LogValue() slog.Value {
-	return slog.GroupValue(
-		slog.String("module_path", c.ModulePath),
-		slog.String("pin", "[REDACTED]"),
-		slog.String("token_label", c.TokenLabel),
-		slog.Int("slot_index", c.SlotIndex),
-		slog.String("key_label", c.KeyLabel),
-		slog.String("key_id_hex", c.KeyIDHex),
-	)
 }
 
 // Pkcs11ConfigFromEnv constructs a Pkcs11Config from environment variables,

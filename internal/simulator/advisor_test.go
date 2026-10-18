@@ -6,7 +6,6 @@ package simulator
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -166,56 +165,4 @@ type failingProvider struct{}
 
 func (f *failingProvider) FetchBaselines(_ context.Context) (*Baselines, error) {
 	return nil, fmt.Errorf("network unavailable")
-}
-
-func TestAdvisor_AnalyzeFootprintUsage_AllAccessed(t *testing.T) {
-	declared := []string{"keyA", "keyB"}
-	accessed := []string{"keyA", "keyB", "otherKey"}
-
-	opt := AnalyzeFootprintUsage(declared, accessed)
-	assert.Empty(t, opt.UnusedReadOnlyKeys)
-	assert.Equal(t, int64(0), opt.EstimatedSaving)
-	assert.Empty(t, opt.Tips)
-}
-
-func TestAdvisor_AnalyzeFootprintUsage_UnusedKeys(t *testing.T) {
-	declared := []string{"keyA", "keyUnused1", "keyB", "keyUnused2"}
-	accessed := []string{"keyA", "keyB"}
-
-	opt := AnalyzeFootprintUsage(declared, accessed)
-	assert.Len(t, opt.UnusedReadOnlyKeys, 2)
-	assert.Contains(t, opt.UnusedReadOnlyKeys, "keyUnused1")
-	assert.Contains(t, opt.UnusedReadOnlyKeys, "keyUnused2")
-	assert.Equal(t, int64(400), opt.EstimatedSaving) // 2 keys * 200 stroops
-	assert.Len(t, opt.Tips, 1)
-	assert.Equal(t, "warning", opt.Tips[0].Severity)
-	assert.Contains(t, opt.Tips[0].Message, "400 stroops")
-}
-
-func TestAdvisor_AnalyseWithFootprint_Integration(t *testing.T) {
-	advisor := NewGasOptimizationAdvisor(NewStaticBaselineProvider(baselineForTest()))
-	assert.NoError(t, advisor.SyncBaselines(context.Background()))
-
-	gas := &GasEstimation{
-		CPUCost:                8_000_000,
-		MemoryCost:             4_000_000,
-		EstimatedFeeLowerBound: 800,
-	}
-
-	declared := []string{"keyA", "keyUnused"}
-	accessed := []string{"keyA"}
-
-	report := advisor.AnalyseWithFootprint(gas, declared, accessed)
-	assert.NotNil(t, report.FootprintOptimization)
-	assert.Len(t, report.FootprintOptimization.UnusedReadOnlyKeys, 1)
-	assert.Equal(t, int64(200), report.FootprintOptimization.EstimatedSaving)
-
-	foundFootprintTip := false
-	for _, tip := range report.Tips {
-		if tip.Severity == "warning" && strings.Contains(tip.Message, "unused read-only footprint key") {
-			foundFootprintTip = true
-			break
-		}
-	}
-	assert.True(t, foundFootprintTip, "expected footprint warning tip in report")
 }

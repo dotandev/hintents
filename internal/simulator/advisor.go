@@ -98,11 +98,10 @@ type Tip struct {
 
 // AdvisorReport is the result of analysing a GasEstimation.
 type AdvisorReport struct {
-	Efficient             bool
-	Score                 float64 // 0–100, higher is better
-	Tips                  []Tip
-	Baselines             Baselines
-	FootprintOptimization *FootprintOptimization `json:"footprint_optimization,omitempty"`
+	Efficient bool
+	Score     float64 // 0–100, higher is better
+	Tips      []Tip
+	Baselines Baselines
 }
 
 // GasOptimizationAdvisor scores a GasEstimation against dynamic baselines
@@ -208,76 +207,4 @@ func (a *GasOptimizationAdvisor) Analyse(gas *GasEstimation) AdvisorReport {
 		Tips:      tips,
 		Baselines: bl,
 	}
-}
-
-// DefaultReadOnlyKeyFeeStroops is the estimated fee overhead in stroops for each declared read-only footprint key.
-const DefaultReadOnlyKeyFeeStroops int64 = 200
-
-// FootprintOptimization holds details about unused footprint entries and potential fee savings.
-type FootprintOptimization struct {
-	UnusedReadOnlyKeys []string `json:"unused_read_only_keys"`
-	EstimatedSaving    int64    `json:"estimated_saving_stroops"`
-	Tips               []Tip    `json:"tips"`
-}
-
-// AnalyzeFootprintUsage compares declared read-only footprint keys with keys actually accessed during simulation,
-// listing all unused keys along with estimated fee savings.
-func AnalyzeFootprintUsage(declaredReadOnly []string, accessedKeys []string) FootprintOptimization {
-	accessedMap := make(map[string]bool, len(accessedKeys))
-	for _, k := range accessedKeys {
-		accessedMap[k] = true
-	}
-
-	var unused []string
-	for _, k := range declaredReadOnly {
-		if !accessedMap[k] {
-			unused = append(unused, k)
-		}
-	}
-
-	saving := int64(len(unused)) * DefaultReadOnlyKeyFeeStroops
-	var tips []Tip
-	if len(unused) > 0 {
-		tips = append(tips, Tip{
-			Severity: "warning",
-			Message: fmt.Sprintf(
-				"Found %d unused read-only footprint key(s) (e.g. %s) — removing them could save ~%d stroops in base fees",
-				len(unused), truncate(unused[0], 25), saving,
-			),
-		})
-	}
-
-	return FootprintOptimization{
-		UnusedReadOnlyKeys: unused,
-		EstimatedSaving:    saving,
-		Tips:               tips,
-	}
-}
-
-// AnalyzeFootprintUsage on GasOptimizationAdvisor delegates to the standalone AnalyzeFootprintUsage function.
-func (a *GasOptimizationAdvisor) AnalyzeFootprintUsage(declaredReadOnly []string, accessedKeys []string) FootprintOptimization {
-	return AnalyzeFootprintUsage(declaredReadOnly, accessedKeys)
-}
-
-// AnalyseWithFootprint scores gas costs and checks for unused footprint keys.
-func (a *GasOptimizationAdvisor) AnalyseWithFootprint(gas *GasEstimation, declaredReadOnly []string, accessedKeys []string) AdvisorReport {
-	report := a.Analyse(gas)
-
-	opt := AnalyzeFootprintUsage(declaredReadOnly, accessedKeys)
-	report.FootprintOptimization = &opt
-
-	if len(opt.UnusedReadOnlyKeys) > 0 {
-		report.Tips = append(report.Tips, opt.Tips...)
-		penalty := float64(len(opt.UnusedReadOnlyKeys)) * 5.0
-		if penalty > 25.0 {
-			penalty = 25.0
-		}
-		report.Score -= penalty
-		if report.Score < 0 {
-			report.Score = 0
-		}
-		report.Efficient = report.Score >= 70
-	}
-
-	return report
 }
