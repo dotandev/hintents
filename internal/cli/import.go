@@ -33,6 +33,10 @@ type ImportConfig struct {
 	Token string
 	// Timeout bounds the whole import operation (default: 60s).
 	Timeout time.Duration
+	// DryRun executes the full fetch + merge pipeline against an in-memory
+	// clone of the snapshot and discards the result: nothing is created or
+	// modified on disk.
+	DryRun bool
 }
 
 // ImportResult summarizes what was written into the snapshot.
@@ -47,6 +51,9 @@ type ImportResult struct {
 	Contracts []string
 	// Fingerprint is the deterministic snapshot fingerprint.
 	Fingerprint string
+	// DryRun reports that the import was simulated in memory and that no
+	// snapshot file was created or modified.
+	DryRun bool
 }
 
 // ImportNetworkState fetches contract data for the given contracts/keys from a
@@ -59,6 +66,11 @@ type ImportResult struct {
 //
 // If OutputPath already exists, the fetched entries are merged into the
 // existing snapshot (fetched values win), enabling incremental imports.
+//
+// When cfg.DryRun is true the same fetch + merge runs against an in-memory
+// clone and the result is discarded, so the snapshot file is never touched.
+// This lets callers preview the entries and fingerprint an import would
+// produce before committing it to the local store.
 func ImportNetworkState(ctx context.Context, cfg ImportConfig) (*ImportResult, error) {
 	if cfg.OutputPath == "" {
 		return nil, fmt.Errorf("import: OutputPath is required")
@@ -128,15 +140,20 @@ func ImportNetworkState(ctx context.Context, cfg ImportConfig) (*ImportResult, e
 		}
 	}
 
-	if dir := filepath.Dir(cfg.OutputPath); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, fmt.Errorf("import: failed to create output directory: %w", err)
-		}
-	}
-
+	// The merge above operated on an in-memory clone of any existing snapshot.
+	// In dry-run mode we stop here: the clone is discarded and the file on
+	// disk (if any) is left byte-for-byte untouched.
 	snap := snapshot.FromMap(entries)
-	if err := snapshot.Save(cfg.OutputPath, snap); err != nil {
-		return nil, fmt.Errorf("import: failed to write snapshot: %w", err)
+	if !cfg.DryRun {
+		if dir := filepath.Dir(cfg.OutputPath); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return nil, fmt.Errorf("import: failed to create output directory: %w", err)
+			}
+		}
+
+		if err := snapshot.Save(cfg.OutputPath, snap); err != nil {
+			return nil, fmt.Errorf("import: failed to write snapshot: %w", err)
+		}
 	}
 
 	return &ImportResult{
@@ -145,5 +162,6 @@ func ImportNetworkState(ctx context.Context, cfg ImportConfig) (*ImportResult, e
 		FetchedKeys: fetched,
 		Contracts:   append([]string(nil), cfg.ContractIDs...),
 		Fingerprint: snap.Fingerprint,
+		DryRun:      cfg.DryRun,
 	}, nil
 }

@@ -1,8 +1,9 @@
-// Copyright (c) Hintents Authors.
+﻿// Copyright (c) Hintents Authors.
 // SPDX-License-Identifier: Apache-2.0
 
 import * as rpc from 'vscode-jsonrpc/node';
 import * as net from 'net';
+import { connectWithRetry, ConnectionRetryConfig } from './ipc/lifecycle';
 
 export interface TraceStep {
     step: number;
@@ -27,24 +28,32 @@ export interface Trace {
 
 export class ERSTClient {
     private connection: rpc.MessageConnection | undefined;
+    private retryConfig?: ConnectionRetryConfig;
 
-    constructor(private host: string = '127.0.0.1', private port: number = 8080) { }
+    constructor(
+        private host: string = '127.0.0.1',
+        private port: number = 8080,
+        retryConfig?: ConnectionRetryConfig
+    ) {
+        this.retryConfig = retryConfig;
+    }
 
+    /**
+     * Connects to the ERST simulator with retry logic.
+     *
+     * Uses exponential backoff to handle the race condition where
+     * the DAP request arrives before the simulator has finished
+     * binding its IPC socket.
+     *
+     * @throws Error if connection fails after all retries
+     */
     async connect(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const socket = net.createConnection({ host: this.host, port: this.port });
-            socket.on('connect', () => {
-                this.connection = rpc.createMessageConnection(
-                    new rpc.StreamMessageReader(socket),
-                    new rpc.StreamMessageWriter(socket)
-                );
-                this.connection.listen();
-                resolve();
-            });
-            socket.on('error', (err) => {
-                reject(err);
-            });
-        });
+        const socket = await connectWithRetry(this.host, this.port, this.retryConfig);
+        this.connection = rpc.createMessageConnection(
+            new rpc.StreamMessageReader(socket),
+            new rpc.StreamMessageWriter(socket)
+        );
+        this.connection.listen();
     }
 
     async debugTransaction(hash: string): Promise<any> {

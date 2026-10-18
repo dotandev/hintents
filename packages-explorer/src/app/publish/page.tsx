@@ -4,7 +4,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { UploadCloud, CheckCircle2, AlertCircle, FileCode2, PackageOpen } from 'lucide-react';
+import { UploadCloud, CheckCircle2, AlertCircle, FileCode2, PackageOpen, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 
 export default function PublishDashboard() {

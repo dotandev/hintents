@@ -8,6 +8,7 @@
 //! is the symbol `"log"`. This module locates those events and decodes them
 //! into plain strings so the simulator can surface them in `SimulationResponse.logs`.
 
+use crate::types::symbol;
 use soroban_env_host::events::Events;
 use soroban_env_host::xdr::{ContractEventBody, ContractEventType, ScString, ScVal};
 
@@ -60,9 +61,7 @@ fn scval_to_display(val: &ScVal) -> String {
         ScVal::String(ScString(s)) => std::str::from_utf8(s.as_slice())
             .unwrap_or("<invalid UTF-8>")
             .to_string(),
-        ScVal::Symbol(s) => std::str::from_utf8(s.as_slice())
-            .unwrap_or("<invalid symbol>")
-            .to_string(),
+        ScVal::Symbol(s) => symbol::symbol_to_string(s.as_slice()),
         ScVal::I32(n) => n.to_string(),
         ScVal::U32(n) => n.to_string(),
         ScVal::I64(n) => n.to_string(),
@@ -168,6 +167,18 @@ mod tests {
         let logs = extract_debug_logs(&Events(vec![event]));
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0], "x = 42");
+    }
+
+    #[test]
+    fn renders_invalid_symbol_without_panicking() {
+        // A Symbol whose bytes are not valid UTF-8 must not crash the formatter.
+        let bad_symbol = ScSymbol(vec![0x66, 0x80, 0x67].try_into().expect("fits"));
+        let items: Vec<ScVal> = vec![ScVal::Symbol(bad_symbol)];
+        let vec_val = ScVal::Vec(Some(ScVec(VecM::try_from(items).expect("fits"))));
+        let event = make_log_event(vec_val);
+        let logs = extract_debug_logs(&Events(vec![event]));
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0], crate::types::symbol::INVALID_SYMBOL_PLACEHOLDER);
     }
 
     #[test]

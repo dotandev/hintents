@@ -4,6 +4,22 @@
 import { XDRDecoder } from '../../xdr/decoder';
 
 describe('Streaming XDR decoder memory usage', () => {
+    it('reuses decoded buffers while yielding the decoded bytes', async () => {
+        const decoded: number[][] = [];
+        const input = Buffer.from('AQID\nBAUG\n', 'utf8');
+
+        for await (const bytes of XDRDecoder.streamLedgerEntries(input, (buffer) =>
+            Array.from(buffer),
+        )) {
+            decoded.push(bytes as number[]);
+        }
+
+        expect(decoded).toEqual([
+            [1, 2, 3],
+            [4, 5, 6],
+        ]);
+    });
+
     it('should stream decode 1000 ledger entries with low peak memory', async () => {
         // Provide a mock decode function for the streaming decoder
             const mockDecodeFn = () => ({ dummy: true });

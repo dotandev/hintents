@@ -523,6 +523,8 @@ mod contract_execution_tests {
             include_linear_memory: false,
             enable_asset_safety: false,
             pprof_output_path: None,
+            ledger_timestamp: None,
+            clock_advance_seconds: None,
         };
         let result = execute_operations(&sim_host, &operations, &request, &mut coverage);
         assert!(result.is_ok());

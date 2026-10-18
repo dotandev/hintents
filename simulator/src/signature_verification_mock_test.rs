@@ -34,6 +34,8 @@ fn test_signature_verification_mock_true() {
         include_linear_memory: false,
         enable_asset_safety: false,
         pprof_output_path: None,
+        ledger_timestamp: None,
+        clock_advance_seconds: None,
     };
 
     assert!(request.mock_signature_verification.is_some());
@@ -69,6 +71,8 @@ fn test_signature_verification_mock_false() {
         include_linear_memory: false,
         enable_asset_safety: false,
         pprof_output_path: None,
+        ledger_timestamp: None,
+        clock_advance_seconds: None,
     };
 
     assert!(request.mock_signature_verification.is_some());
@@ -104,6 +108,8 @@ fn test_signature_verification_mock_disabled() {
         include_linear_memory: false,
         enable_asset_safety: false,
         pprof_output_path: None,
+        ledger_timestamp: None,
+        clock_advance_seconds: None,
     };
 
     assert!(request.mock_signature_verification.is_none());

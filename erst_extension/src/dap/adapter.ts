@@ -1,4 +1,4 @@
-// Copyright (c) Hintents Authors.
+﻿// Copyright (c) Hintents Authors.
 // SPDX-License-Identifier: Apache-2.0
 
 /**
@@ -162,7 +162,7 @@ export class ERSTDebugSession implements vscode.DebugAdapter {
                     this.handleStepOut(request as DebugProtocol.StepOutRequest);
                     break;
                 case 'stepBack':
-                    this.handleStepBack(request);
+                    this.handleStepBack(request as DebugProtocol.StepBackRequest);
                     break;
                 case 'pause':
                     this.handlePause(request as DebugProtocol.PauseRequest);

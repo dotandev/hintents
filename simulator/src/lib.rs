@@ -9,6 +9,7 @@ pub mod gas_optimizer;
 pub mod git_detector;
 pub mod host;
 pub mod hsm;
+pub mod indexer;
 pub mod ipc;
 pub mod memory;
 pub mod metering;
@@ -18,6 +19,7 @@ pub mod source_map_cache;
 pub mod source_mapper;
 pub mod stack_trace;
 pub mod state;
+pub mod time;
 pub mod types;
 pub mod wasm_types;
 

@@ -176,33 +176,31 @@ defer cancel()
 header, err := client.GetLedgerHeader(ctx, sequence)
 ```
 
-### 2. Handle Rate Limiting
+### 2. Built-in Automatic Exponential Backoff & Rate Limiting
+
+`GetLedgerHeader` includes automatic exponential backoff for retryable errors (such as 429 Too Many Requests, 5xx server errors, or transient connection issues). By default, it retries up to 3 times with exponential backoff (500ms, 1s, 2s).
+
+Non-retryable errors like `ErrLedgerNotFound` (404), `ErrLedgerArchived` (410), or `ErrRPCResponseTooLarge` (413) fail fast without unnecessary retries.
+
+You can customize the backoff behavior when initializing the client:
 
 ```go
-func fetchWithRetry(client *rpc.Client, sequence uint32) (*rpc.LedgerHeaderResponse, error) {
-    maxRetries := 3
-    backoff := time.Second
+// Custom backoff: initial 250ms, max 5s, 4 retries
+client, err := rpc.NewClient(
+    rpc.WithNetwork(rpc.Testnet),
+    rpc.WithLedgerBackoff(250*time.Millisecond, 5*time.Second, 4),
+)
 
-    for i := 0; i < maxRetries; i++ {
-        ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-        defer cancel()
-
-        header, err := client.GetLedgerHeader(ctx, sequence)
-        if err == nil {
-            return header, nil
-        }
-
-        if rpc.IsRateLimitError(err) {
-            time.Sleep(backoff)
-            backoff *= 2
-            continue
-        }
-
-        return nil, err
-    }
-
-    return nil, fmt.Errorf("max retries exceeded")
-}
+// Or with a full RetryConfig struct
+client, err := rpc.NewClient(
+    rpc.WithNetwork(rpc.Testnet),
+    rpc.WithLedgerRetryConfig(rpc.RetryConfig{
+        MaxRetries:     3,
+        InitialBackoff: 500 * time.Millisecond,
+        MaxBackoff:     2 * time.Second,
+        JitterFraction: 0.1,
+    }),
+)
 ```
 
 ### 3. Cache Ledger Headers

@@ -4,10 +4,12 @@
 package metrics
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
@@ -124,4 +126,13 @@ func RecordSimulationExecution(success bool) {
 		status = "error"
 	}
 	SimulationExecutionTotal.WithLabelValues(status).Inc()
+}
+
+// StartMetricsServer starts an HTTP server on the given address to expose Prometheus metrics.
+// This includes standard Go process metrics (CPU, memory) and custom simulation metrics (tx throughput).
+// It blocks until the server is closed or an error occurs.
+func StartMetricsServer(addr string) error {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	return http.ListenAndServe(addr, mux)
 }

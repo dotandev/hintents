@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::git_detector::GitRepository;
-use gimli::{self, ColumnType, Dwarf, EndianSlice, Reader, RunTimeEndian, SectionId};
+use gimli::{
+    self, AbbreviationsCacheStrategy, ColumnType, Dwarf, EndianSlice, Reader, RunTimeEndian,
+    SectionId,
+};
 use object::{Object, ObjectSection};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -101,7 +104,8 @@ impl SourceMapper {
         })
         .map_err(|err| format!("failed to load DWARF: {err}"))?;
 
-        let dwarf = dwarf_sections.borrow(|section| EndianSlice::new(section.as_ref(), endian));
+        let mut dwarf = dwarf_sections.borrow(|section| EndianSlice::new(section.as_ref(), endian));
+        dwarf.populate_abbreviations_cache(AbbreviationsCacheStrategy::All);
         Self::extract_line_entries(&dwarf)
             .map_err(|err| format!("failed to parse .debug_line: {err}"))
     }

@@ -157,16 +157,35 @@ func Load(path string) (*Snapshot, error) {
 	return &snap, nil
 }
 
-// Save writes a snapshot to a JSON file with indentation for readability.
-func Save(path string, snap *Snapshot) error {
+// Serialize renders a snapshot into its canonical indented JSON encoding.
+// Entries are normalized (copied and sorted by key) before marshaling so the
+// output is deterministic and the caller's slice is never mutated. The complete
+// payload is buffered in memory, which lets callers hand it to an AsyncWriter
+// for off-thread persistence.
+func Serialize(snap *Snapshot) ([]byte, error) {
 	stable := normalizedForSave(snap)
 
 	data, err := json.MarshalIndent(stable, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal snapshot: %w", err)
+		return nil, fmt.Errorf("failed to marshal snapshot: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	return data, nil
+}
+
+// Save writes a snapshot to a JSON file with indentation for readability.
+//
+// The payload is fully serialized before any bytes reach disk and the
+// destination is replaced atomically, so readers never observe a partially
+// written snapshot. When the write syscall itself is the bottleneck (massive
+// state dumps), use an AsyncWriter to move it off the calling goroutine.
+func Save(path string, snap *Snapshot) error {
+	data, err := Serialize(snap)
+	if err != nil {
+		return err
+	}
+
+	if err := writeFileAtomic(path, data); err != nil {
 		return fmt.Errorf("failed to write snapshot file: %w", err)
 	}
 
