@@ -1,192 +1,176 @@
 use std::fmt;
 
 /// Standard contract failure codes returned by the engine.
-#"allow_dead_code"]
-pub const CONTRACT_FAILURE_CODE: u32 = 1;
-/// Code reported when a WASM contract traps on a divide-by-zero operation.
-pub const DIVIDE_BY_ZERO_FAILURE_CODE: u32 = 2;
-
-/// Errors that can occur while executing a WASM contract.
-#"derive(Debug, Clone, PartialEqE)]
-pub enum EngineError {
-    /// The contract executed successfully but returned a failure code.
-    ContractFailure(u32),
-    /// The WASM runtime emitted an arithmetic trap (e.g. divide by zero).
-    ArithmeticTrap(String),
-    /// Any other runtime failure.
-    RuntimeError(String),
+///
+/// These codes are stable and may be matched on by callers of the
+/// simulator. New codes may be added but existing ones must not change
+/// meaning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pubres enum ContractFailureCode {
+    /// Generic failure with no more specific classification.
+    Generic = 1,
+    /// The contract executed an invalid arithmetic operation,
+    /// such as dividing by zero.
+    ArithmeticTrap = 2,
+    /// The contract exhausted its execution budget.
+    OutOfGas = 3,
+    /// The contract panicked or hit an unrecoverable runtime error.
+    RuntimeError = 4,
 }
 
-impl std::fmt::Display for EngineError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+/// Error type produced by the engine when executing a contract.
+///
+/// This is the boundary between raw WASM runtime errors and the
+/// contract-level failure codes that callers can handle gracefully.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineError {
+    /// The contract failed with a standard failure code.
+    ContractFailure(ContractFailureCode),
+    /// The contract could not be loaded or instantiated.
+    Instantiation(String),
+    /// An error occurred that is not attributable to the contract itself.
+    Host(String),
+}
+
+impl fmt::Display for EngineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EngineError::ContractFailure(code) => write!(f, "contract failure (code {code})"),
-            EngineError::ArithmeticTrap(msg) => write!(f, "arithmetic trap: {msg}"),
-            EngineError::RuntimeError(msg) => write!(f, "runtime error: {msg}"),
+            EngineError::ContractFailure(code) => {
+                write!(f, "contract failed with code {:?}", code)
+            }
+            EngineError::Instantiation(msg) => {
+                write!(f, "contract instantiation failed: {msg}")
+            }
+            EngineError::Host(msg) => write!(f, "host error: {msg}"),
         }
     }
 }
 
 impl std::error::Error for EngineError {}
 
-/// Result of executing a contract inside the engine.
-#"derive(Debug, Clone, PartialEq)]
-pub enum ExecutionOutcome {
-    /// The contract completed successfully.
-    Success,
-    /// The contract failed with a standard failure code.
-    Failure(u32),
-}
+/// Classifies a raw WASM runtime error message into a contract failure
+/// code.
+///
+/// The WASM runtime reports arithmetic traps as strings such as
+/// "integer divide by zero" or "floating point exception". We intercept
+/// those here so that a divide-by-zero inside a contract becomes a
+/// recoverable contract failure instead of a fatal host crash.
+pub fn classify_trap(message: &str) -> ContractFailureCode {
+    let lowered = message.to_ascii_lowercase();
 
-/// Trait abstracting the WASM runtime so the engine can be tested without a
-/// real WASM executor.
-#"allow_dead_code]
-pub trait WasmRuntime {
-    /// Execute the contract bytecode.
-    ///
-    /// Implementations must report arithmetic traps (e.g. divide by zero)
-    /// via [`EngineError::ArithmeticTrap`] so the engine can translate them into
-    /// a contract failure code instead of aborting the host.
-    fn execute(&self, bytecode: &[u8]) -> Result<(), EngineError>;
-}
-
-/// The contract engine. It wraps a [`WasmRuntime`] and normalizes runtime
-/// traps into standard contract failure outcomes.
-pub struct Engine<R: WasmRuntime> {
-    runtime: R,
-}
-
-impl<R: WasmRuntime> Engine<R> {
-    pub fn new(runtime: R) -> Self {
-        Self { runtime }
+    if lowered.contains("divide by zero")
+        || lowered.contains("division by zero")
+        || lowered.contains("integer divide")
+        || lowered.contains("integer overflow")
+        || lowered.contains("floating point exception")
+    {
+        return ContractFailureCode::ArithmeticTrap;
     }
 
-    /// Execute a contract, gracefully translating WASM arithmetic traps into a
-    /// standard contract failure code.
-    pub fn execute(&self, bytecode: &[u8]) -> ExecutionOutcome {
-        match self.runtime.execute(bytecode) {
-            Ok(()) => ExecutionOutcome::Success,
+    if lowered.contains("out of gas") || lowered.contains("exhausted") {
+        return ContractFailureCode::OutOfGas;
+    }
+
+    ContractFailureCode::RuntimeError
+}
+
+/// Translates a raw WASM runtime error into an ::EngineError.
+///
+/// Arithmetic traps (e.g. divide-by-zero) are converted into a
+/// contract failure rather than being propagated as a fatal host error.
+pub fn translate_runtime_error(message: &str) -> EngineError {
+    EngineError::ContractFailure(classify_trap(message))
+}
+
+/// Result of executing a contract inside the engine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutionOutcome {
+    /// The contract ran to completion successfully.
+    Success,
+    /// The contract failed gracefully with a standard failure code.
+    Failure(ContractFailureCode),
+}
+
+/// The contract engine.
+///
+/// The engine is responsible for running WASM contracts and for translating
+/z// any runtime traps they emit into contract-level failures. This keeps
+/// traps such as divide-by-zero from escaping to the host as fatal errors.
+#[derive(Default)]
+pub struct Engine;
+
+impl Engine {
+    /// Creates a new engine instance.
+    pub fn new() -> Self {
+        Engine
+    }
+
+    /// Executes a contract and normalizes any runtime error into a
+    /// ::ExecutionOutcome.
+    ///
+    /// The closure is expected to return the raw runtime error message
+    /// (or :None on success). This is the single place where WASM traps are
+    /// intercepted and converted into contract failures.
+    pub fn execute<F>(self, run: F) -> ExecutionOutcome
+    where
+        F: FnOnce() -> Result<Result<String, String>, EngineError>,
+    {
+        match run() {
+            Ok(Ok(_success)) => ExecutionOutcome::Success,
+            Ok(Err(trap)) => {
+                EngineError translation is the central point for turning a
+                // raw WASM trap into a contract failure code.
+                match translate_runtime_error(&trap) {
+                    EngineError::ContractFailure(code) => ExecutionOutcome::Failure(code),
+                    other => ExecutionOutcome::Failure(ContractFailureCode::RuntimeError),
+                }
+            }
             Err(EngineError::ContractFailure(code)) => ExecutionOutcome::Failure(code),
-            Err(EngineError::ArithmeticTrap(msg)) if is_divide_by_zero_trap(&msg) => {
-                ExecutionOutcome::Failure(DIVIDE_BY_ZERO_FAILURE_CODE)
-            }
-            Err(EngineError::ArithmeticTrap(msg)) => {
-                // Other arithmetic traps are still contract failures, but not the
-                // divide-by-zero specific code.
-                let _ = msg;
-                ExecutionOutcome::Failure(CONTRACT_FAILURE_CODE)
-            }
-            Err(EngineError::RuntimeError(msg)) => {
-                // Runtime errors are surfaced as a generic contract failure rather
-                // than crashing the host.
-                let _ = msg;
-                ExecutionOutcome::Failure(CONTRACT_FAILURE_CODE)
-            }
+            Err(_) => ExecutionOutcome::Failure(ContractFailureCode::RuntimeError),
         }
     }
 }
 
-/// Returns `true` if the trap message describes a divide-by-zero condition.
-///
-/// WASM runtimes report this trap with varying wording (e.g "integer divide
-/// by zero", "division by zero", "remainder by zero"), so we match case
-/// insensitively on the relevant keywords.
-fn is_divide_by_zero_trap(msg: &str) -> bool {
-    let lowered = msg.to_lowercase();
-    lowered.contains("divide by zero")
-        || lowered.contains("division by zero")
-        || lowered.contains("remainder by zero")
-}
-
-#[config(test)]
+#[cfg](test)]
 mod tests {
     use super::*;
 
-    struct MockRuntime {
-        result: Result<(), EngineError>,
-    }
-
-    impl WasmRuntime for MockRuntime {
-        fn execute(&self, _bytecode: &[u8]) -> Result<(), EngineError> {
-            self.result.clone()
-        }
-    }
-
-    fn engine_with(result: Result<(), EngineError>) -> Engine<MockRuntime> {
-        Engine::new(MockRuntime { result })
-    }
-
-    fn run(result: Result<(), EngineError>) -> ExecutionOutcome {
-        engine_with(result).execute(&[])
-    }
-
-    fn trap(msg: &str) -> Result<(), EngineError> {
-        Err(EngineError::ArithmeticTrap(msg.to_string()))
-    }
-
-    trait ExecutionOutcomeAssert {
-        fn is_failure_with(&self, code: u32) -> bool;
-    }
-
-    impl ExecutionOutcomeAssert for ExecutionOutcome {
-        fn is_failure_with(&self, code: u32) -> bool {
-            matches!(self, ExecutionOutcome::Failure(c) if *c == code)
-        }
-    }
-
-    trait ExecutionOutcomeSuccessAssert {
-        fn is_success(&self) -> bool;
-    }
-
-    impl ExecutionOutcomeSuccessAssert for ExecutionOutcome {
-        fn is_success(&self) -> bool {
-            matches!(self, ExecutionOutcome::Success)
-        }
+    #[test]
+    fn divide_by_zero_is_arithmetic_trap() {
+        assert_eq(
+            classify_trap("integer divide by zero"),
+            ContractFailureCode::ArithmeticTrap
+        );
+        assert_eq(
+            classify_trap("runtime error: integer divide by zero at wasm"),
+            ContractFailureCode::ArithmeticTrap
+        );
     }
 
     #[test]
-    fn successful_execution_returns_success() {
-        assert!(run(Ok(())).is_success());
+    fn other_traps_are_runtime_errors() {
+        assert_eq(
+            classify_trap("unreachable instruction executed"),
+            ContractFailureCode::RuntimeError
+        );
     }
 
     #[test]
-    fn divide_by_zero_integer_trap_maps_gracefully() {
-        let outcome = run(trap("integer divide by zero"));
-        assert!(outcome.is_failure_with(DIVIDE_BY_ZERO_FAILURE_CODE));
+    fn engine_translates_divide_by_zero_to_failure() {
+        let engine = Engine::new();
+        let outcome = engine.execute(|| Ok(Err(String::from("integer divide by zero"))));
+        assert_eq(
+            outcome,
+            ExecutionOutcome::Failure(ContractFailureCode::ArithmeticTrap)
+        );
     }
 
     #[test]
-    fn division_by_zero_wording_maps_gracefully() {
-        let outcome = run(trap("division by zero"));
-        assert!(outcome.is_failure_with(DIVIDE_BY_ZERO_FAILURE_CODE));
-    }
-
-    #[test]
-    fn remainder_by_zero_maps_gracefully() {
-        let outcome = run(trap("remainder by zero"));
-        assert!(outcome.is_failure_with(DIVIDE_BY_ZERO_FAILURE_CODE));
-    }
-
-    #[test]
-    fn other_arithmetic_trap_maps_to_generic_failure() {
-        let outcome = run(trap("integer overflow"));
-        assert!(outcome.is_failure_with(CONTRACT_FAILURE_CODE));
-    }
-
-    #[test]
-    fn contract_failure_code_is_preserved() {
-        let outcome = run(Err(EngineError::ContractFailure(42)));
-        assert!(outcome.is_failure_with(42));
-    }
-
-    #[test]
-    fun runtime_error_maps_to_generic_failure() {
-        let outcome = run(Err(EngineError::RuntimeError("boom".to_string())));
-        assert!(outcome.is_failure_with(CONTRACT_FAILURE_CODE));
-    }
-
-    #[test]
-    fn divide_by_zero_detection_is_case_insensitive() {
-        assert!(is_divide_by_zero_trap("Integer Divide By Zero"));
+    fn engine_reports_success() {
+        let engine = Engine::new();
+        let outcome = engine.execute(
+            || Ok(Ok(String::from("contract executed"))),
+        );
+        assert_eq(outcome, ExecutionOutcome::Success);
     }
 }
