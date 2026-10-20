@@ -29,7 +29,7 @@ use crate::source_mapper::SourceMapper;
 use crate::stack_trace::WasmStackTrace;
 use crate::types::*;
 use base64::Engine as _;
-use soroban_env_host::xdr::{Operation, OperationBody};
+use soroban_env_host::xdr::{Limits, Operation, OperationBody};
 use soroban_env_host::xdr::{ReadXdr, WriteXdr};
 use std::any::Any;
 use std::collections::HashMap;
@@ -61,11 +61,15 @@ fn init_logger() {
 }
 
 fn send_error(msg: String) {
+    send_error_with_code(msg, None)
+}
+
+fn send_error_with_code(msg: String, error_code: Option<String>) {
     let trace = WasmStackTrace::from_host_error(&msg, None);
     let res = SimulationResponse {
         status: "error".to_string(),
         error: Some(msg),
-        error_code: None,
+        error_code,
         lcov_report: None,
         lcov_report_path: None,
         events: vec![],
@@ -84,6 +88,108 @@ fn send_error(msg: String) {
     };
     ipc::response::emit_response(&res);
     std::process::exit(1);
+}
+
+/// Returns duplicate keys declared in both Soroban footprint access sets.
+/// Keys are represented by their base64 XDR encoding so diagnostics identify
+/// the exact ledger key without exposing decoded contract values.
+fn duplicate_footprint_keys(
+    footprint: &soroban_env_host::xdr::LedgerFootprint,
+) -> Result<Vec<String>, String> {
+    use std::collections::HashSet;
+    let read_only: HashSet<Vec<u8>> = footprint
+        .read_only
+        .iter()
+        .map(|key| key.to_xdr(Limits::none()).map_err(|e| e.to_string()))
+        .collect::<Result<_, _>>()?;
+    let mut conflicts = std::collections::BTreeSet::new();
+    for key in footprint.read_write.iter() {
+        let encoded = key.to_xdr(Limits::none()).map_err(|e| e.to_string())?;
+        if read_only.contains(&encoded) {
+            conflicts.insert(base64::engine::general_purpose::STANDARD.encode(encoded));
+        }
+    }
+    Ok(conflicts.into_iter().collect())
+}
+
+fn envelope_footprint_conflicts(
+    envelope: &soroban_env_host::xdr::TransactionEnvelope,
+) -> Result<Vec<String>, String> {
+    use soroban_env_host::xdr::{FeeBumpTransactionInnerTx, TransactionExt};
+    let tx = match envelope {
+        soroban_env_host::xdr::TransactionEnvelope::Tx(env) => Some(&env.tx),
+        soroban_env_host::xdr::TransactionEnvelope::TxFeeBump(env) => match &env.tx.inner_tx {
+            FeeBumpTransactionInnerTx::Tx(inner) => Some(&inner.tx),
+        },
+        soroban_env_host::xdr::TransactionEnvelope::TxV0(_) => None,
+    };
+    match tx.map(|tx| &tx.ext) {
+        Some(TransactionExt::V1(data)) => duplicate_footprint_keys(&data.resources.footprint),
+        _ => Ok(Vec::new()),
+    }
+}
+
+#[cfg(test)]
+mod footprint_conflict_tests {
+    use super::*;
+    use soroban_env_host::xdr::{
+        Hash, LedgerFootprint, LedgerKey, LedgerKeyContractCode, SorobanResources,
+        SorobanTransactionData, Transaction, TransactionExt, TransactionV1Envelope,
+    };
+
+    fn envelope_with_footprint(
+        footprint: LedgerFootprint,
+    ) -> soroban_env_host::xdr::TransactionEnvelope {
+        let tx = Transaction {
+            ext: TransactionExt::V1(SorobanTransactionData {
+                resources: SorobanResources {
+                    footprint,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        soroban_env_host::xdr::TransactionEnvelope::Tx(TransactionV1Envelope {
+            tx,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn checks_footprint_conflicts_through_transaction_envelope() {
+        let key = LedgerKey::ContractCode(LedgerKeyContractCode {
+            hash: Hash([7; 32]),
+        });
+        let clean = LedgerFootprint {
+            read_only: vec![key.clone()].try_into().unwrap(),
+            read_write: vec![LedgerKey::ContractCode(LedgerKeyContractCode {
+                hash: Hash([8; 32]),
+            })]
+            .try_into()
+            .unwrap(),
+        };
+        assert!(
+            envelope_footprint_conflicts(&envelope_with_footprint(clean))
+                .unwrap()
+                .is_empty()
+        );
+
+        let conflicting = LedgerFootprint {
+            read_only: vec![key.clone(), key.clone()].try_into().unwrap(),
+            read_write: vec![key.clone(), key.clone()].try_into().unwrap(),
+        };
+        let conflicts =
+            envelope_footprint_conflicts(&envelope_with_footprint(conflicting)).unwrap();
+        assert_eq!(
+            conflicts.len(),
+            1,
+            "duplicate declarations are deduplicated"
+        );
+        let expected =
+            base64::engine::general_purpose::STANDARD.encode(key.to_xdr(Limits::none()).unwrap());
+        assert_eq!(conflicts, vec![expected]);
+    }
 }
 
 fn panic_info_to_string(panic_info: &(dyn Any + Send)) -> String {
@@ -524,6 +630,33 @@ fn main() {
             return;
         }
     };
+
+    // This preflight check can reliably diagnose keys declared in both
+    // footprint sets. Runtime read-only write diagnostics need storage-level
+    // instrumentation: the current SimHost storage is rebuilt from snapshots,
+    // while soroban-env-host exposes access failures only as Storage/ExceededLimit
+    // (also used for undeclared accesses) without a structured ledger key.
+    let footprint_conflicts = match envelope_footprint_conflicts(&envelope) {
+        Ok(conflicts) => conflicts,
+        Err(error) => {
+            send_error(format!("Failed to inspect transaction footprint: {error}"));
+            return;
+        }
+    };
+    if !footprint_conflicts.is_empty() {
+        let keys = footprint_conflicts
+            .iter()
+            .map(|key| format!("`{key}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        send_error_with_code(
+            format!(
+                "footprint conflict (duplicate declaration): ledger key(s) {keys} appear in both read-only and read-write sets"
+            ),
+            Some("ERR_FOOTPRINT_CONFLICT".to_string()),
+        );
+        return;
+    }
 
     // Decode ResultMeta XDR
     let _result_meta = if request.result_meta_xdr.is_empty() {
