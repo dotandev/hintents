@@ -22,9 +22,14 @@
 //! 4. [`TrackingAllocator`] caps the live heap, and [`install_cpu_rlimit`] gives
 //!    the kernel the last word on CPU time.
 //!
+//! [`MeteringReport`] carries the outcome: it keeps CPU instructions and memory
+//! bytes as separate counters so a diagnostic can attribute a spike to compute or
+//! to memory expansion rather than to an opaque composite total.
+//!
 //! Memory is deliberately *not* capped with `RLIMIT_AS`; see
 //! [`install_cpu_rlimit`] for why.
 
+use serde::{Deserialize, Serialize};
 use soroban_env_host::{budget::Budget, HostError};
 use std::alloc::{GlobalAlloc, Layout};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -203,6 +208,85 @@ fn whole_millis(duration: Duration) -> u64 {
     let millis = duration.as_millis();
 
     u64::try_from(millis).unwrap_or(u64::MAX)
+}
+
+/// The resource cost of a run, with each budget dimension reported separately.
+///
+/// The Soroban budget exposes CPU instructions and memory bytes as two counters
+/// that are charged by different cost models, but a single composite gas number
+/// hides which one moved. Keeping [`MeteringReport::cpu_insns_executed`] and
+/// [`MeteringReport::mem_bytes_allocated`] as independent fields lets a
+/// diagnostic say whether a spike came from compute-heavy loops or from memory
+/// expansion, which is the whole point of the report.
+///
+/// The counters are monotonic totals read from a [`Budget`], so a single report
+/// is a reading. Subtract two readings with [`MeteringReport::since`] to get the
+/// delta attributed to the work in between.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeteringReport {
+    /// CPU instructions charged to the budget. Independent of memory bytes.
+    pub cpu_insns_executed: u64,
+    /// Bytes charged to the budget for linear-memory allocation. Independent of
+    /// CPU instructions.
+    pub mem_bytes_allocated: u64,
+}
+
+impl MeteringReport {
+    /// A report with both counters at zero.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            cpu_insns_executed: 0,
+            mem_bytes_allocated: 0,
+        }
+    }
+
+    /// Reads both counters from a live budget.
+    ///
+    /// A counter read that fails is treated as zero for that dimension alone, so
+    /// a broken budget handle never corrupts the other counter. This mirrors how
+    /// [`check_budget`] treats a failed read.
+    #[must_use]
+    pub fn from_budget(budget: &Budget) -> Self {
+        Self {
+            cpu_insns_executed: budget.get_cpu_insns_consumed().unwrap_or(0),
+            mem_bytes_allocated: budget.get_mem_bytes_consumed().unwrap_or(0),
+        }
+    }
+
+    /// The resource delta between `earlier` and `self`.
+    ///
+    /// Both fields are deltas, and each saturates at zero, so a counter that
+    /// went backwards (for example a budget that was reset) reports no change
+    /// rather than wrapping to a huge number.
+    #[must_use]
+    pub const fn since(&self, earlier: &Self) -> Self {
+        Self {
+            cpu_insns_executed: self
+                .cpu_insns_executed
+                .saturating_sub(earlier.cpu_insns_executed),
+            mem_bytes_allocated: self
+                .mem_bytes_allocated
+                .saturating_sub(earlier.mem_bytes_allocated),
+        }
+    }
+
+    /// Whether neither dimension consumed anything.
+    #[must_use]
+    pub const fn is_zero(&self) -> bool {
+        self.cpu_insns_executed == 0 && self.mem_bytes_allocated == 0
+    }
+
+    /// The two counters combined into one figure.
+    ///
+    /// Only for callers that want a single health number. The separate fields
+    /// remain the source of truth, so preferring one of them is the right call
+    /// when diagnosing a spike.
+    #[must_use]
+    pub const fn composite_gas(&self) -> u64 {
+        self.cpu_insns_executed
+            .saturating_add(self.mem_bytes_allocated)
+    }
 }
 
 /// Checks a live Soroban budget against `limits`.
@@ -583,6 +667,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackingAllocator<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_env_host::xdr::ContractCostType;
     use std::alloc::System;
     use std::sync::atomic::AtomicBool;
 
@@ -685,5 +770,149 @@ mod tests {
         unsafe { allocator.dealloc(ptr, layout) };
         assert_eq!(allocator.live_bytes(), 0);
         assert_eq!(allocator.peak_bytes(), 1024);
+    }
+
+    #[test]
+    fn a_fresh_report_is_zero_on_both_dimensions() {
+        let report = MeteringReport::new();
+
+        assert_eq!(report.cpu_insns_executed, 0);
+        assert_eq!(report.mem_bytes_allocated, 0);
+        assert!(report.is_zero());
+        assert_eq!(report, MeteringReport::default());
+    }
+
+    #[test]
+    fn a_report_reads_cpu_and_memory_independently() {
+        let limits = MeteringLimits::network();
+        let budget = limits.budget().expect("limits apply");
+
+        // WasmInsnExec is CPU-only: its memory model is zero by definition, so
+        // this moves the instruction counter without allocating anything.
+        budget
+            .charge(ContractCostType::WasmInsnExec, None)
+            .expect("cpu charge applies");
+
+        let cpu_only = MeteringReport::from_budget(&budget);
+        assert!(cpu_only.cpu_insns_executed > 0);
+        assert_eq!(
+            cpu_only.mem_bytes_allocated, 0,
+            "a CPU-only charge must not allocate memory"
+        );
+
+        // MemAlloc's CPU constant term is non-zero, so this moves both counters,
+        // but the memory delta is attributable to the requested bytes.
+        budget
+            .charge(ContractCostType::MemAlloc, Some(1024))
+            .expect("memory charge applies");
+
+        let both = MeteringReport::from_budget(&budget);
+        assert!(
+            both.cpu_insns_executed > cpu_only.cpu_insns_executed,
+            "the second charge must add instructions"
+        );
+        assert!(
+            both.mem_bytes_allocated > 0,
+            "the allocation must be visible in the memory counter"
+        );
+        assert!(
+            both.mem_bytes_allocated >= 1024,
+            "the memory counter must reflect the allocated bytes"
+        );
+    }
+
+    #[test]
+    fn a_cpu_spike_and_a_memory_spike_are_distinguishable() {
+        let limits = MeteringLimits::network();
+
+        // A compute-heavy run: instructions only.
+        let compute_budget = limits.budget().expect("limits apply");
+        compute_budget
+            .bulk_charge(ContractCostType::WasmInsnExec, 1_000_000, None)
+            .expect("bulk cpu charge applies");
+        let compute = MeteringReport::from_budget(&compute_budget);
+
+        // A memory-heavy run: large allocation, no extra instructions charged
+        // beyond the fixed cost of the allocation itself.
+        let memory_budget = limits.budget().expect("limits apply");
+        memory_budget
+            .charge(ContractCostType::MemAlloc, Some(1_000_000))
+            .expect("memory charge applies");
+        let memory = MeteringReport::from_budget(&memory_budget);
+
+        // The two profiles have opposite shapes, which is exactly what a single
+        // composite number could not tell apart.
+        assert!(compute.cpu_insns_executed > compute.mem_bytes_allocated);
+        assert!(memory.mem_bytes_allocated > memory.cpu_insns_executed);
+        assert_eq!(compute.mem_bytes_allocated, 0);
+    }
+
+    #[test]
+    fn the_delta_between_two_readings_isolates_one_charge() {
+        let limits = MeteringLimits::network();
+        let budget = limits.budget().expect("limits apply");
+
+        let before = MeteringReport::from_budget(&budget);
+        assert!(before.is_zero(), "a fresh budget has consumed nothing");
+
+        budget
+            .charge(ContractCostType::MemAlloc, Some(4096))
+            .expect("memory charge applies");
+
+        let after = MeteringReport::from_budget(&budget);
+        let delta = after.since(&before);
+
+        assert!(delta.cpu_insns_executed > 0);
+        assert!(
+            delta.mem_bytes_allocated >= 4096,
+            "the delta must contain the allocated bytes, got {}",
+            delta.mem_bytes_allocated
+        );
+        // The delta is much smaller than the absolute reading would be for a run
+        // that had already spent most of its budget, so it attributes cost to
+        // this charge rather than to the run's history.
+        assert_eq!(delta.mem_bytes_allocated, after.mem_bytes_allocated);
+    }
+
+    #[test]
+    fn a_delta_saturates_when_the_counter_moves_backwards() {
+        let before = MeteringReport {
+            cpu_insns_executed: 500,
+            mem_bytes_allocated: 800,
+        };
+        let after = MeteringReport {
+            cpu_insns_executed: 100,
+            mem_bytes_allocated: 200,
+        };
+
+        let delta = after.since(&before);
+
+        assert_eq!(delta, MeteringReport::new(), "a reset must not wrap");
+    }
+
+    #[test]
+    fn the_composite_gas_is_the_sum_of_the_separate_counters() {
+        let report = MeteringReport {
+            cpu_insns_executed: 1_200,
+            mem_bytes_allocated: 300,
+        };
+
+        assert_eq!(report.composite_gas(), 1_500);
+        assert!(!report.is_zero());
+    }
+
+    #[test]
+    fn a_report_serializes_both_dimensions_separately() {
+        let report = MeteringReport {
+            cpu_insns_executed: 42,
+            mem_bytes_allocated: 7,
+        };
+
+        let json = serde_json::to_value(report).expect("report serializes");
+        assert_eq!(json["cpu_insns_executed"], 42);
+        assert_eq!(json["mem_bytes_allocated"], 7);
+
+        let restored: MeteringReport = serde_json::from_value(json).expect("report round-trips");
+        assert_eq!(restored, report);
     }
 }

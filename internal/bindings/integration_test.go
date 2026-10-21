@@ -4,6 +4,8 @@
 package bindings
 
 import (
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,100 @@ import (
 	"github.com/dotandev/hintents/internal/abi"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
+
+// buildWasmWithSpec wraps XDR-encoded contract spec entries in a minimal valid
+// WASM binary containing a "contractspecv0" custom section.
+func buildWasmWithSpec(t *testing.T, entries ...xdr.ScSpecEntry) []byte {
+	t.Helper()
+
+	var spec []byte
+	for _, e := range entries {
+		b, err := e.MarshalBinary()
+		if err != nil {
+			t.Fatalf("marshal spec entry: %v", err)
+		}
+		spec = append(spec, b...)
+	}
+
+	var payload []byte
+	payload = append(payload, encodeLEB128(uint32(len("contractspecv0")))...)
+	payload = append(payload, "contractspecv0"...)
+	payload = append(payload, spec...)
+
+	wasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	wasm = append(wasm, 0x00) // custom section id
+	wasm = append(wasm, encodeLEB128(uint32(len(payload)))...)
+	wasm = append(wasm, payload...)
+	return wasm
+}
+
+func encodeLEB128(v uint32) []byte {
+	var out []byte
+	for {
+		b := byte(v & 0x7f)
+		v >>= 7
+		if v != 0 {
+			b |= 0x80
+		}
+		out = append(out, b)
+		if v == 0 {
+			return out
+		}
+	}
+}
+
+func TestGenerateBindingsFromWasmErrorEnums(t *testing.T) {
+	wasm := buildWasmWithSpec(t, xdr.ScSpecEntry{
+		Kind: xdr.ScSpecEntryKindScSpecEntryUdtErrorEnumV0,
+		UdtErrorEnumV0: &xdr.ScSpecUdtErrorEnumV0{
+			Name: "ContractError",
+			Cases: []xdr.ScSpecUdtErrorEnumCaseV0{
+				{Name: "NotInitialized", Value: 1, Doc: "contract is not initialized"},
+				{Name: "Unauthorized", Value: 2},
+			},
+		},
+	})
+
+	generator := NewGenerator(GeneratorConfig{
+		WasmBytes:   wasm,
+		PackageName: "token-contract",
+	})
+
+	files, err := generator.Generate()
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+
+	var content string
+	for _, f := range files {
+		if f.Path == "errors.go" {
+			content = f.Content
+		}
+	}
+	if content == "" {
+		t.Fatal("errors.go was not generated")
+	}
+
+	// Full pipeline output must be valid, type-checkable Go source.
+	typeCheckGoSource(t, content)
+
+	want := []string{
+		"package tokencontract",
+		"type ContractError uint32",
+		"ContractErrorNotInitialized ContractError = 1",
+		`return "NotInitialized: contract is not initialized"`,
+		`return "Unauthorized"`,
+	}
+	for _, w := range want {
+		if !strings.Contains(content, w) {
+			t.Errorf("generated errors.go missing %q\n%s", w, content)
+		}
+	}
+
+	if _, err := parser.ParseFile(token.NewFileSet(), "errors.go", content, 0); err != nil {
+		t.Fatalf("generated errors.go does not parse: %v", err)
+	}
+}
 
 func TestGenerateBindings(t *testing.T) {
 	// Create a mock contract spec
@@ -192,6 +288,7 @@ func TestGenerateBindingsEndToEnd(t *testing.T) {
 		"index.ts",
 		"package.json",
 		"README.md",
+		"errors.go",
 	}
 
 	for _, expectedFile := range expectedFiles {

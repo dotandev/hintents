@@ -68,6 +68,7 @@
 │  index.ts              - Exports                                  │
 │  package.json          - NPM config                               │
 │  README.md             - Documentation                            │
+│  errors.go             - Typed Go error enums                     │
 └─────────────────────────────────────────────────────────────────┘
                                  │
                                  ▼
@@ -109,6 +110,7 @@
 │  ├─ Generate types.ts                                             │
 │  ├─ Generate client.ts                                            │
 │  ├─ Generate erst-integration.ts                                  │
+│  ├─ Generate errors.go (typed Go error enums)                     │
 │  └─ Write files to disk                                           │
 │                                                                   │
 │  internal/abi/                                                    │
