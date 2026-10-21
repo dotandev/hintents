@@ -56,7 +56,8 @@ output-directory/
 ├── erst-integration.ts   # Erst simulator
 ├── index.ts              # Exports
 ├── package.json          # NPM config
-└── README.md             # Usage docs
+├── README.md             # Usage docs
+└── errors.go             # Typed Go error enums
 ```
 
 ## Usage Examples
