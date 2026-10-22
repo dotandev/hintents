@@ -10,12 +10,10 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/dotandev/hintents/internal/rpc"
 )
 
-func makeHeader(seq uint32) *rpc.LedgerHeaderResponse {
-	return &rpc.LedgerHeaderResponse{
+func makeHeader(seq uint32) *LedgerHeaderResponse {
+	return &LedgerHeaderResponse{
 		Sequence:          seq,
 		Hash:              fmt.Sprintf("hash-%08d", seq),
 		PrevHash:          fmt.Sprintf("prev-%08d", seq-1),
@@ -37,17 +35,17 @@ type mockFetcher struct {
 	mu        sync.Mutex
 	calls     int
 	failSeq   map[uint32]bool
-	customRes map[uint32]*rpc.LedgerHeaderResponse
+	customRes map[uint32]*LedgerHeaderResponse
 }
 
 func newMockFetcher() *mockFetcher {
 	return &mockFetcher{
 		failSeq:   make(map[uint32]bool),
-		customRes: make(map[uint32]*rpc.LedgerHeaderResponse),
+		customRes: make(map[uint32]*LedgerHeaderResponse),
 	}
 }
 
-func (m *mockFetcher) GetLedgerHeader(ctx context.Context, seq uint32) (*rpc.LedgerHeaderResponse, error) {
+func (m *mockFetcher) GetLedgerHeader(ctx context.Context, seq uint32) (*LedgerHeaderResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls++
@@ -196,9 +194,9 @@ func TestPeekDoesNotUpdateRecency(t *testing.T) {
 
 func TestEvictionCallback(t *testing.T) {
 	var evictedSeq uint32
-	var evictedHeader *rpc.LedgerHeaderResponse
+	var evictedHeader *LedgerHeaderResponse
 
-	cache := NewLedgerHeaderCacheWithCallback(2, func(seq uint32, header *rpc.LedgerHeaderResponse) {
+	cache := NewLedgerHeaderCacheWithCallback(2, func(seq uint32, header *LedgerHeaderResponse) {
 		evictedSeq = seq
 		evictedHeader = header
 	})

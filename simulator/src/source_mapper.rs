@@ -27,6 +27,24 @@ pub struct SourceLocation {
     pub github_link: Option<String>,
 }
 
+impl std::fmt::Display for SourceLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(col) = self.column {
+            write!(f, "{}:{}:{}", self.file, self.line, col)
+        } else {
+            write!(f, "{}:{}", self.file, self.line)
+        }
+    }
+}
+
+impl SourceLocation {
+    /// Format as "file:line:column" or "file:line"
+    #[allow(dead_code)]
+    pub fn format_location(&self) -> String {
+        self.to_string()
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CachedLineEntry {
     start: u64,
@@ -75,8 +93,10 @@ impl SourceMapper {
 
     fn check_debug_symbols(wasm_bytes: &[u8]) -> bool {
         if let Ok(obj_file) = object::File::parse(wasm_bytes) {
-            obj_file.section_by_name(".debug_info").is_some()
-                && obj_file.section_by_name(".debug_line").is_some()
+            (obj_file.section_by_name(".debug_info").is_some()
+                || obj_file.section_by_name("debug_info").is_some())
+                && (obj_file.section_by_name(".debug_line").is_some()
+                    || obj_file.section_by_name("debug_line").is_some())
         } else {
             false
         }
@@ -93,7 +113,12 @@ impl SourceMapper {
         };
 
         let dwarf_sections = Dwarf::load(|id: SectionId| -> Result<Cow<'_, [u8]>, gimli::Error> {
-            if let Some(section) = obj_file.section_by_name(id.name()) {
+            let name = id.name();
+            let alt_name = name.strip_prefix('.').unwrap_or(name);
+            if let Some(section) = obj_file
+                .section_by_name(name)
+                .or_else(|| obj_file.section_by_name(alt_name))
+            {
                 match section.uncompressed_data() {
                     Ok(data) => Ok(data),
                     Err(_) => Ok(Cow::Borrowed(&[])),
@@ -263,6 +288,36 @@ impl SourceMapper {
         }
 
         Some(location)
+    }
+
+    /// Alias for `map_wasm_offset_to_source` to provide a convenient lookup API.
+    #[allow(dead_code)]
+    pub fn lookup(&self, wasm_offset: u64) -> Option<SourceLocation> {
+        self.map_wasm_offset_to_source(wasm_offset)
+    }
+
+    /// Map a trapping instruction's code offset to source location.
+    #[allow(dead_code)]
+    pub fn map_trapping_offset(&self, offset: u64) -> Option<SourceLocation> {
+        self.map_wasm_offset_to_source(offset)
+    }
+
+    /// Construct a `SourceMapper` with pre-populated mappings for testing and programmatic mapping.
+    #[allow(dead_code)]
+    pub fn with_mappings(entries: Vec<(u64, Option<u64>, SourceLocation)>) -> Self {
+        let line_cache = entries
+            .into_iter()
+            .map(|(start, end, location)| CachedLineEntry {
+                start,
+                end,
+                location,
+            })
+            .collect();
+        Self {
+            has_symbols: true,
+            line_cache,
+            git_repo: None,
+        }
     }
 
     #[allow(dead_code)]
@@ -456,5 +511,55 @@ mod tests {
         let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
         let hash = SourceMapCache::compute_wasm_hash(&wasm_bytes);
         assert_eq!(hash.len(), 64);
+    }
+
+    #[test]
+    fn test_source_location_display_and_format() {
+        let with_col = SourceLocation {
+            file: "contract/src/lib.rs".to_string(),
+            line: 42,
+            column: Some(15),
+            column_end: None,
+            github_link: None,
+        };
+        assert_eq!(format!("{with_col}"), "contract/src/lib.rs:42:15");
+        assert_eq!(with_col.format_location(), "contract/src/lib.rs:42:15");
+
+        let without_col = SourceLocation {
+            file: "contract/src/lib.rs".to_string(),
+            line: 42,
+            column: None,
+            column_end: None,
+            github_link: None,
+        };
+        assert_eq!(format!("{without_col}"), "contract/src/lib.rs:42");
+        assert_eq!(without_col.format_location(), "contract/src/lib.rs:42");
+    }
+
+    #[test]
+    fn test_source_mapper_lookup_and_trapping_offset() {
+        let mapper = mapper_with_cache(vec![CachedLineEntry {
+            start: 0x1000,
+            end: Some(0x1010),
+            location: SourceLocation {
+                file: "src/panic.rs".into(),
+                line: 25,
+                column: Some(4),
+                column_end: None,
+                github_link: None,
+            },
+        }]);
+
+        let loc = mapper.lookup(0x1000).expect("lookup should find entry");
+        assert_eq!(loc.file, "src/panic.rs");
+        assert_eq!(loc.line, 25);
+        assert_eq!(loc.column, Some(4));
+
+        let trap_loc = mapper
+            .map_trapping_offset(0x1004)
+            .expect("map_trapping_offset should find entry");
+        assert_eq!(trap_loc.file, "src/panic.rs");
+        assert_eq!(trap_loc.line, 25);
+        assert_eq!(trap_loc.column, Some(4));
     }
 }
