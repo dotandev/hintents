@@ -525,6 +525,7 @@ mod contract_execution_tests {
             pprof_output_path: None,
             ledger_timestamp: None,
             clock_advance_seconds: None,
+            ledger_sequence: None,
         };
         let result = execute_operations(&sim_host, &operations, &request, &mut coverage);
         assert!(result.is_ok());

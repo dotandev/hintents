@@ -77,6 +77,11 @@ pub struct SimulationRequest {
     /// clock will be at 1700003600 when simulation starts.
     #[serde(default)]
     pub clock_advance_seconds: Option<i64>,
+    /// Optional replay ledger sequence number. When provided, the simulator
+    /// compares contract instance and contract code entry TTLs against this
+    /// sequence and raises an archived-entry error if expired.
+    #[serde(default)]
+    pub ledger_sequence: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

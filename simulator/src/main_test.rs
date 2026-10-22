@@ -73,6 +73,9 @@ mod restore_preamble_tests {
             include_linear_memory: false,
             enable_asset_safety: false,
             pprof_output_path: None,
+            ledger_timestamp: None,
+            clock_advance_seconds: None,
+            ledger_sequence: None,
         };
         // Simulate main logic: inject restore_preamble into host storage
         let sim_host = crate::runner::SimHost::new(crate::runner::HostConfig::default());

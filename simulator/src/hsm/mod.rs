@@ -17,6 +17,7 @@ use std::fmt;
 use thiserror::Error;
 
 /// Generic signer interface for cryptographic operations
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Signer: Send + Sync {
     /// Sign the provided data and return a signature

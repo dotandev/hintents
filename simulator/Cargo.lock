@@ -907,6 +907,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "soroban-env-host",
  "tempfile",
  "thiserror 2.0.18",

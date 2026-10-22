@@ -18,6 +18,8 @@ mod snapshot;
 mod source_map_cache;
 mod source_mapper;
 mod stack_trace;
+#[allow(dead_code)]
+mod state;
 mod time;
 mod types;
 mod vm;
@@ -220,19 +222,9 @@ fn generate_lcov_report(coverage: &CoverageTracker, source_file: &str) -> String
 fn load_ledger_entries(
     sim_host: &mut runner::SimHost,
     entries: &HashMap<String, String>,
+    replay_sequence: Option<u32>,
 ) -> Result<usize, String> {
-    let mut loaded_entries = 0usize;
-    for (key_xdr, entry_xdr) in entries {
-        let key = snapshot::decode_ledger_key(key_xdr)
-            .map_err(|e| format!("Failed to parse LedgerKey XDR: {e}"))?;
-        let entry = snapshot::decode_ledger_entry(entry_xdr)
-            .map_err(|e| format!("Failed to parse LedgerEntry XDR: {e}"))?;
-        sim_host
-            .set_ledger_entry(key, entry)
-            .map_err(|e| format!("Failed to inject ledger entry: {e:?}"))?;
-        loaded_entries += 1;
-    }
-    Ok(loaded_entries)
+    crate::state::load_ledger_entries(sim_host, entries, replay_sequence).map_err(|e| e.to_string())
 }
 
 fn execute_operations(
@@ -588,6 +580,12 @@ fn main() {
         .with_calibration(request.resource_calibration.clone())
         .with_memory_limit(request.memory_limit);
     let mut sim_host = runner::SimHost::new(host_config);
+    if let Some(seq) = request.ledger_sequence {
+        if let Err(e) = sim_host.set_ledger_sequence(seq) {
+            send_error(format!("Failed to set ledger sequence: {e}"));
+            return;
+        }
+    }
 
     // --- START: Local WASM Loading Integration (Issue #70) ---
     if let Some(path) = &request.wasm_path {
@@ -619,7 +617,7 @@ fn main() {
 
     let mut loaded_entries_count = 0;
     if let Some(entries) = &resolved_entries {
-        match load_ledger_entries(&mut sim_host, entries) {
+        match load_ledger_entries(&mut sim_host, entries, request.ledger_sequence) {
             Ok(count) => {
                 loaded_entries_count = count;
             }
@@ -1659,8 +1657,69 @@ mod tests {
         );
 
         let mut sim_host = runner::SimHost::new(HostConfig::default());
-        let count = load_ledger_entries(&mut sim_host, &entries).expect("failed to load entries");
+        let count =
+            load_ledger_entries(&mut sim_host, &entries, None).expect("failed to load entries");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_load_ledger_entries_archived_entry_fails() {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine;
+        use sha2::Digest;
+        use soroban_env_host::xdr::{
+            ContractDataDurability, ContractDataEntry, ContractId, Hash, LedgerEntry,
+            LedgerEntryData, LedgerEntryExt, LedgerKey, LedgerKeyContractData, LedgerKeyTtl,
+            Limits, ScAddress, ScVal, TtlEntry, WriteXdr,
+        };
+
+        let contract_id = Hash([12u8; 32]);
+        let instance_key = LedgerKey::ContractData(LedgerKeyContractData {
+            contract: ScAddress::Contract(ContractId(contract_id.clone())),
+            key: ScVal::LedgerKeyContractInstance,
+            durability: ContractDataDurability::Persistent,
+        });
+        let instance_entry = LedgerEntry {
+            last_modified_ledger_seq: 100,
+            data: LedgerEntryData::ContractData(ContractDataEntry {
+                ext: soroban_env_host::xdr::ExtensionPoint::V0,
+                contract: ScAddress::Contract(ContractId(contract_id)),
+                key: ScVal::LedgerKeyContractInstance,
+                durability: ContractDataDurability::Persistent,
+                val: ScVal::U32(1),
+            }),
+            ext: LedgerEntryExt::V0,
+        };
+
+        let instance_key_xdr = instance_key.to_xdr(Limits::none()).unwrap();
+        let key_hash: [u8; 32] = sha2::Sha256::digest(&instance_key_xdr).into();
+        let ttl_key = LedgerKey::Ttl(LedgerKeyTtl {
+            key_hash: Hash(key_hash),
+        });
+        let ttl_entry = LedgerEntry {
+            last_modified_ledger_seq: 100,
+            data: LedgerEntryData::Ttl(TtlEntry {
+                key_hash: Hash(key_hash),
+                live_until_ledger_seq: 150,
+            }),
+            ext: LedgerEntryExt::V0,
+        };
+
+        let mut entries = HashMap::new();
+        entries.insert(
+            STANDARD.encode(instance_key_xdr),
+            STANDARD.encode(instance_entry.to_xdr(Limits::none()).unwrap()),
+        );
+        entries.insert(
+            STANDARD.encode(ttl_key.to_xdr(Limits::none()).unwrap()),
+            STANDARD.encode(ttl_entry.to_xdr(Limits::none()).unwrap()),
+        );
+
+        let mut sim_host = runner::SimHost::new(HostConfig::default());
+        let result = load_ledger_entries(&mut sim_host, &entries, Some(200));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains(crate::state::INVOKE_HOST_FUNCTION_ENTRY_ARCHIVED));
     }
 
     #[test]

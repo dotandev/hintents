@@ -176,6 +176,7 @@ fn test_simulation_request_with_ledger_timestamp() {
         pprof_output_path: None,
         ledger_timestamp: Some(1700000000),
         clock_advance_seconds: Some(3600),
+        ledger_sequence: None,
     };
 
     assert_eq!(request.ledger_timestamp, Some(1700000000));
@@ -214,6 +215,7 @@ fn test_simulation_request_fields_are_optional() {
         pprof_output_path: None,
         ledger_timestamp: None,
         clock_advance_seconds: None,
+        ledger_sequence: None,
     };
 
     assert_eq!(request.ledger_timestamp, None);

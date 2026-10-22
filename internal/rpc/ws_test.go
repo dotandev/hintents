@@ -320,18 +320,14 @@ func TestWSRateLimiter_CleanupStaleEntries(t *testing.T) {
 
 	assert.Equal(t, 2, limiter.TotalTrackedIPs())
 
-	// Sleep longer than TTL + CleanupInterval
-	time.Sleep(60 * time.Millisecond)
-
-	limiter.mu.RLock()
-	tracked := len(limiter.entries)
-	_, idleExists := limiter.entries[ipIdle]
-	_, activeExists := limiter.entries[ipActive]
-	limiter.mu.RUnlock()
-
-	assert.False(t, idleExists, "idle entry should have been evicted")
-	assert.True(t, activeExists, "active entry must NOT be evicted")
-	assert.Equal(t, 1, tracked)
+	// Wait for background cleanup loop to evict idle entry
+	assert.Eventually(t, func() bool {
+		limiter.mu.RLock()
+		defer limiter.mu.RUnlock()
+		_, idleExists := limiter.entries[ipIdle]
+		_, activeExists := limiter.entries[ipActive]
+		return !idleExists && activeExists && len(limiter.entries) == 1
+	}, 2*time.Second, 10*time.Millisecond, "idle entry should have been evicted while active entry is kept")
 }
 
 // ---------------------------------------------------------------------------

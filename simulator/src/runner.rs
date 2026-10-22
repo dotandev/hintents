@@ -272,12 +272,36 @@ impl SimHost {
         let mut footprint_map = FootprintMap::new();
         let mut storage_map = StorageMap::new();
 
+        let mut ttl_by_hash = std::collections::HashMap::new();
+        for (_, entry) in snapshot.iter() {
+            if let soroban_env_host::xdr::LedgerEntryData::Ttl(ref ttl) = entry.data {
+                ttl_by_hash.insert(ttl.key_hash.clone(), ttl.live_until_ledger_seq);
+            }
+        }
+
         for (key_bytes, entry) in snapshot.iter() {
             let key = Rc::new(crate::snapshot::decode_ledger_key(
                 &base64::engine::general_purpose::STANDARD.encode(key_bytes),
             )?);
+            // LedgerKey::Ttl is metadata used for TTL tracking and is attached to contract entries,
+            // not stored directly in host storage map.
+            if matches!(entry.data, soroban_env_host::xdr::LedgerEntryData::Ttl(_))
+                || matches!(*key, soroban_env_host::xdr::LedgerKey::Ttl(_))
+            {
+                continue;
+            }
+            let live_until = match &entry.data {
+                soroban_env_host::xdr::LedgerEntryData::ContractData(_)
+                | soroban_env_host::xdr::LedgerEntryData::ContractCode(_) => {
+                    crate::state::compute_key_hash(&key)
+                        .ok()
+                        .and_then(|h| ttl_by_hash.get(&h).copied())
+                }
+                _ => None,
+            };
             footprint_map = footprint_map.insert(Rc::clone(&key), AccessType::ReadWrite, budget)?;
-            storage_map = storage_map.insert(key, Some((Rc::new(entry.clone()), None)), budget)?;
+            storage_map =
+                storage_map.insert(key, Some((Rc::new(entry.clone()), live_until)), budget)?;
         }
 
         let storage =
@@ -407,6 +431,34 @@ impl SimHost {
     pub fn reset_clock(&mut self) {
         self.clock.reset();
         debug!("reset simulator clock");
+    }
+
+    /// Sets the replay ledger sequence number on the host's ledger info.
+    #[allow(dead_code)]
+    pub fn set_ledger_sequence(&self, sequence: u32) -> Result<(), SimHostError> {
+        let mut info = self
+            .inner
+            .with_ledger_info(|li| Ok(li.clone()))
+            .unwrap_or_else(|_| soroban_env_host::LedgerInfo {
+                protocol_version: 21,
+                sequence_number: sequence,
+                timestamp: self.clock.get_clock(),
+                network_id: [0u8; 32],
+                base_reserve: 10,
+                min_temp_entry_ttl: 16,
+                min_persistent_entry_ttl: 4096,
+                max_entry_ttl: 6_312_000,
+            });
+        info.sequence_number = sequence;
+        self.inner.set_ledger_info(info).map_err(SimHostError::Host)
+    }
+
+    /// Returns the current simulated ledger sequence, if configured.
+    #[allow(dead_code)]
+    pub fn get_ledger_sequence(&self) -> Option<u32> {
+        self.inner
+            .with_ledger_info(|li| Ok(li.sequence_number))
+            .ok()
     }
 }
 
