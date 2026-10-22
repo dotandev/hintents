@@ -22,12 +22,16 @@ import (
 //
 // Each log record includes:
 //   - method     – HTTP verb (GET, POST, …)
-//   - url        – full request URL
+//   - url        – full request URL (sanitized)
 //   - status     – HTTP response status code
 //   - latency_ms – round-trip duration in milliseconds
+//   - headers    – sanitized request headers (authorization and other
+//     credential-bearing fields are masked, see logger.go)
 //
 // Errors from the inner transport are logged at ERROR level with an "error" field
-// instead of a status code.
+// instead of a status code. Error strings are passed through the log sanitizer
+// so private key material or bearer tokens embedded in upstream error messages
+// never reach stdout.
 func NewLoggingMiddleware() Middleware {
 	return func(next http.RoundTripper) http.RoundTripper {
 		return &loggingTransport{next: next}
@@ -55,19 +59,21 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 		logger.Logger.Error("http request failed",
 			"method", req.Method,
-			"url", req.URL.String(),
+			"url", SanitizeLogString(req.URL.String()),
 			"latency_ms", latencyMs,
 			"status", statusCode,
-			"error", err,
+			"error", SanitizeLogString(err.Error()),
+			"headers", SanitizeHeaders(req.Header),
 		)
 		return resp, err
 	}
 
 	logger.Logger.Info("http request completed",
 		"method", req.Method,
-		"url", req.URL.String(),
+		"url", SanitizeLogString(req.URL.String()),
 		"status", resp.StatusCode,
 		"latency_ms", latencyMs,
+		"headers", SanitizeHeaders(req.Header),
 	)
 	return resp, nil
 }

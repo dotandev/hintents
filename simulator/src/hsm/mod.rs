@@ -17,6 +17,9 @@ use std::fmt;
 use thiserror::Error;
 
 /// Generic signer interface for cryptographic operations
+// `async_trait` emits a bare `#[must_use]` on the desugared methods, which
+// clippy flags because `Result` is already `#[must_use]`.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Signer: Send + Sync {
     /// Sign the provided data and return a signature

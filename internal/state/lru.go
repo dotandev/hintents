@@ -7,7 +7,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/dotandev/hintents/internal/rpc"
+	"github.com/dotandev/hintents/internal/types"
 )
 
 const (
@@ -333,7 +333,7 @@ func (c *LRUCache[K, V]) EvictionCount() uint64 {
 
 // LedgerFetcher fetches ledger headers from the network (e.g. *rpc.Client).
 type LedgerFetcher interface {
-	GetLedgerHeader(ctx context.Context, sequence uint32) (*rpc.LedgerHeaderResponse, error)
+	GetLedgerHeader(ctx context.Context, sequence uint32) (*types.LedgerHeaderResponse, error)
 }
 
 // LedgerHeaderCache provides an institutional-grade, thread-safe LRU cache
@@ -341,7 +341,7 @@ type LedgerFetcher interface {
 // consumption over long-running node sessions by evicting the least-recently-used
 // ledger headers once capacity (default: 10,000) is reached.
 type LedgerHeaderCache struct {
-	lru *LRUCache[uint32, *rpc.LedgerHeaderResponse]
+	lru *LRUCache[uint32, *types.LedgerHeaderResponse]
 }
 
 // LedgerCache is an alias for LedgerHeaderCache.
@@ -356,21 +356,21 @@ func NewLedgerHeaderCache(capacity ...int) *LedgerHeaderCache {
 	}
 
 	return &LedgerHeaderCache{
-		lru: NewLRU[uint32, *rpc.LedgerHeaderResponse](capSize),
+		lru: NewLRU[uint32, *types.LedgerHeaderResponse](capSize),
 	}
 }
 
 // NewLedgerHeaderCacheWithCallback creates a new LedgerHeaderCache with an eviction callback.
-func NewLedgerHeaderCacheWithCallback(capacity int, onEvict func(seq uint32, header *rpc.LedgerHeaderResponse)) *LedgerHeaderCache {
+func NewLedgerHeaderCacheWithCallback(capacity int, onEvict func(seq uint32, header *types.LedgerHeaderResponse)) *LedgerHeaderCache {
 	if capacity <= 0 {
 		capacity = DefaultMaxLedgerHeaders
 	}
-	var cb EvictionCallback[uint32, *rpc.LedgerHeaderResponse]
+	var cb EvictionCallback[uint32, *types.LedgerHeaderResponse]
 	if onEvict != nil {
-		cb = EvictionCallback[uint32, *rpc.LedgerHeaderResponse](onEvict)
+		cb = EvictionCallback[uint32, *types.LedgerHeaderResponse](onEvict)
 	}
 	return &LedgerHeaderCache{
-		lru: NewLRU[uint32, *rpc.LedgerHeaderResponse](capacity, cb),
+		lru: NewLRU[uint32, *types.LedgerHeaderResponse](capacity, cb),
 	}
 }
 
@@ -380,14 +380,14 @@ func NewLedgerCache(capacity ...int) *LedgerCache {
 }
 
 // Get retrieves a cached ledger header by sequence, marking it as most recently used.
-func (c *LedgerHeaderCache) Get(sequence uint32) (*rpc.LedgerHeaderResponse, bool) {
+func (c *LedgerHeaderCache) Get(sequence uint32) (*types.LedgerHeaderResponse, bool) {
 	return c.lru.Get(sequence)
 }
 
 // Put caches a ledger header using header.Sequence as key.
 // If header is nil, Put is a no-op and returns false.
 // Returns true if an older ledger header was evicted to make room.
-func (c *LedgerHeaderCache) Put(header *rpc.LedgerHeaderResponse) bool {
+func (c *LedgerHeaderCache) Put(header *types.LedgerHeaderResponse) bool {
 	if header == nil {
 		return false
 	}
@@ -396,12 +396,12 @@ func (c *LedgerHeaderCache) Put(header *rpc.LedgerHeaderResponse) bool {
 
 // PutWithSequence caches a ledger header with an explicit sequence number.
 // Returns true if an older ledger header was evicted to make room.
-func (c *LedgerHeaderCache) PutWithSequence(sequence uint32, header *rpc.LedgerHeaderResponse) bool {
+func (c *LedgerHeaderCache) PutWithSequence(sequence uint32, header *types.LedgerHeaderResponse) bool {
 	return c.lru.Put(sequence, header)
 }
 
 // Peek returns the cached ledger header without modifying recency order or stats.
-func (c *LedgerHeaderCache) Peek(sequence uint32) (*rpc.LedgerHeaderResponse, bool) {
+func (c *LedgerHeaderCache) Peek(sequence uint32) (*types.LedgerHeaderResponse, bool) {
 	return c.lru.Peek(sequence)
 }
 
@@ -448,7 +448,7 @@ func (c *LedgerHeaderCache) EvictionCount() uint64 {
 // GetOrFetch retrieves a ledger header from the cache if available; otherwise,
 // fetches it from the provided LedgerFetcher, caches it (subject to LRU eviction),
 // and returns it.
-func (c *LedgerHeaderCache) GetOrFetch(ctx context.Context, fetcher LedgerFetcher, sequence uint32) (*rpc.LedgerHeaderResponse, error) {
+func (c *LedgerHeaderCache) GetOrFetch(ctx context.Context, fetcher LedgerFetcher, sequence uint32) (*types.LedgerHeaderResponse, error) {
 	if header, ok := c.Get(sequence); ok {
 		return header, nil
 	}

@@ -499,14 +499,20 @@ impl<A> TrackingAllocator<A> {
     /// Accounts for `bytes` about to be allocated, or refuses them.
     fn reserve(&self, bytes: usize) -> bool {
         let order = Ordering::Relaxed;
-        let claimed = self.live.fetch_update(order, order, |live| {
+        // A compare-exchange loop instead of `fetch_update`, which newer
+        // toolchains deprecate in favour of `try_update` (unavailable on the
+        // 1.87 MSRV job).
+        let mut live = self.live.load(order);
+        let claimed = loop {
             let next = live.saturating_add(bytes);
             if next > self.limit {
-                None
-            } else {
-                Some(next)
+                break Err(live);
             }
-        });
+            match self.live.compare_exchange_weak(live, next, order, order) {
+                Ok(previous) => break Ok(previous),
+                Err(actual) => live = actual,
+            }
+        };
 
         match claimed {
             Ok(previous) => {
