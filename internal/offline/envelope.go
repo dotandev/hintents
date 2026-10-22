@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/dotandev/hintents/internal/errors"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // EnvelopeFile is the portable JSON structure written to / read from disk.
@@ -147,4 +148,152 @@ func (e *EnvelopeFile) IsSigned() bool {
 func checksumOf(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
+}
+
+
+// ErrInvalidSequenceOrder is returned when sequential transactions for the same
+// source account in a batch do not strictly increment the sequence number by 1.
+var ErrInvalidSequenceOrder = errors.New("invalid sequence order in batch")
+
+// SequenceOrderConflictError records a sequence order mismatch between two envelopes.
+type SequenceOrderConflictError struct {
+	SourceAccount  string
+	ExpectedSeq    int64
+	ActualSeq      int64
+	PreviousTxHash string
+	CurrentTxHash  string
+}
+
+func (e *SequenceOrderConflictError) Error() string {
+	return fmt.Sprintf(
+		"%v: account %s expected sequence %d, got %d (previous tx: %s, conflicting tx: %s)",
+		ErrInvalidSequenceOrder,
+		e.SourceAccount,
+		e.ExpectedSeq,
+		e.ActualSeq,
+		e.PreviousTxHash,
+		e.CurrentTxHash,
+	)
+}
+
+func (e *SequenceOrderConflictError) Is(target error) bool {
+	return target == ErrInvalidSequenceOrder
+}
+
+type accountSequenceTracker struct {
+	seq    int64
+	txHash string
+}
+
+// ValidateBatchSequenceNumbers verifies that sequential transactions from the same
+// source account strictly increment their sequence numbers (SeqNum + 1).
+// If any sequence order violation or gap is detected, it returns a SequenceOrderConflictError
+// matching ErrInvalidSequenceOrder with details about the conflicting transaction hashes.
+func ValidateBatchSequenceNumbers(envelopes []*EnvelopeFile) error {
+	if len(envelopes) <= 1 {
+		return nil
+	}
+
+	tracked := make(map[string]accountSequenceTracker)
+
+	for i, ef := range envelopes {
+		if ef == nil {
+			return errors.WrapValidationError(fmt.Sprintf("envelope at index %d is nil", i))
+		}
+		if ef.EnvelopeXDR == "" {
+			return errors.WrapValidationError(fmt.Sprintf("envelope at index %d has empty envelope_xdr", i))
+		}
+
+		var env xdr.TransactionEnvelope
+		if err := xdr.SafeUnmarshalBase64(ef.EnvelopeXDR, &env); err != nil {
+			return errors.WrapUnmarshalFailed(err, fmt.Sprintf("envelope XDR at index %d", i))
+		}
+
+		source, seq, err := extractSourceAndSeq(&env)
+		if err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("envelope at index %d: %v", i, err))
+		}
+
+		txHash := effectiveTxHash(ef)
+
+		if prev, exists := tracked[source]; exists {
+			expectedSeq := prev.seq + 1
+			if seq != expectedSeq {
+				return &SequenceOrderConflictError{
+					SourceAccount:  source,
+					ExpectedSeq:    expectedSeq,
+					ActualSeq:      seq,
+					PreviousTxHash: prev.txHash,
+					CurrentTxHash:  txHash,
+				}
+			}
+		}
+
+		tracked[source] = accountSequenceTracker{
+			seq:    seq,
+			txHash: txHash,
+		}
+	}
+
+	return nil
+}
+
+// ValidateBatchSequenceNumbersXDR verifies sequence order directly from base64 XDR strings.
+func ValidateBatchSequenceNumbersXDR(envelopeXDRs []string) error {
+	envelopes := make([]*EnvelopeFile, len(envelopeXDRs))
+	for i, xdrStr := range envelopeXDRs {
+		envelopes[i] = &EnvelopeFile{
+			EnvelopeXDR: xdrStr,
+			Checksum:    checksumOf(xdrStr),
+		}
+	}
+	return ValidateBatchSequenceNumbers(envelopes)
+}
+
+func extractSourceAndSeq(env *xdr.TransactionEnvelope) (string, int64, error) {
+	switch env.Type {
+	case xdr.EnvelopeTypeEnvelopeTypeTxV0:
+		if env.V0 == nil {
+			return "", 0, fmt.Errorf("missing V0 transaction in envelope")
+		}
+		acc := xdr.AccountId{
+			Type:    xdr.PublicKeyTypePublicKeyTypeEd25519,
+			Ed25519: &env.V0.Tx.SourceAccountEd25519,
+		}
+		return acc.Address(), int64(env.V0.Tx.SeqNum), nil
+
+	case xdr.EnvelopeTypeEnvelopeTypeTx:
+		if env.V1 == nil {
+			return "", 0, fmt.Errorf("missing V1 transaction in envelope")
+		}
+		return env.V1.Tx.SourceAccount.Address(), int64(env.V1.Tx.SeqNum), nil
+
+	case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
+		if env.FeeBump == nil {
+			return "", 0, fmt.Errorf("missing FeeBump transaction in envelope")
+		}
+		inner := env.FeeBump.Tx.InnerTx
+		switch inner.Type {
+		case xdr.EnvelopeTypeEnvelopeTypeTx:
+			if inner.V1 == nil {
+				return "", 0, fmt.Errorf("missing V1 inner transaction in FeeBump")
+			}
+			return inner.V1.Tx.SourceAccount.Address(), int64(inner.V1.Tx.SeqNum), nil
+		default:
+			return "", 0, fmt.Errorf("unsupported inner transaction type: %v", inner.Type)
+		}
+
+	default:
+		return "", 0, fmt.Errorf("unsupported transaction envelope type: %v", env.Type)
+	}
+}
+
+func effectiveTxHash(ef *EnvelopeFile) string {
+	if ef.Metadata.TxHash != "" {
+		return ef.Metadata.TxHash
+	}
+	if ef.Checksum != "" {
+		return ef.Checksum
+	}
+	return checksumOf(ef.EnvelopeXDR)
 }
