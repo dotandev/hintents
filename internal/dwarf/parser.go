@@ -106,22 +106,83 @@ func NewParser(data []byte) (*Parser, error) {
 	return nil, ErrInvalidWASM
 }
 
-// parseWASM parses DWARF info from a WASM binary
-func parseWASM(data []byte) (*Parser, error) {
-	sections := parseWASMSections(data)
+// NewParserWithDetached creates a DWARF parser for a module binary.
+// If the module contains embedded DWARF debug info, that info is used.
+// If the module contains no embedded debug info (e.g., a stripped release build)
+// and debugData is provided, the DWARF info is loaded from debugData (such as a
+// detached .dwp or .debug.wasm file).
+func NewParserWithDetached(moduleData []byte, debugData []byte) (*Parser, error) {
+	// First attempt to parse DWARF from the module itself
+	p, err := NewParser(moduleData)
+	if err == nil && p.HasDebugInfo() {
+		return p, nil
+	}
 
-	var dwarfData *dwarf.Data
-	var err error
-	infoSec, ok := sections[".debug_info"]
-	if !ok || len(infoSec) == 0 {
+	// If no detached debug data is provided, return the module parsing result
+	if len(debugData) == 0 {
+		return p, err
+	}
+
+	// Module has no debug info (or error is ErrNoDebugInfo).
+	// Parse detached debug data (.dwp / .debug.wasm).
+	detachedParser, debugErr := NewParser(debugData)
+	if debugErr != nil {
+		if errors.Is(debugErr, ErrNoDebugInfo) && err != nil {
+			return nil, err
+		}
+		return nil, debugErr
+	}
+
+	if !detachedParser.HasDebugInfo() {
+		if err != nil {
+			return nil, err
+		}
 		return nil, ErrNoDebugInfo
 	}
-	abbrevSec := sections[".debug_abbrev"]
-	lineSec := sections[".debug_line"]
-	rangesSec := sections[".debug_ranges"]
-	strSec := sections[".debug_str"]
 
-	dwarfData, err = dwarf.New(abbrevSec, nil, nil, infoSec, lineSec, nil, rangesSec, strSec)
+	// Determine binary type: prefer module's type if known, else detached's type
+	bType := detachedParser.binaryType
+	if p != nil && p.binaryType != "" {
+		bType = p.binaryType
+	} else if len(moduleData) >= 4 && moduleData[0] == 0x00 && moduleData[1] == 0x61 && moduleData[2] == 0x73 && moduleData[3] == 0x6d {
+		bType = "wasm"
+	}
+
+	return &Parser{
+		data:       detachedParser.data,
+		binaryType: bType,
+	}, nil
+}
+
+// NewParserFromDetached creates a new DWARF parser directly from detached debug
+// symbol data (.dwp or .debug.wasm).
+func NewParserFromDetached(debugData []byte) (*Parser, error) {
+	return NewParser(debugData)
+}
+
+// parseWASM parses DWARF info from a WASM binary
+func parseWASM(data []byte) (*Parser, error) {
+	sections := ParseWASMSections(data)
+
+	getSection := func(names ...string) []byte {
+		for _, name := range names {
+			if s, ok := sections[name]; ok && len(s) > 0 {
+				return s
+			}
+		}
+		return nil
+	}
+
+	infoSec := getSection(".debug_info", ".debug_info.dwo")
+	if len(infoSec) == 0 {
+		return nil, ErrNoDebugInfo
+	}
+	abbrevSec := getSection(".debug_abbrev", ".debug_abbrev.dwo")
+	lineSec := getSection(".debug_line", ".debug_line.dwo")
+	rangesSec := getSection(".debug_ranges", ".debug_ranges.dwo")
+	strSec := getSection(".debug_str", ".debug_str.dwo")
+
+	dwarfData, err := dwarf.New(abbrevSec, nil, nil, infoSec, lineSec, nil, rangesSec, strSec)
 
 	if dwarfData == nil || err != nil {
 		// No DWARF info in WASM
@@ -134,10 +195,10 @@ func parseWASM(data []byte) (*Parser, error) {
 	}, nil
 }
 
-// parseWASMSections parses the section table of a WASM binary and returns a
-// map of custom-section names to their content bytes.  Only custom sections
+// ParseWASMSections parses the section table of a WASM binary and returns a
+// map of custom-section names to their content bytes. Only custom sections
 // (section ID 0) are collected; all other sections are skipped.
-func parseWASMSections(data []byte) map[string][]byte {
+func ParseWASMSections(data []byte) map[string][]byte {
 	sections := make(map[string][]byte)
 
 	pos := 8 // skip 4-byte magic + 4-byte version
@@ -181,6 +242,11 @@ func parseWASMSections(data []byte) map[string][]byte {
 	return sections
 }
 
+// parseWASMSections is an internal alias for ParseWASMSections.
+func parseWASMSections(data []byte) map[string][]byte {
+	return ParseWASMSections(data)
+}
+
 // readULEB128 decodes an unsigned little-endian base-128 integer starting at
 // data[pos].  It returns the value and the number of bytes consumed.  If the
 // data is truncated or malformed it returns (0, 0).
@@ -210,6 +276,15 @@ func parseELF(data []byte) (*Parser, error) {
 	}
 
 	dwarfData, err := elfFile.DWARF()
+	if err == nil && dwarfData != nil {
+		return &Parser{
+			data:       dwarfData,
+			binaryType: "elf",
+		}, nil
+	}
+
+	// Try reading split DWARF (.dwo) sections commonly found in .dwp files
+	dwarfData, err = parseELFDWO(elfFile)
 	if err != nil {
 		return nil, ErrNoDebugInfo
 	}
@@ -218,6 +293,38 @@ func parseELF(data []byte) (*Parser, error) {
 		data:       dwarfData,
 		binaryType: "elf",
 	}, nil
+}
+
+// parseELFDWO extracts DWARF data from ELF .dwo sections (used in split DWARF / .dwp files).
+func parseELFDWO(elfFile *elf.File) (*dwarf.Data, error) {
+	getSectionData := func(names ...string) []byte {
+		for _, name := range names {
+			s := elfFile.Section(name)
+			if s != nil {
+				d, err := s.Data()
+				if err == nil && len(d) > 0 {
+					return d
+				}
+			}
+		}
+		return nil
+	}
+
+	info := getSectionData(".debug_info.dwo", ".debug_info", ".zdebug_info.dwo", ".zdebug_info")
+	if len(info) == 0 {
+		return nil, ErrNoDebugInfo
+	}
+
+	abbrev := getSectionData(".debug_abbrev.dwo", ".debug_abbrev", ".zdebug_abbrev.dwo", ".zdebug_abbrev")
+	line := getSectionData(".debug_line.dwo", ".debug_line", ".zdebug_line.dwo", ".zdebug_line")
+	ranges := getSectionData(".debug_ranges.dwo", ".debug_ranges", ".zdebug_ranges.dwo", ".zdebug_ranges")
+	str := getSectionData(".debug_str.dwo", ".debug_str", ".zdebug_str.dwo", ".zdebug_str")
+
+	d, err := dwarf.New(abbrev, nil, nil, info, line, nil, ranges, str)
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 // parseMacho parses DWARF info from a Mach-O binary
@@ -798,4 +905,37 @@ func (p *Parser) HasDebugInfo() bool {
 // BinaryType returns the type of binary being parsed
 func (p *Parser) BinaryType() string {
 	return p.binaryType
+}
+
+// Data returns the underlying DWARF data, or nil if none is loaded.
+func (p *Parser) Data() *dwarf.Data {
+	return p.data
+}
+
+// SetData sets the underlying DWARF data for the parser.
+func (p *Parser) SetData(data *dwarf.Data) {
+	p.data = data
+}
+
+// LoadDetached loads DWARF debug information from detached symbol data
+// (.dwp or .debug.wasm) into an existing Parser. This is used when the
+// main module has no embedded DWARF info.
+func (p *Parser) LoadDetached(debugData []byte) error {
+	detachedParser, err := NewParser(debugData)
+	if err != nil {
+		return err
+	}
+	if !detachedParser.HasDebugInfo() {
+		return ErrNoDebugInfo
+	}
+	p.data = detachedParser.data
+	if p.binaryType == "" {
+		p.binaryType = detachedParser.binaryType
+	}
+	return nil
+}
+
+// LoadDetachedDWARF is an alias for LoadDetached.
+func (p *Parser) LoadDetachedDWARF(debugData []byte) error {
+	return p.LoadDetached(debugData)
 }

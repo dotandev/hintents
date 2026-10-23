@@ -4,6 +4,8 @@
 package dwarf
 
 import (
+	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -332,5 +334,171 @@ func TestInlinedSubroutineInfo_ZeroValues(t *testing.T) {
 	}
 	if info.CallSite.Line != 0 {
 		t.Errorf("expected zero CallSite.Line, got %d", info.CallSite.Line)
+	}
+}
+
+// =============================================================================
+// Detached DWARF & Split DWO Tests
+// =============================================================================
+
+func buildMockWASM(sections map[string][]byte) []byte {
+	var buf bytes.Buffer
+	// WASM magic + version 1
+	buf.Write([]byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00})
+
+	for name, content := range sections {
+		// Section ID 0 = custom section
+		buf.WriteByte(0x00)
+
+		nameBytes := []byte(name)
+		var nameLenBuf []byte
+		nameLenBuf = appendTestULEB128(nameLenBuf, uint64(len(nameBytes)))
+
+		payloadLen := len(nameLenBuf) + len(nameBytes) + len(content)
+		var payloadLenBuf []byte
+		payloadLenBuf = appendTestULEB128(payloadLenBuf, uint64(payloadLen))
+
+		buf.Write(payloadLenBuf)
+		buf.Write(nameLenBuf)
+		buf.Write(nameBytes)
+		buf.Write(content)
+	}
+
+	return buf.Bytes()
+}
+
+func appendTestULEB128(dst []byte, val uint64) []byte {
+	for {
+		b := byte(val & 0x7f)
+		val >>= 7
+		if val != 0 {
+			b |= 0x80
+		}
+		dst = append(dst, b)
+		if val == 0 {
+			break
+		}
+	}
+	return dst
+}
+
+// sampleDWARFSections returns minimal valid DWARF 4 compile unit sections.
+func sampleDWARFSections(isDWO bool) map[string][]byte {
+	abbrev := []byte{0x01, 0x11, 0x00, 0x00, 0x00, 0x00}
+	info := []byte{
+		0x08, 0x00, 0x00, 0x00, // length
+		0x04, 0x00, // version = 4
+		0x00, 0x00, 0x00, 0x00, // abbrev offset
+		0x04, // addr size
+		0x01, // DIE tag 1
+	}
+
+	if isDWO {
+		return map[string][]byte{
+			".debug_abbrev.dwo": abbrev,
+			".debug_info.dwo":   info,
+		}
+	}
+	return map[string][]byte{
+		".debug_abbrev": abbrev,
+		".debug_info":   info,
+	}
+}
+
+func TestNewParserWithDetached_Embedded(t *testing.T) {
+	module := buildMockWASM(sampleDWARFSections(false))
+	p, err := NewParserWithDetached(module, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !p.HasDebugInfo() {
+		t.Fatal("expected embedded debug info to be present")
+	}
+	if p.BinaryType() != "wasm" {
+		t.Errorf("binaryType = %q, want wasm", p.BinaryType())
+	}
+}
+
+func TestNewParserWithDetached_StrippedModuleWithDetachedWASM(t *testing.T) {
+	// Stripped WASM: valid magic, no debug sections
+	stripped := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	detached := buildMockWASM(sampleDWARFSections(false))
+
+	p, err := NewParserWithDetached(stripped, detached)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !p.HasDebugInfo() {
+		t.Fatal("expected debug info loaded from detached WASM")
+	}
+	if p.BinaryType() != "wasm" {
+		t.Errorf("binaryType = %q, want wasm", p.BinaryType())
+	}
+}
+
+func TestNewParserWithDetached_SplitDWO(t *testing.T) {
+	stripped := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	detached := buildMockWASM(sampleDWARFSections(true))
+
+	p, err := NewParserWithDetached(stripped, detached)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !p.HasDebugInfo() {
+		t.Fatal("expected debug info loaded from split DWO WASM")
+	}
+}
+
+func TestNewParserWithDetached_NoDebugData(t *testing.T) {
+	stripped := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	_, err := NewParserWithDetached(stripped, nil)
+	if !errors.Is(err, ErrNoDebugInfo) {
+		t.Fatalf("expected ErrNoDebugInfo, got %v", err)
+	}
+}
+
+func TestNewParserWithDetached_InvalidModuleAndNoDetached(t *testing.T) {
+	invalid := []byte{0x01, 0x02}
+	_, err := NewParserWithDetached(invalid, nil)
+	if !errors.Is(err, ErrInvalidWASM) {
+		t.Fatalf("expected ErrInvalidWASM, got %v", err)
+	}
+}
+
+func TestParser_LoadDetached(t *testing.T) {
+	p := &Parser{binaryType: "wasm"}
+	if p.HasDebugInfo() {
+		t.Fatal("expected no debug info initially")
+	}
+
+	detached := buildMockWASM(sampleDWARFSections(false))
+	if err := p.LoadDetached(detached); err != nil {
+		t.Fatalf("LoadDetached failed: %v", err)
+	}
+
+	if !p.HasDebugInfo() {
+		t.Fatal("expected debug info after LoadDetached")
+	}
+	if p.Data() == nil {
+		t.Fatal("expected non-nil Data()")
+	}
+}
+
+func TestParser_LoadDetached_Invalid(t *testing.T) {
+	p := &Parser{binaryType: "wasm"}
+	err := p.LoadDetached([]byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00})
+	if !errors.Is(err, ErrNoDebugInfo) {
+		t.Fatalf("expected ErrNoDebugInfo for debug data without DWARF, got %v", err)
+	}
+}
+
+func TestNewParserFromDetached(t *testing.T) {
+	detached := buildMockWASM(sampleDWARFSections(false))
+	p, err := NewParserFromDetached(detached)
+	if err != nil {
+		t.Fatalf("NewParserFromDetached failed: %v", err)
+	}
+	if !p.HasDebugInfo() {
+		t.Fatal("expected debug info")
 	}
 }
