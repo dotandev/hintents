@@ -6,11 +6,25 @@ The Error Suggestion Engine is a heuristic-based system that analyzes Soroban tr
 
 ## Features
 
-- **Heuristic Analysis**: Pattern matching against common error scenarios
+- **Structured Analysis**: Typed Soroban error categories and codes take priority over message text
 - **Confidence Levels**: Each suggestion includes a confidence rating (high, medium, low)
 - **Extensible Rules**: Support for custom error patterns
 - **Call Tree Analysis**: Analyzes entire execution traces including nested contract calls
 - **Clear Marking**: All suggestions are clearly marked as "Potential Fixes"
+
+Both diagnostic decoding paths retain the XDR error, contract function, and
+argument types separately from the displayed topics and data. Built-in rules
+recognize storage `MissingValue`, authorization errors, value/object input errors,
+and resource-budget errors without depending on the wording of a host message.
+When an event matches a structured rule, text-only matches for that event are
+ignored. Events without a known structured match retain the existing keyword
+and event-check fallback, confidence scoring, ordering, and deduplication.
+
+Custom `ErrorPattern` rules can supply `Structured` criteria. Error types, error
+codes, and function names are alternatives within each field; populated fields
+must all match, and every requested argument type must be present. Empty criteria
+do not match. Contract-defined numeric errors are not interpreted as host error
+codes because their meanings depend on the contract.
 
 ## Built-in Rules
 

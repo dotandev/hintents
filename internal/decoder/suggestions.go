@@ -5,7 +5,10 @@ package decoder
 
 import (
 	"fmt"
+	"slices"
 	"strings"
+
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 const (
@@ -25,6 +28,7 @@ type ruleMatch struct {
 	keywordMatches  int
 	exactKeywordHit bool
 	eventCheckMatch bool
+	structuredMatch bool
 }
 
 type scoredSuggestion struct {
@@ -35,9 +39,42 @@ type scoredSuggestion struct {
 // ErrorPattern defines a heuristic rule for error detection
 type ErrorPattern struct {
 	Name        string
+	Structured  []DiagnosticCriteria
 	Keywords    []string
 	EventChecks []func(DecodedEvent) bool
 	Suggestion  Suggestion
+}
+
+// DiagnosticCriteria matches alternatives within a field and requires every
+// populated field. ArgumentTypes requires all listed types to be present.
+type DiagnosticCriteria struct {
+	ErrorTypes    []xdr.ScErrorType
+	ErrorCodes    []xdr.ScErrorCode
+	Functions     []string
+	ArgumentTypes []xdr.ScValType
+}
+
+func (c DiagnosticCriteria) matches(event DecodedEvent) bool {
+	if len(c.ErrorTypes)+len(c.ErrorCodes)+len(c.Functions)+len(c.ArgumentTypes) == 0 {
+		return false
+	}
+	if len(c.ErrorTypes) > 0 && (event.Error == nil || !slices.Contains(c.ErrorTypes, event.Error.Type)) {
+		return false
+	}
+	if len(c.ErrorCodes) > 0 {
+		if event.Error == nil || event.Error.Type == xdr.ScErrorTypeSceContract || event.Error.Code == nil || !slices.Contains(c.ErrorCodes, *event.Error.Code) {
+			return false
+		}
+	}
+	if len(c.Functions) > 0 && !slices.Contains(c.Functions, event.ContractFunction) {
+		return false
+	}
+	for _, argumentType := range c.ArgumentTypes {
+		if !slices.Contains(event.ArgumentTypes, argumentType) {
+			return false
+		}
+	}
+	return true
 }
 
 // SuggestionEngine provides heuristic-based error suggestions
@@ -58,7 +95,11 @@ func NewSuggestionEngine() *SuggestionEngine {
 func (e *SuggestionEngine) loadDefaultRules() {
 	// Rule 1: Uninitialized contract
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "uninitialized_contract",
+		Name: "uninitialized_contract",
+		Structured: []DiagnosticCriteria{{
+			ErrorTypes: []xdr.ScErrorType{xdr.ScErrorTypeSceStorage},
+			ErrorCodes: []xdr.ScErrorCode{xdr.ScErrorCodeScecMissingValue},
+		}},
 		Keywords: []string{"empty", "not found", "missing", "null"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
@@ -80,7 +121,10 @@ func (e *SuggestionEngine) loadDefaultRules() {
 
 	// Rule 2: Insufficient authorization
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "missing_authorization",
+		Name: "missing_authorization",
+		Structured: []DiagnosticCriteria{{
+			ErrorTypes: []xdr.ScErrorType{xdr.ScErrorTypeSceAuth},
+		}},
 		Keywords: []string{"auth", "unauthorized", "permission", "signature"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
@@ -124,7 +168,11 @@ func (e *SuggestionEngine) loadDefaultRules() {
 
 	// Rule 4: Invalid parameters
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "invalid_parameters",
+		Name: "invalid_parameters",
+		Structured: []DiagnosticCriteria{{
+			ErrorTypes: []xdr.ScErrorType{xdr.ScErrorTypeSceValue, xdr.ScErrorTypeSceObject},
+			ErrorCodes: []xdr.ScErrorCode{xdr.ScErrorCodeScecInvalidInput, xdr.ScErrorCodeScecUnexpectedType, xdr.ScErrorCodeScecUnexpectedSize},
+		}},
 		Keywords: []string{"invalid", "malformed", "bad", "parameter"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
@@ -162,7 +210,10 @@ func (e *SuggestionEngine) loadDefaultRules() {
 
 	// Rule 6: Exceeded resource limits
 	e.rules = append(e.rules, ErrorPattern{
-		Name:     "resource_limit_exceeded",
+		Name: "resource_limit_exceeded",
+		Structured: []DiagnosticCriteria{{
+			ErrorTypes: []xdr.ScErrorType{xdr.ScErrorTypeSceBudget},
+		}},
 		Keywords: []string{"limit", "exceeded", "quota", "budget"},
 		EventChecks: []func(DecodedEvent) bool{
 			func(e DecodedEvent) bool {
@@ -211,9 +262,21 @@ func (e *SuggestionEngine) AnalyzeEvents(events []DecodedEvent) []Suggestion {
 	bestMatches := make(map[string]scoredSuggestion, len(e.rules))
 
 	for _, event := range events {
+		structuredOnly := false
+		for _, rule := range e.rules {
+			for _, criteria := range rule.Structured {
+				if criteria.matches(event) {
+					structuredOnly = true
+					break
+				}
+			}
+			if structuredOnly {
+				break
+			}
+		}
 		for _, rule := range e.rules {
 			match, matched := e.matchRule(rule, event)
-			if !matched {
+			if !matched || (structuredOnly && !match.structuredMatch) {
 				continue
 			}
 
@@ -243,6 +306,11 @@ func (e *SuggestionEngine) AnalyzeEvents(events []DecodedEvent) []Suggestion {
 }
 
 func (e *SuggestionEngine) matchRule(rule ErrorPattern, event DecodedEvent) (ruleMatch, bool) {
+	for _, criteria := range rule.Structured {
+		if criteria.matches(event) {
+			return ruleMatch{structuredMatch: true}, true
+		}
+	}
 	match := ruleMatch{}
 	topics := make([]string, 0, len(event.Topics))
 	for _, topic := range event.Topics {
@@ -280,6 +348,9 @@ func (e *SuggestionEngine) matchRule(rule ErrorPattern, event DecodedEvent) (rul
 }
 
 func (m ruleMatch) specificityScore() int {
+	if m.structuredMatch {
+		return 4
+	}
 	score := 0
 	if m.eventCheckMatch {
 		score += 2

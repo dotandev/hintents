@@ -27,17 +27,24 @@ type CallNode struct {
 
 // DecodedEvent is a human-friendly representation of a DiagnosticEvent
 type DecodedEvent struct {
-	ContractID string   `json:"contract_id"`
-	Topics     []string `json:"topics"`
-	Data       string   `json:"data"`
-	CPU        uint64   `json:"cpu,omitempty"`
-	Memory     uint64   `json:"mem,omitempty"`
+	ContractID       string          `json:"contract_id"`
+	Topics           []string        `json:"topics"`
+	Data             string          `json:"data"`
+	CPU              uint64          `json:"cpu,omitempty"`
+	Memory           uint64          `json:"mem,omitempty"`
+	Error            *xdr.ScError    `json:"error,omitempty"`
+	ContractFunction string          `json:"contract_function,omitempty"`
+	ArgumentTypes    []xdr.ScValType `json:"argument_types,omitempty"`
+
+	hasCPU      bool
+	hasMemory   bool
+	topicSymbol string
 }
 
 // DecodeEvents builds a call hierarchy from a list of base64-encoded XDR DiagnosticEvents.
 // Deprecated: use DecodeDiagnosticEvents instead for gas-aware traces.
 func DecodeEvents(eventsXdr []string, maxDepth int) (*CallNode, error) {
-	var diagEvents []simulator.DiagnosticEvent
+	var diagEvents []DecodedEvent
 	for _, eventStr := range eventsXdr {
 		var diag xdr.DiagnosticEvent
 		data, err := base64.StdEncoding.DecodeString(eventStr)
@@ -48,15 +55,13 @@ func DecodeEvents(eventsXdr []string, maxDepth int) (*CallNode, error) {
 			return nil, fmt.Errorf("failed to unmarshal XDR event: %w", err)
 		}
 
-		decoded := simulator.DiagnosticEvent{
-			EventType:                fmt.Sprintf("%v", diag.Event.Type),
-			Topics:                   make([]string, 0, len(diag.Event.Body.V0.Topics)),
-			Data:                     fmt.Sprintf("%v", diag.Event.Body.V0.Data.Type),
-			InSuccessfulContractCall: diag.InSuccessfulContractCall,
+		decoded := DecodedEvent{
+			Topics: make([]string, 0, len(diag.Event.Body.V0.Topics)),
+			Data:   fmt.Sprintf("%v", diag.Event.Body.V0.Data.Type),
 		}
 		if diag.Event.ContractId != nil {
 			id := hex.EncodeToString(diag.Event.ContractId[:])
-			decoded.ContractID = &id
+			decoded.ContractID = id
 		}
 		for _, topic := range diag.Event.Body.V0.Topics {
 			if topic.Type == xdr.ScValTypeScvSymbol {
@@ -65,21 +70,16 @@ func DecodeEvents(eventsXdr []string, maxDepth int) (*CallNode, error) {
 				decoded.Topics = append(decoded.Topics, fmt.Sprintf("%v", topic.Type))
 			}
 		}
+		populateDiagnosticFields(&decoded, diag.Event.Body.V0.Topics, &diag.Event.Body.V0.Data)
 		diagEvents = append(diagEvents, decoded)
 	}
 
-	return DecodeDiagnosticEvents(diagEvents, maxDepth)
+	return buildCallTree(diagEvents, maxDepth)
 }
 
 // DecodeDiagnosticEvents builds a call hierarchy from a list of decoded simulator DiagnosticEvents
 func DecodeDiagnosticEvents(events []simulator.DiagnosticEvent, maxDepth int) (*CallNode, error) {
-	root := &CallNode{
-		ContractID: "ROOT",
-		Function:   "TOP_LEVEL",
-	}
-	current := root
-	currentDepth := 0
-
+	decodedEvents := make([]DecodedEvent, 0, len(events))
 	for _, event := range events {
 		decoded := DecodedEvent{
 			Topics: event.Topics,
@@ -90,18 +90,81 @@ func DecodeDiagnosticEvents(events []simulator.DiagnosticEvent, maxDepth int) (*
 		}
 		if event.CPU != nil {
 			decoded.CPU = *event.CPU
+			decoded.hasCPU = true
 		}
 		if event.Memory != nil {
 			decoded.Memory = *event.Memory
+			decoded.hasMemory = true
+		}
+		// Legacy callers also pass display text; leave it available as fallback.
+		topics, _ := event.ParseTopics()
+		var data *xdr.ScVal
+		if event.Data != "" {
+			if value, err := event.ParseData(); err == nil {
+				data = &value
+			}
+		}
+		populateDiagnosticFields(&decoded, topics, data)
+		decodedEvents = append(decodedEvents, decoded)
+	}
+	return buildCallTree(decodedEvents, maxDepth)
+}
+
+// populateDiagnosticFields retains typed XDR independently of display text.
+func populateDiagnosticFields(event *DecodedEvent, topics []xdr.ScVal, data *xdr.ScVal) {
+	if len(topics) > 0 && topics[0].Type == xdr.ScValTypeScvSymbol && topics[0].Sym != nil {
+		event.topicSymbol = string(*topics[0].Sym)
+	}
+	for _, topic := range topics {
+		if topic.Type == xdr.ScValTypeScvError && topic.Error != nil {
+			event.Error = topic.Error
+			break
+		}
+	}
+	functionIndex := 1
+	if event.topicSymbol == "fn_call" && len(topics) > 2 && topics[1].Type == xdr.ScValTypeScvBytes {
+		// Host calls include the callee's contract ID before the function name.
+		functionIndex = 2
+		if topics[1].Bytes != nil {
+			event.ContractID = hex.EncodeToString(*topics[1].Bytes)
+		}
+	}
+	if (event.topicSymbol == "fn_call" || event.topicSymbol == "fn_return") && len(topics) > functionIndex && topics[functionIndex].Sym != nil {
+		event.ContractFunction = string(*topics[functionIndex].Sym)
+	}
+	if data == nil {
+		return
+	}
+	values := []xdr.ScVal{*data}
+	if data.Type == xdr.ScValTypeScvVec && data.Vec != nil && *data.Vec != nil {
+		values = **data.Vec
+	}
+	for _, value := range values {
+		event.ArgumentTypes = append(event.ArgumentTypes, value.Type)
+		if event.Error == nil && value.Type == xdr.ScValTypeScvError && value.Error != nil {
+			event.Error = value.Error
+		}
+	}
+}
+
+func buildCallTree(events []DecodedEvent, maxDepth int) (*CallNode, error) {
+	root := &CallNode{ContractID: "ROOT", Function: "TOP_LEVEL"}
+	current := root
+	currentDepth := 0
+	skippedDepth := 0
+	for _, decoded := range events {
+		if decoded.ContractFunction == "" && current != root && !isFunctionCall(decoded) && !isFunctionReturn(decoded) {
+			decoded.ContractFunction = current.Function
 		}
 
 		if isFunctionCall(decoded) {
-			if maxDepth > 0 && currentDepth >= maxDepth {
+			if skippedDepth > 0 || (maxDepth > 0 && currentDepth >= maxDepth) {
+				skippedDepth++
 				// Depth limit reached. Truncate this branch.
 				// Add a warning event to the current node if not already present
 				hasWarning := false
 				for _, e := range current.Events {
-					if e.Topics[0] == "warning" && e.Data == "Max trace depth reached; branch truncated" {
+					if len(e.Topics) > 0 && e.Topics[0] == "warning" && e.Data == "Max trace depth reached; branch truncated" {
 						hasWarning = true
 						break
 					}
@@ -121,19 +184,20 @@ func DecodeDiagnosticEvents(events []simulator.DiagnosticEvent, maxDepth int) (*
 				Function:   extractFunctionName(decoded),
 				parent:     current,
 			}
-			if event.CPU != nil {
-				child.CPUInstructions = *event.CPU
+			if decoded.hasCPU {
+				child.CPUInstructions = decoded.CPU
 			}
-			if event.Memory != nil {
-				child.MemoryBytes = *event.Memory
+			if decoded.hasMemory {
+				child.MemoryBytes = decoded.Memory
 			}
 			current.SubCalls = append(current.SubCalls, child)
 			current = child
 			currentDepth++
 			current.Events = append(current.Events, decoded)
 		} else if isFunctionReturn(decoded) {
-			if maxDepth > 0 && currentDepth >= maxDepth {
+			if skippedDepth > 0 {
 				// We skipped the corresponding call, so we must skip the return.
+				skippedDepth--
 				continue
 			}
 
@@ -159,11 +223,11 @@ func DecodeDiagnosticEvents(events []simulator.DiagnosticEvent, maxDepth int) (*
 			}
 
 			// Calculate gas used by this node if both call and return have budget
-			if event.CPU != nil && current.CPUInstructions > 0 {
-				current.CPUInstructions = *event.CPU - current.CPUInstructions
+			if decoded.hasCPU && current.CPUInstructions > 0 {
+				current.CPUInstructions = decoded.CPU - current.CPUInstructions
 			}
-			if event.Memory != nil && current.MemoryBytes > 0 {
-				current.MemoryBytes = *event.Memory - current.MemoryBytes
+			if decoded.hasMemory && current.MemoryBytes > 0 {
+				current.MemoryBytes = decoded.Memory - current.MemoryBytes
 			}
 
 			current.Events = append(current.Events, decoded)
@@ -180,14 +244,17 @@ func DecodeDiagnosticEvents(events []simulator.DiagnosticEvent, maxDepth int) (*
 }
 
 func isFunctionCall(e DecodedEvent) bool {
-	return len(e.Topics) > 0 && e.Topics[0] == "fn_call"
+	return e.topicSymbol == "fn_call" || (len(e.Topics) > 0 && e.Topics[0] == "fn_call")
 }
 
 func isFunctionReturn(e DecodedEvent) bool {
-	return len(e.Topics) > 0 && e.Topics[0] == "fn_return"
+	return e.topicSymbol == "fn_return" || (len(e.Topics) > 0 && e.Topics[0] == "fn_return")
 }
 
 func extractFunctionName(e DecodedEvent) string {
+	if e.ContractFunction != "" {
+		return e.ContractFunction
+	}
 	if len(e.Topics) > 1 {
 		return e.Topics[1]
 	}
