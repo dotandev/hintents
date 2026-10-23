@@ -19,7 +19,79 @@
 #![allow(dead_code)]
 
 use crate::snapshot::LedgerSnapshot;
+use soroban_env_host::xdr::{Limits, SorobanAuthorizationEntry, SorobanAuthorizedInvocation};
 use std::fmt;
+
+/// Maximum supported depth of a Soroban authorization invocation tree.
+///
+/// The root invocation is level 1, so the deepest accepted tree is a root with
+/// sub-invocations nested three levels below it
+/// (root -> child -> grandchild -> great-grandchild). A root with no
+/// sub-invocations has depth 1.
+pub const MAX_AUTH_DEPTH: usize = 4;
+
+/// Maximum nesting depth accepted when decoding untrusted XDR.
+///
+/// XDR decoding recurses once per nested type, so decoding with
+/// [`Limits::none`] lets a crafted, deeply nested authorization tree overflow
+/// the stack before any validation can run. 500 matches the depth limit the
+/// Soroban host itself applies to XDR reads and writes.
+pub const MAX_XDR_DECODE_DEPTH: u32 = 500;
+
+/// XDR decode limits for untrusted input: depth-bounded to prevent stack
+/// overflow, with no length cap so large but legitimate envelopes still parse.
+#[must_use]
+pub fn untrusted_xdr_limits() -> Limits {
+    Limits::depth(MAX_XDR_DECODE_DEPTH)
+}
+
+/// Returned when an authorization tree is nested deeper than the supported
+/// maximum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("authorization tree depth exceeds the maximum of {max_depth} levels")]
+pub struct AuthDepthExceeded {
+    /// The depth limit that was exceeded.
+    pub max_depth: usize,
+}
+
+/// Verifies that an authorization invocation tree is at most `max_depth`
+/// levels deep, counting the root as level 1.
+///
+/// The traversal is iterative (explicit stack) so the verifier itself cannot
+/// overflow the call stack regardless of input shape, and it stops at the first
+/// node that exceeds `max_depth`, so a hostile tree is rejected after visiting
+/// at most `max_depth + 1` levels along any path.
+///
+/// # Errors
+///
+/// Returns [`AuthDepthExceeded`] if any invocation sits deeper than
+/// `max_depth`.
+pub fn verify_auth_tree_depth(
+    root: &SorobanAuthorizedInvocation,
+    max_depth: usize,
+) -> Result<(), AuthDepthExceeded> {
+    let mut stack: Vec<(&SorobanAuthorizedInvocation, usize)> = vec![(root, 1)];
+    while let Some((node, depth)) = stack.pop() {
+        if depth > max_depth {
+            return Err(AuthDepthExceeded { max_depth });
+        }
+        for child in node.sub_invocations.iter() {
+            stack.push((child, depth + 1));
+        }
+    }
+    Ok(())
+}
+
+/// Verifies every authorization entry attached to an `InvokeHostFunction`
+/// operation against [`MAX_AUTH_DEPTH`].
+///
+/// # Errors
+///
+/// Returns [`AuthDepthExceeded`] if any entry's invocation tree is too deep.
+pub fn verify_contract_auth(auth: &[SorobanAuthorizationEntry]) -> Result<(), AuthDepthExceeded> {
+    auth.iter()
+        .try_for_each(|entry| verify_auth_tree_depth(&entry.root_invocation, MAX_AUTH_DEPTH))
+}
 
 /// Unique identifier for a snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -313,6 +385,46 @@ impl Default for HostSnapshotTracker {
     }
 }
 
+/// Builders for authorization trees, shared by unit tests in this crate.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use soroban_env_host::xdr::{
+        ContractId, Hash, InvokeContractArgs, ScAddress, ScSymbol, SorobanAuthorizationEntry,
+        SorobanAuthorizedFunction, SorobanAuthorizedInvocation, SorobanCredentials, VecM,
+    };
+
+    pub(crate) fn invocation(
+        children: Vec<SorobanAuthorizedInvocation>,
+    ) -> SorobanAuthorizedInvocation {
+        SorobanAuthorizedInvocation {
+            function: SorobanAuthorizedFunction::ContractFn(InvokeContractArgs {
+                contract_address: ScAddress::Contract(ContractId(Hash([7u8; 32]))),
+                function_name: ScSymbol("f".try_into().unwrap()),
+                args: VecM::default(),
+            }),
+            sub_invocations: children.try_into().unwrap(),
+        }
+    }
+
+    /// A linear chain with `depth` levels (root is level 1). Built bottom-up
+    /// with a loop, so constructing even a huge chain does not recurse.
+    pub(crate) fn chain(depth: usize) -> SorobanAuthorizedInvocation {
+        assert!(depth >= 1);
+        let mut node = invocation(vec![]);
+        for _ in 1..depth {
+            node = invocation(vec![node]);
+        }
+        node
+    }
+
+    pub(crate) fn entry(root: SorobanAuthorizedInvocation) -> SorobanAuthorizationEntry {
+        SorobanAuthorizationEntry {
+            credentials: SorobanCredentials::SourceAccount,
+            root_invocation: root,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,5 +594,116 @@ mod tests {
     fn test_snapshot_id_display() {
         let id = SnapshotId(42);
         assert_eq!(format!("{}", id), "snap-42");
+    }
+
+    // ---- Authorization tree depth limit ----------------------------------
+
+    use super::test_support::{chain, entry, invocation};
+    use soroban_env_host::xdr::{ReadXdr, WriteXdr};
+
+    #[test]
+    fn test_auth_depth_up_to_max_is_accepted() {
+        for depth in 1..=MAX_AUTH_DEPTH {
+            let e = entry(chain(depth));
+            assert_eq!(verify_contract_auth(&[e]), Ok(()), "depth {depth}");
+        }
+    }
+
+    #[test]
+    fn test_auth_depth_max_plus_one_is_rejected() {
+        let e = entry(chain(MAX_AUTH_DEPTH + 1));
+        assert_eq!(
+            verify_contract_auth(&[e]),
+            Err(AuthDepthExceeded {
+                max_depth: MAX_AUTH_DEPTH
+            })
+        );
+    }
+
+    #[test]
+    fn test_auth_depth_counts_root_as_level_one() {
+        // A lone root is depth 1; each sub-invocation adds one level.
+        assert_eq!(verify_auth_tree_depth(&chain(1), 1), Ok(()));
+        assert!(verify_auth_tree_depth(&chain(2), 1).is_err());
+    }
+
+    #[test]
+    fn test_auth_depth_checks_every_branch_and_every_entry() {
+        // Shallow siblings must not mask one deep branch.
+        let mixed = invocation(vec![chain(1), chain(MAX_AUTH_DEPTH), chain(2)]);
+        assert!(verify_auth_tree_depth(&mixed, MAX_AUTH_DEPTH).is_err());
+
+        // A single bad entry among valid ones fails the whole set.
+        let entries = vec![
+            entry(chain(1)),
+            entry(chain(MAX_AUTH_DEPTH)),
+            entry(chain(MAX_AUTH_DEPTH + 1)),
+        ];
+        assert!(verify_contract_auth(&entries).is_err());
+        assert_eq!(verify_contract_auth(&entries[..2]), Ok(()));
+        assert_eq!(verify_contract_auth(&[]), Ok(()));
+    }
+
+    #[test]
+    fn test_auth_wide_shallow_tree_is_accepted() {
+        let wide = invocation((0..1_000).map(|_| chain(MAX_AUTH_DEPTH - 1)).collect());
+        assert_eq!(verify_auth_tree_depth(&wide, MAX_AUTH_DEPTH), Ok(()));
+    }
+
+    #[test]
+    fn test_auth_extremely_deep_tree_does_not_overflow_stack() {
+        // 200k levels would overflow the stack of any recursive traversal.
+        let deep = entry(chain(200_000));
+        let result = verify_contract_auth(std::slice::from_ref(&deep));
+        // Dropping a tree this deep is itself recursive, so leak it instead.
+        std::mem::forget(deep);
+        assert_eq!(
+            result,
+            Err(AuthDepthExceeded {
+                max_depth: MAX_AUTH_DEPTH
+            })
+        );
+    }
+
+    #[test]
+    fn test_auth_depth_exceeded_message_names_the_limit() {
+        let err = AuthDepthExceeded { max_depth: 4 };
+        assert_eq!(
+            err.to_string(),
+            "authorization tree depth exceeds the maximum of 4 levels"
+        );
+    }
+
+    /// Raw XDR for a linear invocation chain of `depth` levels, assembled
+    /// without any recursive encoder.
+    fn chain_xdr(depth: usize) -> Vec<u8> {
+        let leaf = invocation(vec![]).to_xdr(Limits::none()).unwrap();
+        // Everything except the trailing 4-byte (empty) sub_invocations length.
+        let function = &leaf[..leaf.len() - 4];
+        let mut out = Vec::with_capacity(depth * (function.len() + 4));
+        for _ in 1..depth {
+            out.extend_from_slice(function);
+            out.extend_from_slice(&1u32.to_be_bytes()); // one sub-invocation
+        }
+        out.extend_from_slice(&leaf);
+        out
+    }
+
+    #[test]
+    fn test_untrusted_xdr_decode_rejects_pathological_depth_without_overflow() {
+        let bytes = chain_xdr(100_000);
+        assert!(
+            SorobanAuthorizedInvocation::from_xdr(&bytes, untrusted_xdr_limits()).is_err(),
+            "decode must fail cleanly instead of recursing 100k levels"
+        );
+    }
+
+    #[test]
+    fn test_untrusted_xdr_decode_accepts_valid_tree_and_roundtrips() {
+        let bytes = chain_xdr(MAX_AUTH_DEPTH);
+        let decoded =
+            SorobanAuthorizedInvocation::from_xdr(&bytes, untrusted_xdr_limits()).unwrap();
+        assert_eq!(verify_auth_tree_depth(&decoded, MAX_AUTH_DEPTH), Ok(()));
+        assert_eq!(decoded, chain(MAX_AUTH_DEPTH));
     }
 }

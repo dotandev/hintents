@@ -9,6 +9,7 @@ mod debug_host_fn;
 mod events;
 mod gas_optimizer;
 mod git_detector;
+mod host;
 mod indexer;
 mod ipc;
 mod memory;
@@ -248,6 +249,10 @@ fn execute_operations(
         match &op.body {
             OperationBody::InvokeHostFunction(invoke_op) => {
                 logs.push("Executing InvokeHostFunction...".to_string());
+
+                // Reject over-deep authorization trees before executing anything.
+                host::verify_contract_auth(&invoke_op.auth)
+                    .map_err(crate::runner::SimHostError::from)?;
 
                 // Check for signature verification mock
                 if let Some(mock_result) =
@@ -511,7 +516,9 @@ fn main() {
     let envelope = match base64::engine::general_purpose::STANDARD.decode(&request.envelope_xdr) {
         Ok(bytes) => match soroban_env_host::xdr::TransactionEnvelope::from_xdr(
             bytes,
-            soroban_env_host::xdr::Limits::none(),
+            // Depth-bounded: a crafted, deeply nested authorization tree must
+            // fail to parse rather than overflow the stack during decoding.
+            host::untrusted_xdr_limits(),
         ) {
             Ok(env) => env,
             Err(e) => {
@@ -1730,3 +1737,73 @@ mod tests {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod auth_depth_tests {
+    use super::*;
+    use crate::host::test_support::{chain, entry};
+    use crate::host::MAX_AUTH_DEPTH;
+    use crate::runner::SimHostError;
+    use soroban_env_host::xdr::{
+        ContractId, Hash, HostFunction, InvokeContractArgs, InvokeHostFunctionOp, ScAddress,
+        ScSymbol, SorobanAuthorizationEntry, VecM,
+    };
+
+    fn request() -> SimulationRequest {
+        serde_json::from_value(serde_json::json!({
+            "envelope_xdr": "",
+            "result_meta_xdr": "",
+            "enable_optimization_advisor": false,
+        }))
+        .expect("minimal request should deserialize")
+    }
+
+    fn invoke_op(auth: Vec<SorobanAuthorizationEntry>) -> Operation {
+        Operation {
+            source_account: None,
+            body: OperationBody::InvokeHostFunction(InvokeHostFunctionOp {
+                host_function: HostFunction::InvokeContract(InvokeContractArgs {
+                    contract_address: ScAddress::Contract(ContractId(Hash([1u8; 32]))),
+                    function_name: ScSymbol("f".try_into().unwrap()),
+                    args: VecM::default(),
+                }),
+                auth: auth.try_into().unwrap(),
+            }),
+        }
+    }
+
+    fn run(op: Operation) -> Result<Vec<String>, SimHostError> {
+        let sim_host = runner::SimHost::new(HostConfig::default());
+        execute_operations(
+            &sim_host,
+            &[op],
+            &request(),
+            &mut CoverageTracker::default(),
+        )
+    }
+
+    #[test]
+    fn over_depth_auth_is_rejected_before_execution() {
+        let err = run(invoke_op(vec![entry(chain(MAX_AUTH_DEPTH + 1))]))
+            .expect_err("over-depth tree must fail");
+        // The target contract does not exist, so reaching the host would yield
+        // SimHostError::Host; getting this variant proves the check ran first.
+        assert!(
+            matches!(err, SimHostError::AuthDepthExceeded(_)),
+            "unexpected error: {err:?}"
+        );
+        assert!(err.to_string().contains("maximum of 4 levels"));
+    }
+
+    #[test]
+    fn max_depth_auth_is_not_rejected_by_the_depth_check() {
+        // The missing contract still makes execution fail, but with a host
+        // error rather than an auth-depth error.
+        let err = run(invoke_op(vec![entry(chain(MAX_AUTH_DEPTH))]))
+            .expect_err("nonexistent contract should fail in the host");
+        assert!(
+            !matches!(err, SimHostError::AuthDepthExceeded(_)),
+            "valid-depth tree was rejected: {err:?}"
+        );
+    }
+}

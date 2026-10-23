@@ -22,6 +22,8 @@ pub enum SimHostError {
     Host(#[from] HostError),
     #[error(transparent)]
     Snapshot(#[from] SnapshotError),
+    #[error(transparent)]
+    AuthDepthExceeded(#[from] crate::host::AuthDepthExceeded),
     #[error("host execution panicked: {0}")]
     Panic(String),
 }
