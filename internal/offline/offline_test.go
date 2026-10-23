@@ -6,11 +6,14 @@ package offline
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -247,4 +250,238 @@ func TestChecksumOf(t *testing.T) {
 	assert.Equal(t, c1, c2)
 	assert.NotEqual(t, c1, c3)
 	assert.Len(t, c1, 64) // SHA-256 hex = 64 chars
+}
+
+
+func makeTestEnvelopeXDR(t *testing.T, pubKey [32]byte, seqNum int64) string {
+	t.Helper()
+	srcMux, err := xdr.NewMuxedAccount(xdr.CryptoKeyTypeKeyTypeEd25519, xdr.Uint256(pubKey))
+	require.NoError(t, err)
+
+	tx := xdr.Transaction{
+		SourceAccount: srcMux,
+		Fee:           100,
+		SeqNum:        xdr.SequenceNumber(seqNum),
+		Cond:          xdr.Preconditions{Type: xdr.PreconditionTypePrecondNone},
+		Memo:          xdr.Memo{Type: xdr.MemoTypeMemoNone},
+		Operations:    []xdr.Operation{},
+	}
+
+	env := xdr.TransactionEnvelope{
+		Type: xdr.EnvelopeTypeEnvelopeTypeTx,
+		V1: &xdr.TransactionV1Envelope{
+			Tx:         tx,
+			Signatures: []xdr.DecoratedSignature{},
+		},
+	}
+
+	raw, err := env.MarshalBinary()
+	require.NoError(t, err)
+	return base64.StdEncoding.EncodeToString(raw)
+}
+
+func makeTestFeeBumpEnvelopeXDR(t *testing.T, innerKey [32]byte, innerSeqNum int64, feeSourceKey [32]byte) string {
+	t.Helper()
+	innerSrc, err := xdr.NewMuxedAccount(xdr.CryptoKeyTypeKeyTypeEd25519, xdr.Uint256(innerKey))
+	require.NoError(t, err)
+
+	feeSrc, err := xdr.NewMuxedAccount(xdr.CryptoKeyTypeKeyTypeEd25519, xdr.Uint256(feeSourceKey))
+	require.NoError(t, err)
+
+	innerTx := xdr.Transaction{
+		SourceAccount: innerSrc,
+		Fee:           100,
+		SeqNum:        xdr.SequenceNumber(innerSeqNum),
+		Cond:          xdr.Preconditions{Type: xdr.PreconditionTypePrecondNone},
+		Memo:          xdr.Memo{Type: xdr.MemoTypeMemoNone},
+		Operations:    []xdr.Operation{},
+	}
+
+	env := xdr.TransactionEnvelope{
+		Type: xdr.EnvelopeTypeEnvelopeTypeTxFeeBump,
+		FeeBump: &xdr.FeeBumpTransactionEnvelope{
+			Tx: xdr.FeeBumpTransaction{
+				FeeSource: feeSrc,
+				Fee:       200,
+				InnerTx: xdr.FeeBumpTransactionInnerTx{
+					Type: xdr.EnvelopeTypeEnvelopeTypeTx,
+					V1: &xdr.TransactionV1Envelope{
+						Tx:         innerTx,
+						Signatures: []xdr.DecoratedSignature{},
+					},
+				},
+			},
+			Signatures: []xdr.DecoratedSignature{},
+		},
+	}
+
+	raw, err := env.MarshalBinary()
+	require.NoError(t, err)
+	return base64.StdEncoding.EncodeToString(raw)
+}
+
+func TestValidateBatchSequenceNumbers_ValidSequence(t *testing.T) {
+	keyA := [32]byte{1, 2, 3, 4}
+	keyB := [32]byte{5, 6, 7, 8}
+
+	envA1 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 10),
+		Metadata:    EnvelopeMetadata{TxHash: "hash-a-1"},
+	}
+	envB1 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyB, 100),
+		Metadata:    EnvelopeMetadata{TxHash: "hash-b-1"},
+	}
+	envA2 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 11),
+		Metadata:    EnvelopeMetadata{TxHash: "hash-a-2"},
+	}
+	envB2 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyB, 101),
+		Metadata:    EnvelopeMetadata{TxHash: "hash-b-2"},
+	}
+	envA3 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 12),
+		Metadata:    EnvelopeMetadata{TxHash: "hash-a-3"},
+	}
+
+	batch := []*EnvelopeFile{envA1, envB1, envA2, envB2, envA3}
+	err := ValidateBatchSequenceNumbers(batch)
+	assert.NoError(t, err)
+}
+
+func TestValidateBatchSequenceNumbers_SingleAndEmpty(t *testing.T) {
+	assert.NoError(t, ValidateBatchSequenceNumbers(nil))
+	assert.NoError(t, ValidateBatchSequenceNumbers([]*EnvelopeFile{}))
+
+	keyA := [32]byte{1, 2, 3, 4}
+	envSingle := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 5),
+	}
+	assert.NoError(t, ValidateBatchSequenceNumbers([]*EnvelopeFile{envSingle}))
+}
+
+func TestValidateBatchSequenceNumbers_OutOfOrder_Gap(t *testing.T) {
+	keyA := [32]byte{1, 2, 3, 4}
+
+	env1 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 10),
+		Metadata:    EnvelopeMetadata{TxHash: "hash-prev"},
+	}
+	env2 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 12), // skipped 11!
+		Metadata:    EnvelopeMetadata{TxHash: "hash-conflict"},
+	}
+
+	err := ValidateBatchSequenceNumbers([]*EnvelopeFile{env1, env2})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidSequenceOrder))
+
+	var conflict *SequenceOrderConflictError
+	require.True(t, errors.As(err, &conflict))
+	assert.Equal(t, int64(11), conflict.ExpectedSeq)
+	assert.Equal(t, int64(12), conflict.ActualSeq)
+	assert.Equal(t, "hash-prev", conflict.PreviousTxHash)
+	assert.Equal(t, "hash-conflict", conflict.CurrentTxHash)
+	assert.Contains(t, err.Error(), "expected sequence 11, got 12")
+	assert.Contains(t, err.Error(), "hash-prev")
+	assert.Contains(t, err.Error(), "hash-conflict")
+}
+
+func TestValidateBatchSequenceNumbers_OutOfOrder_Duplicate(t *testing.T) {
+	keyA := [32]byte{1, 2, 3, 4}
+
+	env1 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 100),
+		Metadata:    EnvelopeMetadata{TxHash: "hash-1"},
+	}
+	env2 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 100), // duplicate sequence!
+		Metadata:    EnvelopeMetadata{TxHash: "hash-2"},
+	}
+
+	err := ValidateBatchSequenceNumbers([]*EnvelopeFile{env1, env2})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidSequenceOrder))
+
+	var conflict *SequenceOrderConflictError
+	require.True(t, errors.As(err, &conflict))
+	assert.Equal(t, int64(101), conflict.ExpectedSeq)
+	assert.Equal(t, int64(100), conflict.ActualSeq)
+}
+
+func TestValidateBatchSequenceNumbers_OutOfOrder_Decreasing(t *testing.T) {
+	keyA := [32]byte{1, 2, 3, 4}
+
+	env1 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 50),
+		Metadata:    EnvelopeMetadata{TxHash: "tx-50"},
+	}
+	env2 := &EnvelopeFile{
+		EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 49), // decreasing sequence!
+		Metadata:    EnvelopeMetadata{TxHash: "tx-49"},
+	}
+
+	err := ValidateBatchSequenceNumbers([]*EnvelopeFile{env1, env2})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidSequenceOrder))
+}
+
+func TestValidateBatchSequenceNumbers_FeeBump(t *testing.T) {
+	innerKey := [32]byte{9, 9, 9, 9}
+	feeKey1 := [32]byte{1, 1, 1, 1}
+	feeKey2 := [32]byte{2, 2, 2, 2}
+
+	env1 := &EnvelopeFile{
+		EnvelopeXDR: makeTestFeeBumpEnvelopeXDR(t, innerKey, 42, feeKey1),
+		Metadata:    EnvelopeMetadata{TxHash: "fb-1"},
+	}
+	env2 := &EnvelopeFile{
+		EnvelopeXDR: makeTestFeeBumpEnvelopeXDR(t, innerKey, 43, feeKey2),
+		Metadata:    EnvelopeMetadata{TxHash: "fb-2"},
+	}
+
+	err := ValidateBatchSequenceNumbers([]*EnvelopeFile{env1, env2})
+	assert.NoError(t, err)
+
+	env3 := &EnvelopeFile{
+		EnvelopeXDR: makeTestFeeBumpEnvelopeXDR(t, innerKey, 45, feeKey2), // skipped 44
+		Metadata:    EnvelopeMetadata{TxHash: "fb-3"},
+	}
+	err = ValidateBatchSequenceNumbers([]*EnvelopeFile{env1, env2, env3})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidSequenceOrder))
+}
+
+func TestValidateBatchSequenceNumbersXDR(t *testing.T) {
+	keyA := [32]byte{1, 2, 3, 4}
+	xdr1 := makeTestEnvelopeXDR(t, keyA, 1)
+	xdr2 := makeTestEnvelopeXDR(t, keyA, 2)
+	xdr3 := makeTestEnvelopeXDR(t, keyA, 3)
+
+	assert.NoError(t, ValidateBatchSequenceNumbersXDR([]string{xdr1, xdr2, xdr3}))
+
+	xdrBad := makeTestEnvelopeXDR(t, keyA, 5) // skipped 4
+	err := ValidateBatchSequenceNumbersXDR([]string{xdr1, xdr2, xdrBad})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidSequenceOrder))
+}
+
+func TestValidateBatchSequenceNumbers_InvalidInput(t *testing.T) {
+	keyA := [32]byte{1, 2, 3, 4}
+	valid := &EnvelopeFile{EnvelopeXDR: makeTestEnvelopeXDR(t, keyA, 1)}
+
+	// Nil envelope
+	err := ValidateBatchSequenceNumbers([]*EnvelopeFile{valid, nil})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "nil")
+
+	// Empty XDR
+	err = ValidateBatchSequenceNumbers([]*EnvelopeFile{valid, {EnvelopeXDR: ""}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty envelope_xdr")
+
+	// Malformed XDR
+	err = ValidateBatchSequenceNumbers([]*EnvelopeFile{valid, {EnvelopeXDR: "not-valid-base64-xdr"}})
+	assert.Error(t, err)
 }
