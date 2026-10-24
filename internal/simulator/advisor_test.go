@@ -6,6 +6,7 @@ package simulator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,4 +166,161 @@ type failingProvider struct{}
 
 func (f *failingProvider) FetchBaselines(_ context.Context) (*Baselines, error) {
 	return nil, fmt.Errorf("network unavailable")
+}
+
+func TestCheckUnusedReadOnlyFootprint_NoUnused(t *testing.T) {
+	declared := []string{"keyA", "keyB"}
+	accessed := []string{"keyA", "keyB", "keyC"}
+
+	report := CheckUnusedReadOnlyFootprint(declared, accessed)
+	assert.Empty(t, report.UnusedReadOnlyKeys)
+	assert.Equal(t, int64(0), report.EstimatedFeeSavings)
+	assert.Nil(t, report.Tip())
+}
+
+func TestCheckUnusedReadOnlyFootprint_WithUnusedKeys(t *testing.T) {
+	declared := []string{"keyA", "keyB", "keyC"}
+	accessed := []string{"keyB"}
+
+	report := CheckUnusedReadOnlyFootprint(declared, accessed)
+	assert.Equal(t, []string{"keyA", "keyC"}, report.UnusedReadOnlyKeys)
+	expectedSavings := int64(2) * EstimatedReadOnlyKeyFeeStroops
+	assert.Equal(t, expectedSavings, report.EstimatedFeeSavings)
+
+	tip := report.Tip()
+	assert.NotNil(t, tip)
+	assert.Equal(t, "warning", tip.Severity)
+	assert.Contains(t, tip.Message, "Found 2 declared read-only footprint keys")
+	assert.Contains(t, tip.Message, fmt.Sprintf("%d stroops", expectedSavings))
+}
+
+func TestCheckUnusedReadOnlyFootprint_SingleUnusedKey(t *testing.T) {
+	declared := []string{"ContractData:Balance"}
+	accessed := []string{}
+
+	report := CheckUnusedReadOnlyFootprint(declared, accessed)
+	assert.Equal(t, []string{"ContractData:Balance"}, report.UnusedReadOnlyKeys)
+	assert.Equal(t, EstimatedReadOnlyKeyFeeStroops, report.EstimatedFeeSavings)
+
+	tip := report.Tip()
+	assert.NotNil(t, tip)
+	assert.Equal(t, "warning", tip.Severity)
+	assert.Contains(t, tip.Message, "ContractData:Balance")
+	assert.Contains(t, tip.Message, fmt.Sprintf("%d stroops", EstimatedReadOnlyKeyFeeStroops))
+}
+
+func TestCheckUnusedReadOnlyFootprint_EmptyDeclared(t *testing.T) {
+	report := CheckUnusedReadOnlyFootprint(nil, []string{"key1", "key2"})
+	assert.Empty(t, report.UnusedReadOnlyKeys)
+	assert.Equal(t, int64(0), report.EstimatedFeeSavings)
+	assert.Nil(t, report.Tip())
+}
+
+func TestCheckUnusedReadOnlyFootprint_DeduplicatesDeclared(t *testing.T) {
+	declared := []string{"keyA", "keyA", "keyB"}
+	accessed := []string{"keyB"}
+
+	report := CheckUnusedReadOnlyFootprint(declared, accessed)
+	assert.Equal(t, []string{"keyA"}, report.UnusedReadOnlyKeys)
+	assert.Equal(t, EstimatedReadOnlyKeyFeeStroops, report.EstimatedFeeSavings)
+}
+
+func TestAdvisor_SuggestUnusedFootprintKeys(t *testing.T) {
+	advisor := NewGasOptimizationAdvisor(NewStaticBaselineProvider(baselineForTest()))
+
+	declared := []string{"unusedKey", "usedKey"}
+	accessed := []string{"usedKey"}
+
+	unused, savings, tip := SuggestUnusedFootprintKeys(declared, accessed)
+	assert.Equal(t, []string{"unusedKey"}, unused)
+	assert.Equal(t, EstimatedReadOnlyKeyFeeStroops, savings)
+	assert.NotNil(t, tip)
+	assert.Equal(t, "warning", tip.Severity)
+
+	// Also verify method on advisor
+	unused2, savings2, tip2 := advisor.SuggestUnusedReadOnlyKeys(declared, accessed)
+	assert.Equal(t, unused, unused2)
+	assert.Equal(t, savings, savings2)
+	assert.Equal(t, tip, tip2)
+}
+
+func TestAdvisor_CheckFootprint(t *testing.T) {
+	advisor := NewGasOptimizationAdvisor(NewStaticBaselineProvider(baselineForTest()))
+
+	declared := []string{"k1", "k2"}
+	accessed := []string{"k1"}
+
+	fpReport := advisor.CheckFootprint(declared, accessed)
+	assert.Equal(t, []string{"k2"}, fpReport.UnusedReadOnlyKeys)
+	assert.Equal(t, EstimatedReadOnlyKeyFeeStroops, fpReport.EstimatedFeeSavings)
+}
+
+func TestAdvisor_AnalyseWithFootprint_Clean(t *testing.T) {
+	advisor := NewGasOptimizationAdvisor(NewStaticBaselineProvider(baselineForTest()))
+	assert.NoError(t, advisor.SyncBaselines(context.Background()))
+
+	gas := &GasEstimation{
+		CPUCost:                8_000_000,
+		MemoryCost:             4_000_000,
+		EstimatedFeeLowerBound: 800,
+		CPUUsagePercent:        40,
+		MemoryUsagePercent:     40,
+	}
+
+	declared := []string{"key1", "key2"}
+	accessed := []string{"key1", "key2"}
+
+	report := advisor.AnalyseWithFootprint(gas, declared, accessed)
+	assert.True(t, report.Efficient)
+	assert.GreaterOrEqual(t, report.Score, 70.0)
+	assert.NotNil(t, report.UnusedFootprintReport)
+	assert.Empty(t, report.UnusedFootprintReport.UnusedReadOnlyKeys)
+
+	// No footprint warning tip
+	for _, tip := range report.Tips {
+		assert.NotContains(t, tip.Message, "read-only footprint")
+	}
+}
+
+func TestAdvisor_AnalyseWithFootprint_WithUnusedKeys(t *testing.T) {
+	advisor := NewGasOptimizationAdvisor(NewStaticBaselineProvider(baselineForTest()))
+	assert.NoError(t, advisor.SyncBaselines(context.Background()))
+
+	gas := &GasEstimation{
+		CPUCost:                8_000_000,
+		MemoryCost:             4_000_000,
+		EstimatedFeeLowerBound: 800,
+		CPUUsagePercent:        40,
+		MemoryUsagePercent:     40,
+	}
+
+	declared := []string{"usedKey", "unusedKey1", "unusedKey2"}
+	accessed := []string{"usedKey"}
+
+	cleanReport := advisor.Analyse(gas)
+	footprintReport := advisor.AnalyseWithFootprint(gas, declared, accessed)
+
+	// Score is penalized by 10 for having unused read-only keys
+	assert.Equal(t, cleanReport.Score-10, footprintReport.Score)
+	assert.NotNil(t, footprintReport.UnusedFootprintReport)
+	assert.Equal(t, []string{"unusedKey1", "unusedKey2"}, footprintReport.UnusedFootprintReport.UnusedReadOnlyKeys)
+	assert.Equal(t, int64(2)*EstimatedReadOnlyKeyFeeStroops, footprintReport.UnusedFootprintReport.EstimatedFeeSavings)
+
+	// Has a warning tip for unused read-only footprint keys
+	found := false
+	for _, tip := range footprintReport.Tips {
+		if tip.Severity == "warning" && strings.Contains(tip.Message, "read-only footprint") {
+			found = true
+			assert.Contains(t, tip.Message, "unusedKey1")
+			assert.Contains(t, tip.Message, "unusedKey2")
+		}
+	}
+	assert.True(t, found, "expected warning tip for unused read-only footprint keys")
+}
+
+func TestExtractReadOnlyFootprintFromEnvelope_NilAndNonSoroban(t *testing.T) {
+	assert.Empty(t, ExtractReadOnlyFootprintFromEnvelope(nil))
+
+	_, err := ExtractReadOnlyFootprintFromEnvelopeXDR("invalid base64!!!")
+	assert.Error(t, err)
 }
