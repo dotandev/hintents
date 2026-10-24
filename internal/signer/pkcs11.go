@@ -6,6 +6,7 @@ package signer
 import (
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"plugin"
 	"sync"
@@ -53,6 +54,34 @@ type Pkcs11Config struct {
 
 	// KeyIDHex selects a private key by its CKA_ID attribute (hex-encoded).
 	KeyIDHex string
+}
+
+const redactedPIN = "[REDACTED]"
+
+// String implements fmt.Stringer. The PIN is always rendered as [REDACTED].
+// A value receiver is used so both Pkcs11Config and *Pkcs11Config are covered.
+func (c Pkcs11Config) String() string {
+	return fmt.Sprintf(
+		"Pkcs11Config{ModulePath:%s PIN:%s TokenLabel:%s SlotIndex:%d KeyLabel:%s KeyIDHex:%s}",
+		c.ModulePath, redactedPIN, c.TokenLabel, c.SlotIndex, c.KeyLabel, c.KeyIDHex,
+	)
+}
+
+// GoString implements fmt.GoStringer so that %#v does not leak the PIN.
+func (c Pkcs11Config) GoString() string {
+	return c.String()
+}
+
+// LogValue implements slog.LogValuer, redacting the PIN in structured logs.
+func (c Pkcs11Config) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("module_path", c.ModulePath),
+		slog.String("pin", redactedPIN),
+		slog.String("token_label", c.TokenLabel),
+		slog.Int("slot_index", c.SlotIndex),
+		slog.String("key_label", c.KeyLabel),
+		slog.String("key_id_hex", c.KeyIDHex),
+	)
 }
 
 // Pkcs11ConfigFromEnv constructs a Pkcs11Config from environment variables,
