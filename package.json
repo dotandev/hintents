@@ -19,8 +19,8 @@
   },
   "scripts": {
     "test": "jest",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "build": "node api.js && tsc -p tsconfig.json",
+    "start": "node api.js && node dist/index.js"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

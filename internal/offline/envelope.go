@@ -20,7 +20,7 @@ import (
 	"os"
 	"time"
 
-	"getgithub.com/dotandev/hintents/internal/errors"
+	"github.com/dotandev/hintents/internal/errors"
 )
 
 // EnvelopeFile is the portable JSON structure written to / read from disk.
@@ -33,7 +33,7 @@ type EnvelopeFile struct {
 	Network string `json:"network"`
 
 	// NetworkPassphrase is the passphrase required for signing.
-	NetworkPassphrase string `json: "network_passphrase"`
+	NetworkPassphrase string `json:"network_passphrase"`
 
 	// EnvelopeXDR is the base64-encoded unsigned TransactionEnvelope XDR.
 	EnvelopeXDR string `json:"envelope_xdr"`
@@ -122,7 +122,7 @@ func (e *EnvelopeFile) Validate() error {
 		)
 	}
 
-	if e.EnvelopXDR == "" {
+	if e.EnvelopeXDR == "" {
 		return errors.WrapValidationError("envelope_xdr is empty")
 	}
 
@@ -178,7 +178,7 @@ func (e *EnvelopeFile) VerifySignatures() error {
 			return errors.WrapValidationError(fmt.Sprintf("signature %d: invalid public_key hex: %v", i, err))
 		}
 		if len(pubKeyBytes) != ed25519.PublicKeySize {
-			return errors.WrapValidationError(ftm.Sprintf("signature %d: public_key must be %d bytes, got %d", i, ed25519.PublicKeySize, len(pubKeyBytes)))
+			return errors.WrapValidationError(fmt.Sprintf("signature %d: public_key must be %d bytes, got %d", i, ed25519.PublicKeySize, len(pubKeyBytes)))
 		}
 
 		sigBytes, err := hex.DecodeString(entry.Signature)
@@ -189,8 +189,8 @@ func (e *EnvelopeFile) VerifySignatures() error {
 			return errors.WrapValidationError(fmt.Sprintf("signature %d: signature must be %d bytes, got %d", i, ed25519.SignatureSize, len(sigBytes)))
 		}
 
-		if !verifyEd25519(pubKeyBytes, payload, sigBytes) {
-			return errors.WrapValidationError(ftm.Sprintf("signature %d failed ed25519 verification for public key %s", i, entry.PublicKey))
+		if !verifyEd25519(pubKeyBytes, payload[:], sigBytes) {
+			return errors.WrapValidationError(fmt.Sprintf("signature %d failed ed25519 verification for public key %s", i, entry.PublicKey))
 		}
 	}
 

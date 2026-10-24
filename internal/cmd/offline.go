@@ -17,12 +17,12 @@ import (
 
 // Flag variables scoped to the offline command tree.
 var (
-	offlineNetworkFlag string
-	offlineOutputFlag  string
-	offlineKeyFlag     string
-	offlineRPCURLFlag  string
-	offlineDescFlag    string
-	offlineSourceFlag  string
+	offlineNetworkFlag    string
+	offlineOutputFlag     string
+	offlineKeyFlag        string
+	offlineRPCURLFlag     string
+	offlineDescFlag       string
+	offlineSourceFlag     string
 	offlineVerifySigsFlag bool
 )
 
