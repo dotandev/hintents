@@ -9,22 +9,84 @@ use gimli::{
 use object::{Object, ObjectSection};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::PathBuf;
-
-pub struct SourceMapper {
-    has_symbols: bool,
-    line_cache: Vec<CachedLineEntry>,
-    git_repo: Option<GitRepository>,
-}
+use std::sync::Arc;
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SourceLocation {
-    pub file: String,
+    pub file: Arc<str>,
     pub line: u32,
     pub column: Option<u32>,
     pub column_end: Option<u32>,
     pub github_link: Option<String>,
+}
+
+/// A lightweight string interner for file paths to deduplicate memory usage in deep call stacks.
+#[derive(Default, Clone)]
+pub struct PathInterner {
+    cache: HashMap<String, Arc<str>>,
+}
+
+impl PathInterner {
+    pub fn new() -> Self {
+        Self {
+            cache: HashMap::new(),
+        }
+    }
+
+    pub fn intern(&mut self, path: &str) -> Arc<str> {
+        if let Some(arc) = self.cache.get(path) {
+            arc.clone()
+        } else {
+            let arc: Arc<str> = Arc::from(path);
+            self.cache.insert(path.to_string(), arc.clone());
+            arc
+        }
+    }
+}
+
+impl Serialize for SourceLocation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("SourceLocation", 5)?;
+        state.serialize_field("file", self.file.as_ref())?;
+        state.serialize_field("line", &self.line)?;
+        state.serialize_field("column", &self.column)?;
+        state.serialize_field("column_end", &self.column_end)?;
+        state.serialize_field("github_link", &self.github_link)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for SourceLocation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Helper {
+            file: String,
+            line: u32,
+            column: Option<u32>,
+            column_end: Option<u32>,
+            #[serde(default)]
+            github_link: Option<String>,
+        }
+
+        let helper = Helper::deserialize(deserializer)?;
+        Ok(SourceLocation {
+            file: Arc::from(helper.file),
+            line: helper.line,
+            column: helper.column,
+            column_end: helper.column_end,
+            github_link: helper.github_link,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +94,12 @@ struct CachedLineEntry {
     start: u64,
     end: Option<u64>,
     location: SourceLocation,
+}
+
+pub struct SourceMapper {
+    has_symbols: bool,
+    line_cache: Vec<CachedLineEntry>,
+    git_repo: Option<GitRepository>,
 }
 
 impl SourceMapper {
@@ -115,6 +183,7 @@ impl SourceMapper {
         R: Reader,
     {
         let mut cache = Vec::new();
+        let mut interner = PathInterner::new();
         let mut units = dwarf.units();
 
         while let Some(header) = units.next()? {
@@ -174,7 +243,7 @@ impl SourceMapper {
                     };
 
                     let location = SourceLocation {
-                        file: file_name,
+                        file: interner.intern(&file_name),
                         line: line.get() as u32,
                         column,
                         column_end: None,
@@ -272,13 +341,14 @@ impl SourceMapper {
         line: u32,
         column: Option<u32>,
     ) -> SourceLocation {
+        let file_arc: Arc<str> = Arc::from(file);
         let github_link = self
             .git_repo
             .as_ref()
-            .and_then(|repo| repo.generate_file_link(&file, line));
+            .and_then(|repo| repo.generate_file_link(&file_arc, line));
 
         SourceLocation {
-            file,
+            file: file_arc,
             line,
             column,
             column_end: None,
@@ -379,7 +449,7 @@ mod tests {
     #[test]
     fn test_source_location_serialization() {
         let location = SourceLocation {
-            file: "test.rs".to_string(),
+            file: "test.rs".into(),
             line: 42,
             column: Some(10),
             column_end: Some(15),
@@ -394,11 +464,11 @@ mod tests {
     #[test]
     fn test_source_location_with_github_link() {
         let location = SourceLocation {
-            file: "test.rs".to_string(),
+            file: "test.rs".into(),
             line: 42,
             column: Some(10),
             column_end: None,
-            github_link: Some("https://github.com/user/repo/blob/abc123/test.rs#L42".to_string()),
+            github_link: Some("https://github.com/user/repo/blob/abc123/test.rs#L42".into()),
         };
 
         let json = serde_json::to_string(&location).unwrap();
@@ -428,7 +498,7 @@ mod tests {
         mappings.insert(
             0x1234,
             SourceLocation {
-                file: "test.rs".to_string(),
+                file: "test.rs".into(),
                 line: 42,
                 column: Some(10),
                 column_end: None,

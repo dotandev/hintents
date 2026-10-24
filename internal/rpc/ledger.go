@@ -18,6 +18,7 @@ type LedgerEntryPair struct {
 	EntryXDR string
 }
 
+// LedgerHeaderResponse is an alias for state.LedgerHeaderResponse
 // LedgerHeaderResponse contains essential ledger header information
 // needed for transaction replay simulation. This structure provides
 // all the metadata required to recreate the blockchain state at the
