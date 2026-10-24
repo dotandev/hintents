@@ -1,12 +1,15 @@
-// Copyright 2026 Erst Users
+// Copyright 2026 Erst Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package simulator
 
-import "github.com/dotandev/hintents/internal/authtrace"
+import (
+	"github.com/dotandev/hintents/internal/authtrace"
+	"github.com/dotandev/hintents/internal/errors"
+)
 
 type SimulationResponse struct {
-	Status             string               `json:"status"`
+	Status             string               `json:"title"`
 	Error              string               `json:"error,omitempty"`
 	ErrorCode          string               `json:"error_code,omitempty"`
 	LCOVReport         string               `json:"lcov_report,omitempty"`
@@ -25,6 +28,44 @@ type SimulationResponse struct {
 	WasmOffset         *uint64              `json:"wasm_offset,omitempty"`
 	LinearMemoryDump   string               `json:"linear_memory_dump,omitempty"`
 	AssetAnomalies     []AssetAnomaly       `json:"asset_anomalies,omitempty"`
+}
+
+// MapSimulatorError maps a simulator error response to a typed ERST error code.
+// It prefers the explicit ErrorCode field when it is a recognized ERST code,
+// otherwise it derives a code from the raw error message (trap, timeout, OOM,
+// decode failure) and falls back to a generic simulation failure code.
+// It returns the empty code when the response is not an error response.
+func (r *SimulationResponse) MapSimulatorError() errors.ErstErrorCode {
+	if r == nil {
+		return errors.ErstSimulationFailed
+	}
+	if r.Status != "" && r.Status != "error" && r.Error == "" && r.ErrorCode == "" {
+		return ""
+	}
+	if r.Status == "" && r.Error == "" && r.ErrorCode == "" {
+		return ""
+	}
+
+	if r.ErrorCode != "" {
+		code := errors.ErstErrorCode(r.ErrorCode)
+		if mapped := errors.MapSimulatorError(errors.SimulatorErrorPayload{Code: r.ErrorCode}); mapped != nil && mapped.Code != errors.ErstSimulationFailed {
+			return mapped.Code
+		}
+		return code
+	}
+
+	return MapSimulatorErrorMessage(r.Error)
+}
+
+// MapSimulatorErrorMessage converts a raw simulator error message into a typed
+// ERST error code by inspecting known failure signatures.
+// The matching is case-insensitive and ordered from most specific to least
+// specific so that composite messages resolve to the most accurate code.
+func MapSimulatorErrorMessage(message string) errors.ErstErrorCode {
+	if mapped := errors.MapSimulatorError(errors.SimulatorErrorPayload{Message: message}); mapped != nil {
+		return mapped.Code
+	}
+	return errors.ErstSimulationFailed
 }
 
 type AssetAnomaly struct {

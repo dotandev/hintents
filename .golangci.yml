@@ -9,6 +9,7 @@ linters:
     - ineffassign
     - govet
     - staticcheck
+    - errcheck
 
 issues:
   max-issues-per-linter: 0
