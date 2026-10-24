@@ -1,4 +1,4 @@
-// Copyright 2026 Erst Users
+// Copyright 2026 Erst Developers
 // SPDX-License-Identifier: Apache-2.0
 
 // Package offline implements an air-gapped transaction signing pipeline.
@@ -11,7 +11,9 @@
 package offline
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -141,6 +143,75 @@ func (e *EnvelopeFile) Validate() error {
 // IsSigned returns true if at least one signature is present.
 func (e *EnvelopeFile) IsSigned() bool {
 	return len(e.Signatures) > 0
+}
+
+// VerifySignatures checks that every signature entry in the envelope is a
+// valid ed25519 signature over the transaction hash derived from the
+// envelope XDR and the configured network passphrase.
+//
+// This is an opt-in check for offline simulation mode; it rejects envelopes
+// that have no signatures, malformed entries, or signatures that do not verify
+// against the declared public key.
+//
+// The signed payload is the Stellar transaction signature base: the 32-byte
+// network ID SHA-256 digest of the passphrase concatenated with the transaction
+// XDR bytes. This is the canonical message that Stellar ed25519 keys sign.
+func (e *EnvelopeFile) VerifySignatures() error {
+	if !e.IsSigned() {
+		return errors.WrapValidationError("envelope has no signatures")
+	}
+
+	if e.NetworkPassphrase == "" {
+		return errors.WrapValidationError("network_passphrase is empty")
+	}
+
+	envelopeBytes, err := base64.StdEncoding.DecodeString(e.EnvelopeXDR)
+	if err != nil {
+		return errors.WrapValidationError(fmt.Sprintf("envelope_xdr is not valid base64: %v", err))
+	}
+
+	payload := signaturePayload(e.NetworkPassphrase, envelopeBytes)
+
+	for i, entry := range e.Signatures {
+		pubKeyBytes, err := hex.DecodeString(entry.PublicKey)
+		if err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("signature %d: invalid public_key hex: %v", i, err))
+		}
+		if len(pubKeyBytes) != ed25519.PublicKeySize {
+			return errors.WrapValidationError(fmt.Sprintf("signature %d: public_key must be %d bytes, got %d", i, ed25519.PublicKeySize, len(pubKeyBytes)))
+		}
+
+		sigBytes, err := hex.DecodeString(entry.Signature)
+		if err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("signature %d: invalid signature hex: %v", i, err))
+		}
+		if len(sigBytes) != ed25519.SignatureSize {
+			return errors.WrapValidationError(fmt.Sprintf("signature %d: signature must be %d bytes, got %d", i, ed25519.SignatureSize, len(sigBytes)))
+		}
+
+		if !verifyEd25519(pubKeyBytes, payload[:], sigBytes) {
+			return errors.WrapValidationError(fmt.Sprintf("signature %d failed ed25519 verification for public key %s", i, entry.PublicKey))
+		}
+	}
+
+	return nil
+}
+
+// signaturePayload returns the 32-byte Stellar transaction signature base:
+// SHA-256(networkPassphrase || 0 || envelopeXDR).
+func signaturePayload(passphrase string, envelopeXDR []byte) [32]byte {
+	hasher := sha256.New()
+	hasher.Write([]byte(passphrase))
+	hasher.Write([]byte{0})
+	hasher.Write(envelopeXDR)
+	var out [32]byte
+	copy(out[:], hasher.Sum(nil))
+	return out
+}
+
+// verifyEd25519 verifies an ed25519 signature over payload.
+func verifyEd25519(publicKey, payload, signature []byte) bool {
+	return ed25519.Verify(publicKey, payload, signature)
 }
 
 // checksumOf returns the hex-encoded SHA-256 digest of s.
