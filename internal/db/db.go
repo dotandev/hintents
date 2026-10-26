@@ -4,23 +4,23 @@
 package db
 
 import (
-		"database/sql"
-		"encoding/json"
-		"fmt"
-		"os"
-		"path/filepath"
-		"regexp"
-		"time"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"time"
 
-		_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite"
 )
 
 // Session represents a debugging session result
 type Session struct {
 	ID        int64     `json:"id"`
-	TxHash    string    `json:"tx_hash" `
-	Network   string    `json: "network"`
-	Status    string    `json: "status"`
+	TxHash    string    `json:"tx_hash"`
+	Network   string    `json:"network"`
+	Status    string    `json:"status"`
 	ErrorMsg  string    `json:"error_msg"`
 	Events    []string  `json:"events"`
 	Logs      []string  `json:"logs"`
@@ -31,8 +31,6 @@ type Session struct {
 type Store struct {
 	db *sql.DB
 }
-
-const schemaVersion = 1
 
 // migration represents a single ordered schema migration step.
 // Each step must be idempotent and is applied inside a transaction.
@@ -48,17 +46,17 @@ var migrations = []migration{
 		version: 1,
 		query: `
 		CREATE TABLE IF NOT EXISTS sessions (
- 			id INTEGER PRIMARY KEY AUTOINCREMENT,
- 			tx_hash TEXT NOT NULL,
- 			network TEXT NOT NULL,
- 			status TEXT,
- 			error_msg TEXT,
- 			events TEXT,
- 			logs TEXT,
- 			timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
- 		);
- 		CREATE INDEX IF NOT EXISTS idx_sessions_tx_hash ON sessions(tx_hash);
- 		CREATE INDEX IF NOT EXISTS idx_sessions_error ON sessions(error_msg);
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			tx_hash TEXT NOT NULL,
+			network TEXT NOT NULL,
+			status TEXT,
+			error_msg TEXT,
+			events TEXT,
+			logs TEXT,
+			timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_sessions_tx_hash ON sessions(tx_hash);
+		CREATE INDEX IF NOT EXISTS idx_sessions_error ON sessions(error_msg);
 		`,
 	},
 }
@@ -97,8 +95,9 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("failed to read schema version: %w", err)
 	}
 
-	if current > schemaVersion {
-		return fmt.Errorf("database schema version %d is newer than supported version %d", current, schemaVersion)
+	latest := migrations[len(migrations)-1].version
+	if current > latest {
+		return fmt.Errorf("database schema version %d is newer than supported version %d", current, latest)
 	}
 
 	for _, m := range migrations {
@@ -118,7 +117,7 @@ func migrate(db *sql.DB) error {
 func applyMigration(db *sql.DB, m migration) error {
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Error("failed to begin transaction: %w", err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -126,8 +125,7 @@ func applyMigration(db *sql.DB, m migration) error {
 		return fmt.Errorf("failed to execute migration query: %w", err)
 	}
 
-
-// PRAGMA user_version does not support bind parameters, so the value is
+	// PRAGMA user_version does not support bind parameters, so the value is
 	// formatted directly. m.version is an int from our own constant table, so this is
 	// safe from injection.
 	if _, err = tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", m.version)); err != nil {
@@ -147,9 +145,9 @@ func (s *Store) SaveSession(session *Session) error {
 
 	query := `
 	INSERT INTO sessions (tx_hash, network, status, error_msg, events, logs, timestamp)
-	VALUES (?, , ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
-	, err := s.db.Exec(query, session.TxHash, session.Network, session.Status, session.ErrorMsg, string(eventsJSON), string(logsJSON), time.Now())
+	_, err := s.db.Exec(query, session.TxHash, session.Network, session.Status, session.ErrorMsg, string(eventsJSON), string(logsJSON), time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to insert session: %w", err)
 	}
@@ -241,6 +239,10 @@ func (s *Store) SearchSessions(params SearchParams) ([]Session, error) {
 
 		results = append(results, sess)
 		count++
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate sessions: %w", err)
 	}
 
 	return results, nil
