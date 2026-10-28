@@ -255,6 +255,10 @@ func (s *wsStreamer) poll(ctx context.Context, conn *wsConn, hash string, id int
 		return true
 	}
 
+	if err := ValidateEnvelope(data, id); err != nil {
+		logger.Logger.Warn("ws streamer: invalid response envelope", "error", err)
+		return false
+	}
 	var resp jsonrpcResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
 		logger.Logger.Warn("ws streamer: unmarshal response", "error", err)
@@ -371,6 +375,9 @@ func (s *pollingStreamer) queryTxStatus(ctx context.Context, hash string) (TxSta
 		return TxStatus{}, fmt.Errorf("poll: read body: %w", err)
 	}
 
+	if err := ValidateEnvelope(respBytes, req.ID); err != nil {
+		return TxStatus{}, fmt.Errorf("poll: invalid response envelope: %w", err)
+	}
 	var rpcResp jsonrpcResponse
 	if err := json.Unmarshal(respBytes, &rpcResp); err != nil {
 		return TxStatus{}, fmt.Errorf("poll: unmarshal: %w", err)

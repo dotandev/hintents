@@ -5,7 +5,6 @@ package rpc
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -45,21 +44,8 @@ func TestClient_GetHealth_Failover_AllNodesFailedErrorAggregation(t *testing.T) 
 	newFailingNode := func(t *testing.T, message string) *httptest.Server {
 		t.Helper()
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			resp := GetHealthResponse{
-				Jsonrpc: "2.0",
-				ID:      1,
-				Error: &struct {
-					Code    int    `json:"code"`
-					Message string `json:"message"`
-				}{
-					Code:    -32000,
-					Message: message,
-				},
-			}
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(resp); err != nil {
-				t.Errorf("failed to encode response in test server: %v", err)
-			}
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":%q}}`, message)
 		}))
 	}
 

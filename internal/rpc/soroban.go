@@ -345,6 +345,11 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 		return nil, errors.WrapUnmarshalFailed(err, "body read error")
 	}
 
+	if err := ValidateEnvelope(respBytes, reqBody.ID); err != nil {
+		metrics.RecordRemoteNodeResponse(targetURL, string(c.Network), false, duration)
+		c.recordTelemetry(targetURL, duration, false)
+		return nil, err
+	}
 	var rpcResp GetLedgerEntriesResponse
 	if err := json.Unmarshal(respBytes, &rpcResp); err != nil {
 		logger.Logger.Error("Soroban getLedgerEntries response unmarshal failed", "url", targetURL, "error", err)
@@ -532,6 +537,10 @@ func (c *Client) simulateTransactionAttempt(ctx context.Context, envelopeXdr str
 		return nil, errors.WrapUnmarshalFailed(err, "body read error")
 	}
 
+	if err := ValidateEnvelope(respBytes, reqBody.ID); err != nil {
+		c.recordTelemetry(targetURL, duration, false)
+		return nil, err
+	}
 	var rpcResp SimulateTransactionResponse
 	if err := json.Unmarshal(respBytes, &rpcResp); err != nil {
 		logger.Logger.Error("Soroban simulateTransaction unmarshal failed", "url", targetURL, "error", err)
@@ -639,6 +648,10 @@ func (c *Client) getHealthAttempt(ctx context.Context) (healthResp *GetHealthRes
 		return nil, errors.NewRPCError(errors.CodeRPCUnmarshalFailed, err)
 	}
 
+	if err := ValidateEnvelope(respBytes, reqBody.ID); err != nil {
+		c.recordTelemetry(targetURL, duration, false)
+		return nil, err
+	}
 	var rpcResp GetHealthResponse
 	if err := json.Unmarshal(respBytes, &rpcResp); err != nil {
 		logger.Logger.Error("Soroban getHealth unmarshal failed", "url", targetURL, "error", err)
@@ -698,8 +711,15 @@ func fetchLatestFromSDF(ctx context.Context, url string) (int, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	// 3. Decode using the struct you found earlier
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if err := ValidateEnvelope(respBytes, payload["id"]); err != nil {
+		return 0, err
+	}
 	var rpcResp GetLatestLedgerResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+	if err := json.Unmarshal(respBytes, &rpcResp); err != nil {
 		return 0, err
 	}
 

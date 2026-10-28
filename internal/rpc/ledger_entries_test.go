@@ -329,20 +329,8 @@ func TestGetLedgerEntries_TimeoutHandling(t *testing.T) {
 func TestGetLedgerEntries_ErrorHandling(t *testing.T) {
 	// Create mock server that returns error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := GetLedgerEntriesResponse{
-			Jsonrpc: "2.0",
-			ID:      1,
-		}
-		resp.Error = &struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		}{
-			Code:    -32600,
-			Message: "Invalid request",
-		}
-
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid request"}}`))
 	}))
 	defer server.Close()
 

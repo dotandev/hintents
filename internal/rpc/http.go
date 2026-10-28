@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -96,5 +97,25 @@ func (c *Client) postRequest(ctx context.Context, payload interface{}, result in
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	return json.NewDecoder(resp.Body).Decode(result)
+	requestEnvelope := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(data, &requestEnvelope); err != nil {
+		return fmt.Errorf("failed to decode JSON-RPC request: %w", err)
+	}
+	requestID, ok := requestEnvelope["id"]
+	if !ok {
+		return &EnvelopeValidationError{Field: "id", Reason: "request ID is required"}
+	}
+	expectedID, ok := decodeJSONRPCID(requestID)
+	if !ok {
+		return &EnvelopeValidationError{Field: "id", Reason: "request ID must be a string or number"}
+	}
+
+	response, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read JSON-RPC response: %w", err)
+	}
+	if err := ValidateEnvelope(response, expectedID); err != nil {
+		return err
+	}
+	return json.Unmarshal(response, result)
 }

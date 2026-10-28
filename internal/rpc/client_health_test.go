@@ -55,18 +55,7 @@ func TestGetHealth_Success(t *testing.T) {
 
 func TestGetHealth_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := GetHealthResponse{
-			Jsonrpc: "2.0",
-			ID:      1,
-			Error: &struct {
-				Code    int    `json:"code"`
-				Message string `json:"message"`
-			}{
-				Code:    -32601,
-				Message: "Method not found",
-			},
-		}
-		_ = json.NewEncoder(w).Encode(resp)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}`))
 	}))
 	defer server.Close()
 
