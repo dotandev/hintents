@@ -39,7 +39,8 @@ output-directory/
 ├── erst-integration.ts   # Simulator
 ├── index.ts              # Exports
 ├── package.json          # NPM config
-└── README.md             # Documentation
+├── README.md             # Documentation
+└── errors.go             # Typed Go error enums implementing error
 ```
 
 ## Type Mapping
