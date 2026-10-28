@@ -10,6 +10,15 @@ import (
 	"github.com/dotandev/hintents/internal/simulator"
 )
 
+const (
+	// A single storage entry larger than this (bytes) is flagged.
+	storageEntrySizeThreshold = 1024
+	// A single entry growing by more than this (bytes) between writes is flagged.
+	storageGrowthThreshold = 512
+	// This many distinct keys under one topic prefix suggests caller-supplied keys.
+	storageKeyFanoutThreshold = 10
+)
+
 type SecurityViolation struct {
 	Type        string
 	Description string
@@ -35,6 +44,7 @@ func (sa *SecurityAnalyzer) Analyze(resp *simulator.SimulationResponse) []Securi
 	}
 
 	sa.checkUnauthorizedStateModifications(resp.CategorizedEvents)
+	sa.checkUnboundedStorageGrowth(resp.CategorizedEvents)
 
 	return sa.violations
 }
@@ -77,6 +87,74 @@ func (sa *SecurityAnalyzer) checkUnauthorizedStateModifications(events []simulat
 				Severity:    "high",
 				Location:    fmt.Sprintf("event_index:%d", write.index),
 			})
+		}
+	}
+}
+
+// checkUnboundedStorageGrowth warns when a single storage entry becomes large or
+// grows quickly during simulation, or when one contract writes many distinct keys
+// under the same topic prefix (a sign the keys come from caller-supplied values).
+func (sa *SecurityAnalyzer) checkUnboundedStorageGrowth(events []simulator.CategorizedEvent) {
+	type entryState struct {
+		lastSize int
+		flagged  bool
+	}
+
+	entries := make(map[string]*entryState)
+	fanout := make(map[string]map[string]struct{})
+	fanoutFlagged := make(map[string]bool)
+
+	for i, event := range events {
+		if event.EventType != "storage_write" {
+			continue
+		}
+
+		contractID := ""
+		if event.ContractID != nil {
+			contractID = *event.ContractID
+		}
+
+		key := strings.Join(event.Topics, "|")
+		entryID := contractID + "/" + key
+		size := len(event.Data)
+
+		state, seen := entries[entryID]
+		if !seen {
+			state = &entryState{}
+			entries[entryID] = state
+		}
+
+		growth := size - state.lastSize
+		state.lastSize = size
+
+		if !state.flagged && (size > storageEntrySizeThreshold || (seen && growth > storageGrowthThreshold)) {
+			state.flagged = true
+			sa.violations = append(sa.violations, SecurityViolation{
+				Type:        "UnboundedStorageGrowth",
+				Description: fmt.Sprintf("Storage entry in contract %s is large or growing fast (%d bytes)", contractID, size),
+				Severity:    "medium",
+				Location:    fmt.Sprintf("event_index:%d", i),
+			})
+		}
+
+		if len(event.Topics) > 1 {
+			prefix := contractID + "/" + event.Topics[0]
+			if fanout[prefix] == nil {
+				fanout[prefix] = make(map[string]struct{})
+			}
+			fanout[prefix][key] = struct{}{}
+
+			if len(fanout[prefix]) >= storageKeyFanoutThreshold && !fanoutFlagged[prefix] {
+				fanoutFlagged[prefix] = true
+				sa.violations = append(sa.violations, SecurityViolation{
+					Type: "UnboundedStorageGrowth",
+					Description: fmt.Sprintf(
+						"Contract %s writes %d distinct keys under %q; keys may come from caller-supplied values",
+						contractID, len(fanout[prefix]), event.Topics[0]),
+					Severity: "medium",
+					Location: fmt.Sprintf("event_index:%d", i),
+				})
+			}
 		}
 	}
 }
