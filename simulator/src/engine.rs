@@ -1,3 +1,6 @@
+// Copyright 2025 Hintents Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 use std::fmt;
 
 use wasmi::{Engine, Linker, Module, Store, Trap, TrapCode, Value};
@@ -132,3 +135,6 @@ impl ContractEngine {
         }
     }
 }
+
+// Copyright 2025 Hintents Contributors
+// SPDX-License-Identifier: Apache-2.0
