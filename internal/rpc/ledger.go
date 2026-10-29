@@ -18,6 +18,7 @@ type LedgerEntryPair struct {
 	EntryXDR string
 }
 
+// LedgerHeaderResponse is an alias for state.LedgerHeaderResponse
 // LedgerHeaderResponse contains essential ledger header information needed
 // for transaction replay simulation. The type lives in internal/types so that
 // packages such as internal/state can use it without importing this package

@@ -30,13 +30,13 @@ jobs:
             protocol_verify_script: scripts/verify_protocol_registration_linux.sh
 
           - os: macOS-Intel
-            runner: macos-latest     # Intel runner (fallback to latest if 13 fails)
+            runner: macos-13     # Intel runner
             binary_suffix: ""
             go_arch: amd64
             protocol_verify_script: scripts/verify_protocol_registration_macos.sh
 
           - os: macOS-Apple-Silicon
-            runner: macos-latest     # M-series ARM runner
+            runner: macos-14     # M-series ARM runner
             binary_suffix: ""
             go_arch: arm64
             protocol_verify_script: scripts/verify_protocol_registration_macos.sh
