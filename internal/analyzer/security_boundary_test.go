@@ -133,3 +133,69 @@ func TestSecurityBoundaryChecker_UnknownContract_Skipped(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, violations)
 }
+
+func TestSecurityBoundaryChecker_CrossContractReentrancy(t *testing.T) {
+	events := []string{
+		`{"type":"contract_call","contract":"A"}`,
+		`{"type":"contract_call","contract":"B"}`,
+		`{"type":"contract_call","contract":"A"}`,
+		`{"type":"auth","address":"user","contract":"A"}`,
+		`{"type":"storage_write","contract":"A"}`,
+	}
+
+	violations, err := NewSecurityBoundaryChecker().Analyze(events)
+	assert.NoError(t, err)
+	assert.Len(t, violations, 1)
+	assert.Equal(t, "cross_contract_reentrancy", violations[0].Type)
+	assert.Equal(t, "A", violations[0].Contract)
+	assert.Equal(t, []string{"A", "B", "A"}, violations[0].Details["path"])
+}
+
+func TestSecurityBoundaryChecker_RepeatedContractInSiblingCalls(t *testing.T) {
+	events := []string{
+		`{"type":"contract_call","contract":"A"}`,
+		`{"type":"contract_call","contract":"B"}`,
+		`{"type":"contract_return","contract":"B"}`,
+		`{"type":"contract_call","contract":"B"}`,
+		`{"type":"auth","address":"user","contract":"B"}`,
+		`{"type":"storage_write","contract":"B"}`,
+	}
+
+	violations, err := NewSecurityBoundaryChecker().Analyze(events)
+	assert.NoError(t, err)
+	for _, violation := range violations {
+		assert.NotEqual(t, "cross_contract_reentrancy", violation.Type)
+	}
+}
+
+func TestSecurityBoundaryChecker_ReentrancyWithoutStorageWrite(t *testing.T) {
+	events := []string{
+		`{"type":"contract_call","contract":"A"}`,
+		`{"type":"contract_call","contract":"B"}`,
+		`{"type":"contract_call","contract":"A"}`,
+		`{"type":"contract_return","contract":"A"}`,
+	}
+
+	violations, err := NewSecurityBoundaryChecker().Analyze(events)
+	assert.NoError(t, err)
+	for _, violation := range violations {
+		assert.NotEqual(t, "cross_contract_reentrancy", violation.Type)
+	}
+}
+
+func TestSecurityBoundaryChecker_NestedCrossContractReentrancy(t *testing.T) {
+	events := []string{
+		`{"type":"contract_call","contract":"A"}`,
+		`{"type":"contract_call","contract":"B"}`,
+		`{"type":"contract_call","contract":"C"}`,
+		`{"type":"contract_call","contract":"A"}`,
+		`{"type":"auth","address":"user","contract":"A"}`,
+		`{"type":"storage_write","contract":"A"}`,
+	}
+
+	violations, err := NewSecurityBoundaryChecker().Analyze(events)
+	assert.NoError(t, err)
+	assert.Len(t, violations, 1)
+	assert.Equal(t, "cross_contract_reentrancy", violations[0].Type)
+	assert.Equal(t, []string{"A", "B", "C", "A"}, violations[0].Details["path"])
+}
