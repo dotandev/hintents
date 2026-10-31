@@ -216,13 +216,13 @@ func (c *Client) fetchResultMetaFromSorobanRPC(ctx context.Context, hash string)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.SorobanURL, bytes.NewBuffer(reqBytes))
 	if err != nil {
-		return "", fmt.Errorf("create Soroban RPC request: %w", err)
+		return "", fmt.Errorf("create soroban RPC request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	httpResp, err := c.getHTTPClient().Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("Soroban RPC request: %w", err)
+		return "", fmt.Errorf("soroban RPC request: %w", err)
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
@@ -236,10 +236,10 @@ func (c *Client) fetchResultMetaFromSorobanRPC(ctx context.Context, hash string)
 		return "", fmt.Errorf("unmarshal Soroban RPC response: %w", err)
 	}
 	if rpcResp.Error != nil {
-		return "", fmt.Errorf("Soroban RPC error: %s", rpcResp.Error.Message)
+		return "", fmt.Errorf("soroban RPC error: %s", rpcResp.Error.Message)
 	}
 	if rpcResp.Result == nil || rpcResp.Result.ResultMetaXdr == "" {
-		return "", fmt.Errorf("Soroban RPC returned no result meta for %s", hash)
+		return "", fmt.Errorf("soroban RPC returned no result meta for %s", hash)
 	}
 
 	return rpcResp.Result.ResultMetaXdr, nil
