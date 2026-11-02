@@ -310,26 +310,10 @@ func TestExtractLedgerKeys(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	meta := xdr.TransactionResultMeta{
-		FeeProcessing:     changes,
-		TxApplyProcessing: txMeta,
-		Result: xdr.TransactionResultPair{
-			TransactionHash: xdr.Hash{1, 2, 3},
-			Result: xdr.TransactionResult{
-				FeeCharged: 100,
-				Result: xdr.TransactionResultResult{
-					Code:    xdr.TransactionResultCodeTxSuccess,
-					Results: &[]xdr.OperationResult{},
-				},
-				Ext: xdr.TransactionResultExt{
-					V: 0,
-				},
-			},
-		},
-	}
-
-	// Marshal to XDR then Base64
-	metaBytes, err := meta.MarshalBinary()
+	// result_meta_xdr is a bare TransactionMeta on Horizon. Wrapping it in
+	// TransactionResultMeta puts the result pair in front and shifts every
+	// field the decoder reads after it.
+	metaBytes, err := txMeta.MarshalBinary()
 	assert.NoError(t, err)
 	metaB64 := base64.StdEncoding.EncodeToString(metaBytes)
 
@@ -337,8 +321,7 @@ func TestExtractLedgerKeys(t *testing.T) {
 	keys, err := extractLedgerKeys(metaB64)
 	assert.NoError(t, err)
 
-	// We should have at least one key (the one from FeeProcessing and one from Operations)
-	// Both are the same, so map should de-duplicate.
+	// TxChanges and the operation changes carry the same key, so expect one.
 	assert.GreaterOrEqual(t, len(keys), 1)
 
 	// Verify key matches
