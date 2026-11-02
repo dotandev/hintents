@@ -28,8 +28,10 @@
 #![allow(dead_code)]
 
 use crate::snapshot::LedgerSnapshot;
-use soroban_env_host::xdr::{Limits, WriteXdr, SorobanAuthorizationEntry, SorobanAuthorizedInvocation};
 use crate::types::DiagnosticEvent;
+use soroban_env_host::xdr::{
+    Limits, SorobanAuthorizationEntry, SorobanAuthorizedInvocation, WriteXdr,
+};
 use soroban_env_host::EnvBase;
 use std::collections::BTreeMap;
 use std::fmt;
