@@ -13,7 +13,7 @@
     "react-dom": "^18",
     "lucide-react": "^1.63.0",
     "motion": "^14.7.1",
-    "@stellar/freighter-api": "^2.0.0"
+    "@stellar/freighter-api": "^6.0.1"
   },
   "devDependencies": {
     "@types/node": "^20",
