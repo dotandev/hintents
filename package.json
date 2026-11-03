@@ -11,7 +11,7 @@
     "critters": "^0.0.25",
     "cross-fetch": "^4.1.0",
     "crypto-browserify": "^3.12.1",
-    "dotenv": "^17.2.3",
+    "dotenv": "^18.0.9",
     "fast-json-stable-stringify": "^2.1.0",
     "path-browserify": "^1.0.1",
     "pkcs11js": "^2.1.6",
