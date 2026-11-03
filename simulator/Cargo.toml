@@ -35,7 +35,7 @@ inferno = "0.12.8"
 jsonschema = "0.40.2"
 object = { version = "0.40.0", features = ["wasm"] }
 gimli = "0.31"
-wasmparser = "0.245.1"
+wasmparser = "0.255.0"
 blake3 = "1"
 dirs = "6.0.0"
 hex = "0.4.3"
