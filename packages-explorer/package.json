@@ -11,8 +11,8 @@
     "next": "16.4.3",
     "react": "^18",
     "react-dom": "^18",
-    "lucide-react": "^1.63.0",
-    "motion": "^14.7.1",
+    "lucide-react": "^1.66.0",
+    "motion": "^14.9.0",
     "@stellar/freighter-api": "^2.0.0"
   },
   "devDependencies": {
@@ -21,7 +21,7 @@
     "@types/react-dom": "^18",
     "typescript": "^5",
     "tailwindcss": "^3.4.3",
-    "postcss": "^8.4.38",
-    "autoprefixer": "^10.4.19"
+    "postcss": "^8.5.32",
+    "autoprefixer": "^10.6.2"
   }
 }
