@@ -307,22 +307,8 @@ func TestFetchBytecodeForTraceContractCalls_PreservesExistingInstanceAndFetchesM
 			return
 		}
 
-		rawKeys, ok := req.Params[0].([]interface{})
-		if !ok {
-			t.Errorf("unexpected params payload: %#v", req.Params)
-			http.Error(w, "bad params", http.StatusBadRequest)
-			return
-		}
-
-		entries := make([]LedgerEntryResult, 0, len(rawKeys))
-		for _, rawKey := range rawKeys {
-			key, ok := rawKey.(string)
-			if !ok {
-				t.Errorf("unexpected key payload: %#v", rawKey)
-				http.Error(w, "bad key", http.StatusBadRequest)
-				return
-			}
-
+		entries := make([]LedgerEntryResult, 0, len(req.Params.Keys))
+		for _, key := range req.Params.Keys {
 			mu.Lock()
 			requestedKeys = append(requestedKeys, key)
 			mu.Unlock()

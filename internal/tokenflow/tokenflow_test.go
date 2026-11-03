@@ -110,24 +110,11 @@ func encodeResultMetaWithDiagnosticEvents(t *testing.T, events []xdr.DiagnosticE
 
 	tm := xdr.TransactionMeta{V: 3, V3: &tm3}
 
-	emptyOpResults := []xdr.OperationResult{}
-	txResResult := xdr.TransactionResultResult{
-		Code:    xdr.TransactionResultCodeTxSuccess,
-		Results: &emptyOpResults,
-	}
-	txRes := xdr.TransactionResult{
-		FeeCharged: xdr.Int64(0),
-		Result:     txResResult,
-		Ext:        xdr.TransactionResultExt{V: 0},
-	}
-
-	rm := xdr.TransactionResultMeta{
-		Result:            xdr.TransactionResultPair{TransactionHash: xdr.Hash{}, Result: txRes},
-		FeeProcessing:     xdr.LedgerEntryChanges{},
-		TxApplyProcessing: tm,
-	}
-
-	b, err := rm.MarshalBinary()
+	// Horizon's result_meta_xdr decodes directly to TransactionMeta — not
+	// wrapped in a TransactionResultMeta (that wrapper type belongs to
+	// stellar-core's ledger-close-meta stream). extractSACTransfersAndMints
+	// expects the same shape Horizon actually sends.
+	b, err := tm.MarshalBinary()
 	require.NoError(t, err)
 	return base64.StdEncoding.EncodeToString(b)
 }

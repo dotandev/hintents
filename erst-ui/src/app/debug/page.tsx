@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 dotandev
+// SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,12 @@
 "use client";
 
 import React, { useState } from 'react';
+import Link from 'next/link';
+import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react';
 import styles from './page.module.css';
 import Button from '@/components/ui/Button';
+import Logo from '@/components/icons/Logo';
+import ThemeToggle from '@/components/ThemeToggle';
 
 type Network = 'testnet' | 'mainnet' | 'futurenet';
 
@@ -79,108 +83,118 @@ export default function DebugPage() {
   };
 
   return (
-    <div className={styles.container}>
-      <header className={styles.header}>
-        <h1 className="heading-gradient">Transaction Debugger</h1>
-        <p className={styles.subtitle}>Decode envelopes and inspect transaction contexts</p>
-      </header>
+    <div className={styles.page}>
+      <nav className={styles.nav}>
+        <Link href="/" className={styles.navBrand}>
+          <span className={styles.navBrandIcon}>
+            <Logo size={22} />
+          </span>
+          Erst. <span className={styles.navCrumb}>/ Debugger</span>
+        </Link>
+        <div className={styles.navActions}>
+          <Link href="/" className={styles.backLink}>
+            <ArrowLeft size={14} /> Back to site
+          </Link>
+          <ThemeToggle />
+        </div>
+      </nav>
 
-      <div className={styles.grid}>
-        <section className={`glass-panel ${styles.panel}`}>
-          <h2>Input Payload</h2>
-          <div className={styles.inputGroup}>
-            <label>Transaction Hash</label>
-            <textarea
-              className={styles.textarea}
-              placeholder="64-character hex transaction hash..."
-              rows={8}
-              value={txHash}
-              onChange={(e) => setTxHash(e.target.value)}
-            />
-          </div>
-          <div className={styles.inputGroup}>
-            <label htmlFor="network-select">Network</label>
-            <select
-              id="network-select"
-              className={styles.textarea}
-              style={{ height: 'auto', padding: '0.6rem' }}
-              value={network}
-              onChange={(e) => setNetwork(e.target.value as Network)}
-            >
-              <option value="testnet">Testnet</option>
-              <option value="mainnet">Mainnet</option>
-              <option value="futurenet">Futurenet</option>
-            </select>
-          </div>
-          <div className={styles.actions}>
-            <Button variant="primary" onClick={handleDebug} disabled={loading}>
-              {loading ? 'Executing...' : 'Decode & Fetch State'}
-            </Button>
-            <Button variant="ghost" onClick={() => { setTxHash(''); setResult(null); }}>Clear</Button>
-          </div>
-        </section>
+      <div className={styles.container}>
+        <header className={styles.header}>
+          <h1 className="heading-gradient">Transaction Debugger</h1>
+          <p className={styles.subtitle}>Decode envelopes and inspect transaction contexts</p>
+        </header>
 
-        <section className={`glass-panel ${styles.panel} ${styles.resultPanel}`}>
-          <h2>Decoded Context</h2>
-          {!result ? (
-            <div className={styles.emptyState}>
-              <div className={styles.emptyIcon}>⬡</div>
-              <p>Awaiting transaction payload...</p>
+        <div className={styles.grid}>
+          <section className={styles.panel}>
+            <h2>Input Payload</h2>
+            <div className={styles.inputGroup}>
+              <label>Transaction Hash</label>
+              <textarea
+                className={styles.textarea}
+                placeholder="64-character hex transaction hash..."
+                rows={6}
+                value={txHash}
+                onChange={(e) => setTxHash(e.target.value)}
+              />
             </div>
-          ) : (
-            <div className={styles.resultContent} style={{ overflowY: 'auto', maxHeight: '700px', fontSize: '0.85rem' }}>
-              {result.success ? (
-                <>
-                  <h3 style={{ color: 'var(--accent-color)' }}>Execution Succeeded</h3>
-                  <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginTop: '1rem' }}>
-                    {JSON.stringify(result.output, null, 2)}
-                  </pre>
-                  {result.logs && (
-                    <div style={{ marginTop: '1rem' }}>
-                      <h4>Logs:</h4>
-                      <pre style={{ whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>{result.logs}</pre>
-                    </div>
-                  )}
-                  {result.callGraphSvg && (
-                    <div style={{ marginTop: '1.5rem' }}>
-                      <h4>Call Graph</h4>
-                      <div
-                        style={{
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '8px',
-                          overflow: 'auto',
-                          background: '#0d1117',
-                        }}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={svgToImageSrc(result.callGraphSvg)}
-                          alt="Contract call graph"
-                          style={{ display: 'block', width: '100%', height: 'auto' }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <h3 style={{ color: 'var(--error-color)', marginBottom: '1rem' }}>Execution Failed</h3>
-                  <p><strong>Error:</strong> {result.error}</p>
-                  {result.stderr && (
-                    <pre style={{ color: '#ff6b6b', marginTop: '1rem', whiteSpace: 'pre-wrap' }}>
-                      {result.stderr}
-                    </pre>
-                  )}
-                  {result.stdout && (
-                    <pre style={{ color: 'var(--text-secondary)', marginTop: '1rem', whiteSpace: 'pre-wrap' }}>
-                      {result.stdout}
-                    </pre>
-                  )}
-                </>
-              )}
+            <div className={styles.inputGroup}>
+              <label htmlFor="network-select">Network</label>
+              <select
+                id="network-select"
+                className={styles.select}
+                value={network}
+                onChange={(e) => setNetwork(e.target.value as Network)}
+              >
+                <option value="testnet">Testnet</option>
+                <option value="mainnet">Mainnet</option>
+                <option value="futurenet">Futurenet</option>
+              </select>
             </div>
-          )}
-        </section>
+            <div className={styles.actions}>
+              <Button variant="primary" onClick={handleDebug} disabled={loading}>
+                {loading ? 'Executing...' : 'Decode & Fetch State'}
+              </Button>
+              <Button variant="ghost" onClick={() => { setTxHash(''); setResult(null); }}>Clear</Button>
+            </div>
+          </section>
+
+          <section className={`${styles.panel} ${styles.resultPanel}`}>
+            <h2>Decoded Context</h2>
+            {!result ? (
+              <div className={styles.emptyState}>
+                <div className={styles.emptyIcon}>⬡</div>
+                <p>Awaiting transaction payload...</p>
+              </div>
+            ) : (
+              <div className={styles.resultContent}>
+                {result.success ? (
+                  <>
+                    <h3 className={styles.statusSuccess}>
+                      <CheckCircle2 size={18} /> Execution Succeeded
+                    </h3>
+                    <div className={styles.sectionLabel}>Output</div>
+                    <pre className={styles.outputBlock}>{JSON.stringify(result.output, null, 2)}</pre>
+                    {result.logs && (
+                      <>
+                        <div className={styles.sectionLabel}>Logs</div>
+                        <pre className={styles.outputBlock}>{result.logs}</pre>
+                      </>
+                    )}
+                    {result.callGraphSvg && (
+                      <>
+                        <div className={styles.sectionLabel}>Call Graph</div>
+                        <div className={styles.callGraphFrame}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={svgToImageSrc(result.callGraphSvg)} alt="Contract call graph" />
+                        </div>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <h3 className={styles.statusError}>
+                      <XCircle size={18} /> Execution Failed
+                    </h3>
+                    <p><strong>Error:</strong> {result.error}</p>
+                    {result.stderr && (
+                      <>
+                        <div className={styles.sectionLabel}>stderr</div>
+                        <pre className={styles.errorBlock}>{result.stderr}</pre>
+                      </>
+                    )}
+                    {result.stdout && (
+                      <>
+                        <div className={styles.sectionLabel}>stdout</div>
+                        <pre className={styles.outputBlock}>{result.stdout}</pre>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );

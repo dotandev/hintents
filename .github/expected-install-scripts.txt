@@ -1,0 +1,27 @@
+# npm packages permitted to declare an install script.
+#
+# One package name per line. Anything NOT listed here that wants to run a
+# command on `npm install` fails the Supply Chain workflow.
+#
+# The signal this watches for is not "a package has an install script" — four
+# legitimate ones here do — it is "a package that never had one now does".
+# That is what the September 2025 npm worm did: it appended a postinstall to
+# packages whose maintainers it had phished. Pinning the expected set means
+# that change shows up as a build failure instead of as nothing at all.
+#
+# Adding a name here is a tracked edit, so it goes through review like any
+# other change. Before adding one, check why the package needs to run code at
+# install time and whether a prebuilt alternative exists.
+
+# Compiles or downloads a platform-specific binary.
+esbuild
+pkcs11js
+unrs-resolver
+
+# Transitive dev dependency of jest (via jest-haste-map), used for watch mode.
+# Falls back to compiling its native addon from source when no prebuilt binary
+# matches the current platform/arch.
+@parcel/watcher
+
+# macOS file-system watcher. Optional, and only installed on darwin.
+fsevents

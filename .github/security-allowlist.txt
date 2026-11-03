@@ -1,0 +1,50 @@
+# Waivers for the Malicious Code Scan.
+#
+# One waiver per line:
+#
+#     <check-id> <path>
+#
+# The path is exactly as it appears in the scan output. A waiver silences that
+# one check for that one file; it does not disable anything else.
+#
+# Waivers are keyed by file rather than by line so they survive code moving
+# around, and they live in a tracked file so adding one shows up in review —
+# turning off a security check should cost a conversation, not a quiet edit.
+# The scan flags its own allowlist when it changes, for the same reason.
+#
+# Check ids:
+#
+#   key-material-sink    key material passed to a logger, formatter or socket
+#   dynamic-exec         code evaluated at runtime
+#   shell-exec           a shell is spawned
+#   unexpected-egress    a request to a host outside the known set
+#   pull-request-target  a workflow trigger that exposes repository secrets
+#   workflow-expression  event data interpolated into a workflow
+#   unpinned-action      an action pinned to a moving branch
+#   workflow-changed     any change under .github/workflows
+#   stellar-secret-seed  a Stellar secret seed
+#   aws-access-key       an AWS access key id
+#   github-token         a GitHub personal access token
+#   pem-private-key      a PEM private key header
+#
+# From the installed-package scan, where the subject is a path inside
+# node_modules rather than a tracked file:
+#
+#   install-hook         a dependency runs a script on npm install
+#   exfil-endpoint       a request-capture or chat-webhook URL
+#   credential-harvest   reads credential stores or serialises the environment
+#   address-swap         overrides a network primitive or embeds wallet addresses
+#
+# Example:
+#
+#   pem-private-key internal/rpc/logger.go
+
+# The log-sanitisation tests assert that a Stellar seed gets masked, so they
+# have to contain something shaped like one. Four literals remain in this file;
+# commit 474075af moved other fixtures in this package to runtime construction,
+# and these should follow, at which point this waiver can go.
+stellar-secret-seed internal/rpc/logger_test.go
+
+# The redaction code and the HSM guide both quote the PEM header on purpose.
+pem-private-key internal/rpc/logger.go
+pem-private-key docs/HSM_INTEGRATION.md

@@ -13,9 +13,18 @@ RUN rustup target add wasm32-unknown-unknown
 # Set up the application directory
 WORKDIR /app
 
-# Install Node dependencies
+# Install Node dependencies.
+#
+# npm ci, not npm install: `install` is free to resolve a caret range to
+# whatever was published most recently, so a compromised patch release of a
+# transitive package lands in the image without the lockfile ever changing.
+# `ci` installs exactly what the lockfile pins.
+#
+# --ignore-scripts because an install hook is the first code a compromised
+# package gets to run, and it runs here as root, during a build, on a machine
+# that can reach the network. Nothing in this dependency tree needs one.
 COPY package*.json ./
-RUN npm install --production
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copy the server code
 COPY server.js ./

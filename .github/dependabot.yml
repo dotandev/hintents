@@ -61,6 +61,141 @@ updates:
       prefix: "chore(deps)"
     rebase-strategy: "auto"
 
+  # npm - root (stellar-sdk, axios, chalk, pkcs11js)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+    rebase-strategy: "auto"
+    groups:
+      # Everything routine arrives as one pull request a week per project
+      # rather than one per package. Five projects at the usual limit would
+      # have put up to 25 PRs a week on a review queue that already carries
+      # the contributor backlog, and a security update nobody has time to look
+      # at is not a security update. Majors still come through individually,
+      # because those need reading.
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # npm - erst-ui (deployed to Vercel)
+  - package-ecosystem: "npm"
+    directory: "/erst-ui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+    rebase-strategy: "auto"
+    groups:
+      # Everything routine arrives as one pull request a week per project
+      # rather than one per package. Five projects at the usual limit would
+      # have put up to 25 PRs a week on a review queue that already carries
+      # the contributor backlog, and a security update nobody has time to look
+      # at is not a security update. Majors still come through individually,
+      # because those need reading.
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # npm - erst-playground
+  - package-ecosystem: "npm"
+    directory: "/erst-playground"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+    rebase-strategy: "auto"
+    groups:
+      # Everything routine arrives as one pull request a week per project
+      # rather than one per package. Five projects at the usual limit would
+      # have put up to 25 PRs a week on a review queue that already carries
+      # the contributor backlog, and a security update nobody has time to look
+      # at is not a security update. Majors still come through individually,
+      # because those need reading.
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # npm - packages-explorer (deployed to Vercel)
+  - package-ecosystem: "npm"
+    directory: "/packages-explorer"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+    rebase-strategy: "auto"
+    groups:
+      # Everything routine arrives as one pull request a week per project
+      # rather than one per package. Five projects at the usual limit would
+      # have put up to 25 PRs a week on a review queue that already carries
+      # the contributor backlog, and a security update nobody has time to look
+      # at is not a security update. Majors still come through individually,
+      # because those need reading.
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # npm - playground-api (deployed as a container)
+  - package-ecosystem: "npm"
+    directory: "/playground-api"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+    rebase-strategy: "auto"
+    groups:
+      # Everything routine arrives as one pull request a week per project
+      # rather than one per package. Five projects at the usual limit would
+      # have put up to 25 PRs a week on a review queue that already carries
+      # the contributor backlog, and a security update nobody has time to look
+      # at is not a security update. Majors still come through individually,
+      # because those need reading.
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"

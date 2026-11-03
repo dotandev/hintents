@@ -43,7 +43,7 @@ func BenchmarkJSONRPCMarshal(b *testing.B) {
 				Jsonrpc: "2.0",
 				ID:      1,
 				Method:  "getLedgerEntries",
-				Params:  []interface{}{keys},
+				Params:  GetLedgerEntriesParams{Keys: keys},
 			}
 
 			b.ResetTimer()
@@ -245,7 +245,7 @@ func BenchmarkGetLedgerEntries(b *testing.B) {
 					ID:      1,
 				}
 				resp.Result.LatestLedger = 12345
-				resp.Result.Entries = make([]LedgerEntryResult, len(req.Params[0].([]interface{})))
+				resp.Result.Entries = make([]LedgerEntryResult, len(req.Params.Keys))
 
 				for i := range resp.Result.Entries {
 					resp.Result.Entries[i].Key = strings.Repeat("k", 64)
@@ -424,7 +424,7 @@ func BenchmarkJSONRPCRoundTrip(b *testing.B) {
 		Jsonrpc: "2.0",
 		ID:      1,
 		Method:  "getLedgerEntries",
-		Params:  []interface{}{[]string{"key1"}},
+		Params:  GetLedgerEntriesParams{Keys: []string{"key1"}},
 	}
 
 	b.ResetTimer()

@@ -21,8 +21,6 @@ fn test_signature_verification_mock_true() {
         no_cache: false,
         enable_optimization_advisor: false,
         profile: None,
-        _timestamp: None,
-        timestamp: String::new(),
         mock_base_fee: None,
         mock_gas_price: None,
         mock_signature_verification: Some(true),
@@ -37,6 +35,7 @@ fn test_signature_verification_mock_true() {
         ledger_timestamp: None,
         clock_advance_seconds: None,
         ledger_sequence: None,
+        protocol_version: None,
     };
 
     assert!(request.mock_signature_verification.is_some());
@@ -59,8 +58,6 @@ fn test_signature_verification_mock_false() {
         no_cache: false,
         enable_optimization_advisor: false,
         profile: None,
-        _timestamp: None,
-        timestamp: String::new(),
         mock_base_fee: None,
         mock_gas_price: None,
         mock_signature_verification: Some(false),
@@ -75,6 +72,7 @@ fn test_signature_verification_mock_false() {
         ledger_timestamp: None,
         clock_advance_seconds: None,
         ledger_sequence: None,
+        protocol_version: None,
     };
 
     assert!(request.mock_signature_verification.is_some());
@@ -97,8 +95,6 @@ fn test_signature_verification_mock_disabled() {
         no_cache: false,
         enable_optimization_advisor: false,
         profile: None,
-        _timestamp: None,
-        timestamp: String::new(),
         mock_base_fee: None,
         mock_gas_price: None,
         mock_signature_verification: None,
@@ -113,6 +109,7 @@ fn test_signature_verification_mock_disabled() {
         ledger_timestamp: None,
         clock_advance_seconds: None,
         ledger_sequence: None,
+        protocol_version: None,
     };
 
     assert!(request.mock_signature_verification.is_none());

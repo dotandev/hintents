@@ -20,6 +20,15 @@ use crate::snapshot::{LedgerSnapshot, SnapshotError};
 use crate::time::ClockDrift;
 use tracing::{debug, instrument};
 
+/// The highest ledger protocol version this build of the host understands.
+///
+/// Reading it from the host keeps the simulator's default in step with whatever
+/// `soroban-env-host` the binary was compiled against, instead of a literal
+/// that silently becomes "too old for host" after a dependency bump.
+pub fn host_protocol_version() -> u32 {
+    soroban_env_host::meta::INTERFACE_VERSION.protocol
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SimHostError {
     #[error(transparent)]
@@ -416,8 +425,19 @@ impl SimHost {
         // NOTE: We preserve the clock state across rollback so that time progression
         // continues even when rewinding ledger state.
         let preserved_clock = self.clock.clone();
+        // The ledger context belongs to the replay, not to any one snapshot of
+        // storage. Entries are injected one at a time and every injection comes
+        // through here, so without this a ledger context established before
+        // loading state would be discarded by the very first entry and the host
+        // would fail execution with "missing ledger info".
+        let preserved_ledger_info = self.inner.with_ledger_info(|li| Ok(li.clone())).ok();
         *self = restored;
         self.clock = preserved_clock;
+        if let Some(info) = preserved_ledger_info {
+            self.inner
+                .set_ledger_info(info)
+                .map_err(SimHostError::Host)?;
+        }
         Ok(())
     }
 
@@ -634,20 +654,44 @@ impl SimHost {
     /// Sets the replay ledger sequence number on the host's ledger info.
     #[allow(dead_code)]
     pub fn set_ledger_sequence(&self, sequence: u32) -> Result<(), SimHostError> {
+        self.set_ledger_context(sequence, None, None)
+    }
+
+    /// Establishes the ledger a replay runs against.
+    ///
+    /// The host refuses to execute without ledger info at all ("missing ledger
+    /// info"), and refuses a protocol older than its own floor ("ledger
+    /// protocol version too old for host"). Defaulting to the protocol this
+    /// build of the host understands keeps the default working across host
+    /// upgrades, where a pinned number quietly ages out.
+    pub fn set_ledger_context(
+        &self,
+        sequence: u32,
+        timestamp: Option<u64>,
+        protocol_version: Option<u32>,
+    ) -> Result<(), SimHostError> {
         let mut info = self
             .inner
             .with_ledger_info(|li| Ok(li.clone()))
             .unwrap_or_else(|_| soroban_env_host::LedgerInfo {
-                protocol_version: 21,
+                protocol_version: host_protocol_version(),
                 sequence_number: sequence,
-                timestamp: self.clock.get_clock(),
+                timestamp: timestamp.unwrap_or_else(|| self.clock.get_clock()),
                 network_id: [0u8; 32],
                 base_reserve: 10,
                 min_temp_entry_ttl: 16,
                 min_persistent_entry_ttl: 4096,
                 max_entry_ttl: 6_312_000,
             });
+
         info.sequence_number = sequence;
+        if let Some(ts) = timestamp {
+            info.timestamp = ts;
+        }
+        if let Some(version) = protocol_version {
+            info.protocol_version = version;
+        }
+
         self.inner.set_ledger_info(info).map_err(SimHostError::Host)
     }
 

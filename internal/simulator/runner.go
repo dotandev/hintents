@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -303,8 +304,23 @@ func (r *Runner) Run(ctx context.Context, req *SimulationRequest) (*SimulationRe
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
+
+			// The simulator reports what actually went wrong as a JSON payload
+			// on stdout and only then exits non-zero. Reading stderr alone
+			// leaves the caller with a bare "exit status 1" and a few log
+			// lines, so the payload is preferred whenever it parsed.
+			var resp SimulationResponse
+			if unmarshalErr := json.Unmarshal(stdout.Bytes(), &resp); unmarshalErr == nil && resp.Error != "" {
+				classified := (&ipc.Error{Code: resp.ErrorCode, Message: resp.Error}).ToErstError()
+				logger.Logger.Error("Simulator exited with an error payload",
+					"code", classified.Code,
+					"original", classified.OrigErr,
+				)
+				return nil, classified
+			}
+
 			logger.Logger.Error("Simulator execution failed", "error", err, "stderr", stderr.String())
-			return nil, errors.WrapSimCrash(err, stderr.String())
+			return nil, errors.WrapSimCrash(err, strings.TrimSpace(stderr.String()+"\n"+stdout.String()))
 		}
 	case <-ctx.Done():
 		_ = r.terminateProcessGroup(cmd, 1500*time.Millisecond)

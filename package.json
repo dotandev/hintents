@@ -3,7 +3,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^14.5.0",
+    "@stellar/stellar-sdk": "^14.6.1",
     "axios": "^1.13.4",
     "buffer": "^6.0.3",
     "chalk": "^4.1.2",
@@ -32,13 +32,7 @@
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "vscode": "^1.1.37"
-  },
-  "allowScripts": {
-    "esbuild@0.27.2": true,
-    "pkcs11js@2.1.6": true,
-    "unrs-resolver@1.11.1": true
+    "typescript": "^5.9.3"
   },
   "config": {
     "enableFileLogging": true

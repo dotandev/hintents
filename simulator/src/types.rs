@@ -35,14 +35,7 @@ pub struct SimulationRequest {
     pub no_cache: bool,
     pub enable_optimization_advisor: bool,
     pub profile: Option<bool>,
-    #[serde(default)]
-    pub _timestamp: Option<i64>,
     pub resource_calibration: Option<ResourceCalibration>,
-    /// RFC 3339 timestamp supplied by the caller.  Preserved for future use
-    /// (e.g. time-locked contract logic); not yet consumed by the simulator.
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub timestamp: String,
     pub mock_base_fee: Option<u32>,
     pub mock_gas_price: Option<u64>,
     pub mock_signature_verification: Option<bool>,
@@ -82,6 +75,10 @@ pub struct SimulationRequest {
     /// sequence and raises an archived-entry error if expired.
     #[serde(default)]
     pub ledger_sequence: Option<u32>,
+    /// Optional ledger protocol version to replay under. Defaults to the
+    /// protocol this host build supports.
+    #[serde(default)]
+    pub protocol_version: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

@@ -59,11 +59,20 @@ type GetHealthResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// GetLedgerEntriesParams is the parameter object Soroban RPC expects.
+//
+// getLedgerEntries takes NAMED parameters and rejects a positional array
+// outright ("cannot unmarshal array into Go value of type
+// protocol.GetLedgerEntriesRequest"), so this must stay an object.
+type GetLedgerEntriesParams struct {
+	Keys []string `json:"keys"`
+}
+
 type GetLedgerEntriesRequest struct {
-	Jsonrpc string        `json:"jsonrpc"`
-	ID      int           `json:"id"`
-	Method  string        `json:"method"`
-	Params  []interface{} `json:"params"`
+	Jsonrpc string                 `json:"jsonrpc"`
+	ID      int                    `json:"id"`
+	Method  string                 `json:"method"`
+	Params  GetLedgerEntriesParams `json:"params"`
 }
 
 type GetLedgerEntriesResponse struct {
@@ -79,9 +88,19 @@ type GetLedgerEntriesResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// GetLedgerEntries fetches the current state of ledger entries from Soroban RPC
-// keys should be a list of base64-encoded XDR LedgerKeys
-// This method implements batching and concurrent requests for large key sets
+// GetLedgerEntries fetches the current state of ledger entries from Soroban RPC.
+// keys should be a list of base64-encoded XDR LedgerKeys.
+// This method implements batching and concurrent requests for large key sets.
+//
+// The result holds every entry that exists, keyed by its base64 LedgerKey, plus
+// a TTL entry alongside each contract data or contract code entry — the host
+// looks for expiry in storage as an entry of its own, and rejects a contract
+// entry that arrives without one. So the map can be larger than the key list.
+//
+// A key that holds no entry is simply absent from the result. Soroban RPC
+// reports a missing entry by omitting it, and that is a legitimate answer: the
+// entry may be about to be created, or it may have expired and been archived.
+// Callers that need every key accounted for must check for themselves.
 func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[string]string, error) {
 	if len(keys) == 0 {
 		return map[string]string{}, nil
@@ -92,17 +111,37 @@ func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[strin
 
 	// Check cache if enabled
 	if c.CacheEnabled {
+		ttlKeys := ttlKeysFor(keys)
+
 		for _, key := range keys {
 			val, hit, err := Get(key)
 			if err != nil {
 				logger.Logger.Warn("Cache read failed", "error", err)
 			}
-			if hit {
-				entries[key] = val
-				logger.Logger.Debug("Cache hit", "key", key)
-			} else {
+			if !hit {
 				keysToFetch = append(keysToFetch, key)
+				continue
 			}
+
+			// An entry's TTL lives in a ledger entry of its own, and the host
+			// rejects a contract entry that arrives without one. Treat a
+			// half-cached pair as a miss rather than handing the simulator an
+			// entry it will refuse.
+			ttlKey, needsTTL := ttlKeys[key]
+			if needsTTL {
+				ttlVal, ttlHit, ttlErr := Get(ttlKey)
+				if ttlErr != nil {
+					logger.Logger.Warn("Cache read failed", "error", ttlErr)
+				}
+				if !ttlHit {
+					keysToFetch = append(keysToFetch, key)
+					continue
+				}
+				entries[ttlKey] = ttlVal
+			}
+
+			entries[key] = val
+			logger.Logger.Debug("Cache hit", "key", key)
 		}
 	} else {
 		keysToFetch = keys
@@ -300,7 +339,7 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 		Jsonrpc: "2.0",
 		ID:      1,
 		Method:  "getLedgerEntries",
-		Params:  []interface{}{keysToFetch},
+		Params:  GetLedgerEntriesParams{Keys: keysToFetch},
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -366,23 +405,43 @@ func (c *Client) getLedgerEntriesAttempt(ctx context.Context, keysToFetch []stri
 	metrics.RecordRemoteNodeResponse(targetURL, string(c.Network), true, duration)
 	c.recordTelemetry(targetURL, duration, true)
 
+	// Verify before anything is stored or cached, so an entry that fails the
+	// check neither reaches the simulator nor outlives the request.
+	if err := VerifyLedgerEntries(keysToFetch, rpcResp.Result.Entries); err != nil {
+		return nil, fmt.Errorf("ledger entry verification failed: %w", err)
+	}
+
 	entries = make(map[string]string)
 	fetchedCount := 0
 	for _, entry := range rpcResp.Result.Entries {
-		entries[entry.Key] = entry.Xdr
+		// The wire carries a LedgerEntryData; the simulator reads whole
+		// LedgerEntry values, as does everything built from metadata.
+		normalized, encodeErr := EncodeLedgerEntryResult(entry)
+		if encodeErr != nil {
+			return nil, fmt.Errorf("normalizing ledger entry %s: %w", entry.Key, encodeErr)
+		}
+
+		entries[entry.Key] = normalized
 		fetchedCount++
 
 		// Cache the new entry
 		if c.CacheEnabled {
-			if err := Set(entry.Key, entry.Xdr); err != nil {
+			if err := Set(entry.Key, normalized); err != nil {
 				logger.Logger.Warn("Failed to cache entry", "key", entry.Key, "error", err)
 			}
 		}
-	}
 
-	// Cryptographically verify all returned ledger entries
-	if err := VerifyLedgerEntries(keysToFetch, rpcResp.Result.Entries); err != nil {
-		return nil, fmt.Errorf("ledger entry verification failed: %w", err)
+		// The expiry arrives beside the entry as `liveUntilLedgerSeq`, but the
+		// host looks for it as a TTL ledger entry in storage, so add one.
+		if ttlKey, ttlEntry, hasTTL := ttlEntryFor(entry); hasTTL {
+			entries[ttlKey] = ttlEntry
+
+			if c.CacheEnabled {
+				if err := Set(ttlKey, ttlEntry); err != nil {
+					logger.Logger.Warn("Failed to cache TTL entry", "key", ttlKey, "error", err)
+				}
+			}
+		}
 	}
 
 	logger.Logger.Debug("Ledger entries fetched",

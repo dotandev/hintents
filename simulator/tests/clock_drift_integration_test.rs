@@ -161,8 +161,6 @@ fn test_simulation_request_with_ledger_timestamp() {
         no_cache: false,
         enable_optimization_advisor: false,
         profile: None,
-        _timestamp: None,
-        timestamp: String::new(),
         mock_base_fee: None,
         mock_gas_price: None,
         mock_signature_verification: None,
@@ -177,6 +175,7 @@ fn test_simulation_request_with_ledger_timestamp() {
         ledger_timestamp: Some(1700000000),
         clock_advance_seconds: Some(3600),
         ledger_sequence: None,
+        protocol_version: None,
     };
 
     assert_eq!(request.ledger_timestamp, Some(1700000000));
@@ -200,8 +199,6 @@ fn test_simulation_request_fields_are_optional() {
         no_cache: false,
         enable_optimization_advisor: false,
         profile: None,
-        _timestamp: None,
-        timestamp: String::new(),
         mock_base_fee: None,
         mock_gas_price: None,
         mock_signature_verification: None,
@@ -216,6 +213,7 @@ fn test_simulation_request_fields_are_optional() {
         ledger_timestamp: None,
         clock_advance_seconds: None,
         ledger_sequence: None,
+        protocol_version: None,
     };
 
     assert_eq!(request.ledger_timestamp, None);

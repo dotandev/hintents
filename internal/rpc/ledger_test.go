@@ -188,7 +188,7 @@ func TestLedgerKeyFromEntry_ContractCodeLedger(t *testing.T) {
 	}
 }
 
-func TestExtractFromChanges(t *testing.T) {
+func TestCollectChanges_CreatedIsAbsenceNotAnEntry(t *testing.T) {
 	accountID := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
 	entry := xdr.LedgerEntry{
 		LastModifiedLedgerSeq: 100,
@@ -208,48 +208,111 @@ func TestExtractFromChanges(t *testing.T) {
 		},
 	}
 
-	entries := make(map[string]string)
-	extractFromChanges(changes, entries)
+	acc := newPreTxAccumulator()
+	acc.collectChanges(changes)
 
-	if len(entries) != 1 {
-		t.Errorf("Expected 1 entry, got %d", len(entries))
+	// The entry came into existence during the transaction, so before it ran
+	// there was nothing there. Seeding a replay with the created value would
+	// flip any "create if absent" branch the contract takes.
+	if len(acc.entries) != 0 {
+		t.Errorf("expected no pre-transaction entries, got %d", len(acc.entries))
+	}
+	if len(acc.created) != 1 {
+		t.Fatalf("expected 1 key recorded as absent before the transaction, got %d", len(acc.created))
 	}
 
-	// Verify we can decode the entry
-	for keyXDR, entryXDR := range entries {
-		// Decode key
+	for keyXDR := range acc.created {
 		keyBytes, err := base64.StdEncoding.DecodeString(keyXDR)
 		if err != nil {
 			t.Fatalf("Failed to decode key: %v", err)
 		}
-
 		var key xdr.LedgerKey
 		if unmarshalErr := key.UnmarshalBinary(keyBytes); unmarshalErr != nil {
 			t.Fatalf("Failed to unmarshal key: %v", unmarshalErr)
 		}
-
 		if key.Type != xdr.LedgerEntryTypeAccount {
 			t.Errorf("Expected Account type, got %v", key.Type)
-		}
-
-		// Decode entry
-		entryBytes, err := base64.StdEncoding.DecodeString(entryXDR)
-		if err != nil {
-			t.Fatalf("Failed to decode entry: %v", err)
-		}
-
-		var decodedEntry xdr.LedgerEntry
-		if unmarshalErr := decodedEntry.UnmarshalBinary(entryBytes); unmarshalErr != nil {
-			t.Fatalf("Failed to unmarshal entry: %v", unmarshalErr)
-		}
-
-		if decodedEntry.Data.Account.Balance != 5000000 {
-			t.Errorf("Expected balance 5000000, got %d", decodedEntry.Data.Account.Balance)
 		}
 	}
 }
 
-func TestExtractFromChanges_MultipleTypes(t *testing.T) {
+func TestCollectChanges_StateWinsOverUpdated(t *testing.T) {
+	accountID := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
+
+	before := xdr.LedgerEntry{
+		Data: xdr.LedgerEntryData{
+			Type: xdr.LedgerEntryTypeAccount,
+			Account: &xdr.AccountEntry{
+				AccountId: accountID,
+				Balance:   1000000,
+			},
+		},
+	}
+	after := xdr.LedgerEntry{
+		Data: xdr.LedgerEntryData{
+			Type: xdr.LedgerEntryTypeAccount,
+			Account: &xdr.AccountEntry{
+				AccountId: accountID,
+				Balance:   9999999,
+			},
+		},
+	}
+
+	// stellar-core emits the pre-image immediately followed by the post-image
+	// for the same key. A last-write-wins map would keep the post-image and
+	// replay the transaction against the state it was meant to produce.
+	changes := xdr.LedgerEntryChanges{
+		{Type: xdr.LedgerEntryChangeTypeLedgerEntryState, State: &before},
+		{Type: xdr.LedgerEntryChangeTypeLedgerEntryUpdated, Updated: &after},
+	}
+
+	acc := newPreTxAccumulator()
+	acc.collectChanges(changes)
+
+	if len(acc.entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(acc.entries))
+	}
+
+	for _, entryXDR := range acc.entries {
+		entryBytes, err := base64.StdEncoding.DecodeString(entryXDR)
+		if err != nil {
+			t.Fatalf("Failed to decode entry: %v", err)
+		}
+		var decoded xdr.LedgerEntry
+		if unmarshalErr := decoded.UnmarshalBinary(entryBytes); unmarshalErr != nil {
+			t.Fatalf("Failed to unmarshal entry: %v", unmarshalErr)
+		}
+		if got := decoded.Data.Account.Balance; got != 1000000 {
+			t.Errorf("expected the pre-transaction balance 1000000, got %d", got)
+		}
+	}
+}
+
+func TestCollectChanges_UpdatedWithoutStateIsUsed(t *testing.T) {
+	accountID := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
+	updated := xdr.LedgerEntry{
+		Data: xdr.LedgerEntryData{
+			Type: xdr.LedgerEntryTypeAccount,
+			Account: &xdr.AccountEntry{
+				AccountId: accountID,
+				Balance:   4200000,
+			},
+		},
+	}
+
+	// Metadata that omits the pre-image leaves the post-image as the best
+	// available approximation; dropping it would lose the key entirely.
+	acc := newPreTxAccumulator()
+	acc.collectChanges(xdr.LedgerEntryChanges{
+		{Type: xdr.LedgerEntryChangeTypeLedgerEntryUpdated, Updated: &updated},
+	})
+
+	if len(acc.entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(acc.entries))
+	}
+}
+
+func TestCollectChanges_MultipleTypes(t *testing.T) {
 	accountID := xdr.MustAddress("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H")
 
 	accountEntry := xdr.LedgerEntry{
@@ -286,11 +349,16 @@ func TestExtractFromChanges_MultipleTypes(t *testing.T) {
 		},
 	}
 
-	entries := make(map[string]string)
-	extractFromChanges(changes, entries)
+	acc := newPreTxAccumulator()
+	acc.collectChanges(changes)
 
-	if len(entries) != 2 {
-		t.Errorf("Expected 2 entries, got %d", len(entries))
+	// The created account was absent beforehand; only the updated contract
+	// entry carries a pre-transaction value.
+	if len(acc.entries) != 1 {
+		t.Errorf("Expected 1 entry, got %d", len(acc.entries))
+	}
+	if len(acc.created) != 1 {
+		t.Errorf("Expected 1 key known absent, got %d", len(acc.created))
 	}
 }
 
@@ -714,10 +782,10 @@ func TestGetLedgerEntries_OfflineMockOverrides(t *testing.T) {
 		var req GetLedgerEntriesRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 
-		reqKeys := req.Params[0].([]interface{})
+		reqKeys := req.Params.Keys
 		entries := make([]LedgerEntryResult, len(reqKeys))
 		for i, key := range reqKeys {
-			keyStr := key.(string)
+			keyStr := key
 			value, ok := overrides[keyStr]
 			if !ok {
 				t.Fatalf("unexpected ledger key requested: %s", keyStr)
@@ -789,10 +857,10 @@ func TestGetLedgerEntries_OfflineMockManifestMerge(t *testing.T) {
 		var req GetLedgerEntriesRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 
-		reqKeys := req.Params[0].([]interface{})
+		reqKeys := req.Params.Keys
 		entries := make([]LedgerEntryResult, len(reqKeys))
 		for i, key := range reqKeys {
-			keyStr := key.(string)
+			keyStr := key
 			value, ok := overrides[keyStr]
 			require.True(t, ok, "missing override for key %s", keyStr)
 			entries[i] = LedgerEntryResult{

@@ -35,16 +35,19 @@ func TestDefaultPagedMemoryConfig(t *testing.T) {
 	assert.Less(t, cfg.InitialBytes, cfg.MaxBytes)
 }
 
-func TestEffectiveMemoryLimit_LazyGrowth(t *testing.T) {
+func TestEffectiveMemoryLimit_LazyGrowthStillUsesTheCeiling(t *testing.T) {
 	cfg := PagedMemoryConfig{
 		InitialBytes: DefaultInitialMemoryBytes,
 		MaxBytes:     DefaultMaxMemoryBytes,
 		LazyGrowth:   true,
 	}
-	// No explicit limit on request — should use InitialBytes
+	// memory_limit is a hard cap in the simulator with no way to grow, so the
+	// lazy starting point must never be sent as the limit — doing so capped
+	// every simulation at 1 MiB and killed real contracts with
+	// "Memory(OutOfBoundsGrowth)".
 	req := &SimulationRequest{}
 	limit := effectiveMemoryLimit(cfg, req)
-	assert.Equal(t, DefaultInitialMemoryBytes, limit)
+	assert.Equal(t, DefaultMaxMemoryBytes, limit)
 }
 
 func TestEffectiveMemoryLimit_EagerAllocation(t *testing.T) {
@@ -71,7 +74,7 @@ func TestApplyPagedMemoryLimit_SetsLimit(t *testing.T) {
 	req := &SimulationRequest{}
 	applyPagedMemoryLimit(cfg, req)
 	assert.NotNil(t, req.MemoryLimit)
-	assert.Equal(t, DefaultInitialMemoryBytes, *req.MemoryLimit)
+	assert.Equal(t, DefaultMaxMemoryBytes, *req.MemoryLimit)
 }
 
 func TestApplyPagedMemoryLimit_DoesNotOverrideExisting(t *testing.T) {

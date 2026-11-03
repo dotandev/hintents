@@ -141,17 +141,12 @@ func explainFromNetwork(cmd *cobra.Command, txHash string) error {
 		return fmt.Errorf("failed to fetch transaction: %w", err)
 	}
 
-	keys, err := extractLedgerKeys(resp.ResultMetaXdr)
+	// An explanation of a failure is only as honest as the state it replayed
+	// against, so a state we could not assemble is reported rather than
+	// silently simulated around.
+	ledgerEntries, err := client.ResolveReplayState(cmd.Context(), resp.EnvelopeXdr, resp.ResultMetaXdr)
 	if err != nil {
-		keys = nil
-	}
-
-	ledgerEntries, err := rpc.ExtractLedgerEntriesFromMeta(resp.ResultMetaXdr)
-	if err != nil {
-		ledgerEntries, err = client.GetLedgerEntries(cmd.Context(), keys)
-		if err != nil {
-			ledgerEntries = nil
-		}
+		return err
 	}
 
 	runner, err := simulator.NewRunner("", false)

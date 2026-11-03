@@ -310,26 +310,13 @@ func TestExtractLedgerKeys(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	meta := xdr.TransactionResultMeta{
-		FeeProcessing:     changes,
-		TxApplyProcessing: txMeta,
-		Result: xdr.TransactionResultPair{
-			TransactionHash: xdr.Hash{1, 2, 3},
-			Result: xdr.TransactionResult{
-				FeeCharged: 100,
-				Result: xdr.TransactionResultResult{
-					Code:    xdr.TransactionResultCodeTxSuccess,
-					Results: &[]xdr.OperationResult{},
-				},
-				Ext: xdr.TransactionResultExt{
-					V: 0,
-				},
-			},
-		},
-	}
+	// Horizon's result_meta_xdr decodes directly to TransactionMeta — not
+	// wrapped in a TransactionResultMeta (that wrapper type belongs to
+	// stellar-core's ledger-close-meta stream). extractLedgerKeys expects
+	// the same shape Horizon actually sends.
 
 	// Marshal to XDR then Base64
-	metaBytes, err := meta.MarshalBinary()
+	metaBytes, err := txMeta.MarshalBinary()
 	assert.NoError(t, err)
 	metaB64 := base64.StdEncoding.EncodeToString(metaBytes)
 

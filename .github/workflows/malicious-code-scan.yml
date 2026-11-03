@@ -1,0 +1,95 @@
+# Copyright 2026 Erst Users
+# SPDX-License-Identifier: Apache-2.0
+#
+# Looks at what a pull request ADDS for the shapes malicious code takes:
+# credentials, key material reaching a log or a socket, runtime evaluation,
+# traffic to somewhere this project has no business talking to, and changes to
+# CI itself.
+#
+# This project merges a lot of community contributions, which is exactly the
+# path an attacker would use. The scan does not replace review — it decides
+# which twenty lines of a nine-hundred-line diff a reviewer should read first.
+
+name: Malicious Code Scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Read-only, and deliberately `pull_request` rather than `pull_request_target`:
+# this workflow reads code from forks, so it must never run with credentials
+# that code could reach.
+permissions:
+  contents: read
+
+concurrency:
+  group: malicious-code-scan-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan-diff:
+    name: Scan added lines
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The scan compares against the base, so it needs the history that
+          # reaches it.
+          fetch-depth: 0
+
+      - name: Resolve the range to scan
+        id: range
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            # On a push, compare against the commit before it. A first commit
+            # has no parent, so fall back to the empty tree.
+            base=$(git rev-parse "${{ github.sha }}^" 2>/dev/null \
+              || git hash-object -t tree /dev/null)
+            echo "base=${base}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Scan
+        run: |
+          echo "## Malicious code scan" >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/security/scan-diff.sh \
+            "${{ steps.range.outputs.base }}" \
+            "${{ steps.range.outputs.head }}"
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript, actions]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          language: ${{ matrix.language }}
+          # security-extended reaches past the default set into the injection
+          # and data-flow queries that matter here: a path from contributor
+          # input to a command line, a file write, or an outbound request.
+          queries: security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}

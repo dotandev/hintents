@@ -73,15 +73,18 @@ func alignToPage(n uint64) uint64 {
 }
 
 // effectiveMemoryLimit returns the memory limit to set on a SimulationRequest
-// based on the paged config. When LazyGrowth is enabled, we start with
-// InitialBytes instead of eagerly allocating MaxBytes.
+// based on the paged config.
+//
+// The limit is always the ceiling, never InitialBytes. The simulator treats
+// memory_limit as a hard budget cap and has no mechanism to grow it mid-run, so
+// sending the lazy starting point capped every simulation at 1 MiB against a
+// network that allows 40 MiB — any real contract died with
+// "Memory(OutOfBoundsGrowth)" long before it finished. InitialBytes remains the
+// allocation hint; it is not a limit.
 func effectiveMemoryLimit(cfg PagedMemoryConfig, req *SimulationRequest) uint64 {
 	// Explicit per-request override always wins.
 	if req != nil && req.MemoryLimit != nil {
 		return *req.MemoryLimit
-	}
-	if cfg.LazyGrowth {
-		return cfg.InitialBytes
 	}
 	return cfg.MaxBytes
 }

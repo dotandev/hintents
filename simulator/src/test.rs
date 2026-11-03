@@ -510,8 +510,6 @@ mod contract_execution_tests {
             no_cache: false,
             enable_optimization_advisor: false,
             profile: None,
-            _timestamp: None,
-            timestamp: String::new(),
             mock_base_fee: None,
             mock_gas_price: None,
             mock_signature_verification: None,
@@ -526,6 +524,7 @@ mod contract_execution_tests {
             ledger_timestamp: None,
             clock_advance_seconds: None,
             ledger_sequence: None,
+            protocol_version: None,
         };
         let result = execute_operations(&sim_host, &operations, &request, &mut coverage);
         assert!(result.is_ok());

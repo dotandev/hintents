@@ -12,7 +12,6 @@ bin/
 .env.example
 .cursorrules
 Thumbs.db
-*.exe
 *.dll
 *.dylib
 *.so
@@ -43,7 +42,6 @@ create_phase9.py
 .vscode/
 .next/
 
-ishus.py
 # Temporary docs/notes
 *_SUMMARY.md
 PR_MESSAGE*.md
@@ -53,8 +51,6 @@ CHECKLIST.md
 MAINTAINER_NEXT_STEPS.md
 XDR_GENERATOR_PR_SUMMARY.md
 
-node_modules
-out
 # --- Documentation (User specific settings) ---
 # /external/
 # /*.md
@@ -76,14 +72,8 @@ commit_309*.next
 
 .gocache
 
-ishus.py
-
 ishus-t.py
-
 ishust.py
-
-create_phase9.py
-
 create_phase10.py
 
 # --- Windows build artifacts & debug symbols (#1184) ---
@@ -135,3 +125,42 @@ Resource.rc
 *.flamegraph.svg
 *.flamegraph.html
 .npm-cache/
+
+# --- One-off working artifacts committed by mistake ---
+# Saved PR diffs, captured tool output and ad-hoc reports. These are produced
+# while debugging and have no business in history.
+/pr_*_diff.txt
+/macos-failed.log
+clippy_output.txt
+/dummy.wasm
+/dummy.xdr
+
+# --- Build outputs not covered above ---
+/erst-sim
+/bin/erst-sim
+*.test
+__debug_bin*
+.next/
+out/
+/playground-api/dist/
+
+# --- Coverage / profiling output ---
+*.lcov
+*.cover
+coverage.html
+*.prof
+*.pprof
+.nyc_output/
+
+# --- Re-include real source files hidden by the blanket rules above ---
+# `*.json` and `*.py` further up are deliberately broad, but they also keep
+# NEW files under these paths out of version control without any warning —
+# the same trap the "[Dd]ebug/" pattern caused. Everything the repo actually
+# tracks under these paths must be negated explicitly, or `git add` silently
+# does nothing. Add a line here whenever a new tracked .json/.py appears.
+!docs/schema/*.json
+!examples/*.json
+!erst_extension/.eslintrc.json
+!internal/simulator/perf_baseline.json
+!testdata/golden/*.json
+!scripts/*.py

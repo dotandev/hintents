@@ -208,19 +208,10 @@ func runCompare(cmd *cobra.Command, cmdArgs []string) error {
 	}
 	fmt.Printf("%s Fetched (envelope: %d bytes)\n\n", visualizer.Success(), len(txResp.EnvelopeXdr))
 
-	// ── Extract ledger keys & entries ───────────────────────────────────────
-	keys, err := extractLedgerKeys(txResp.ResultMetaXdr)
+	// ── Resolve the state the transaction actually read ─────────────────────
+	ledgerEntries, err := client.ResolveReplayState(ctx, txResp.EnvelopeXdr, txResp.ResultMetaXdr)
 	if err != nil {
-		return errors.WrapUnmarshalFailed(err, "result meta")
-	}
-
-	ledgerEntries, err := rpc.ExtractLedgerEntriesFromMeta(txResp.ResultMetaXdr)
-	if err != nil {
-		logger.Logger.Warn("Falling back to live ledger entry fetch", "error", err)
-		ledgerEntries, err = client.GetLedgerEntries(ctx, keys)
-		if err != nil {
-			return errors.WrapRPCConnectionFailed(err)
-		}
+		return err
 	}
 
 	// ── Build simulator runner ───────────────────────────────────────────────

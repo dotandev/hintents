@@ -91,7 +91,7 @@ func TestBatchGetLedgerEntries_SmallFootprint(t *testing.T) {
 	c := newBatchTestClient(t, srv.URL)
 	result, err := c.BatchGetLedgerEntries(context.Background(), keys)
 	require.NoError(t, err)
-	assert.Len(t, result, 10)
+	assertEntriesWithTTLs(t, keys, result)
 }
 
 // TestBatchGetLedgerEntries_LargeFootprint batches keys over the threshold.
@@ -103,7 +103,7 @@ func TestBatchGetLedgerEntries_LargeFootprint(t *testing.T) {
 	c := newBatchTestClient(t, srv.URL)
 	result, err := c.BatchGetLedgerEntries(context.Background(), keys)
 	require.NoError(t, err)
-	assert.Len(t, result, 250)
+	assertEntriesWithTTLs(t, keys, result)
 }
 
 // TestBatchGetLedgerEntries_ExactThreshold uses exactly largFootprintThreshold keys,
@@ -116,7 +116,7 @@ func TestBatchGetLedgerEntries_ExactThreshold(t *testing.T) {
 	c := newBatchTestClient(t, srv.URL)
 	result, err := c.BatchGetLedgerEntries(context.Background(), keys)
 	require.NoError(t, err)
-	assert.Len(t, result, largFootprintThreshold)
+	assertEntriesWithTTLs(t, keys, result)
 }
 
 // TestBatchGetLedgerEntries_OneBeyondThreshold forces the batching path.
@@ -128,7 +128,7 @@ func TestBatchGetLedgerEntries_OneBeyondThreshold(t *testing.T) {
 	c := newBatchTestClient(t, srv.URL)
 	result, err := c.BatchGetLedgerEntries(context.Background(), keys)
 	require.NoError(t, err)
-	assert.Len(t, result, largFootprintThreshold+1)
+	assertEntriesWithTTLs(t, keys, result)
 }
 
 // TestBatchGetLedgerEntries_ServerError propagates an error from a failing batch.
@@ -162,6 +162,18 @@ func TestBatchGetLedgerEntries_ContextCancelled(t *testing.T) {
 // =============================================================================
 // Helpers
 // =============================================================================
+
+// assertEntriesWithTTLs checks that every requested key came back, each one
+// accompanied by its TTL entry. Contract code and contract data entries are
+// unusable in a replay without one: the host rejects any TTL-aware host
+// function with "unexpected contract entry without TTL".
+func assertEntriesWithTTLs(t *testing.T, keys []string, result map[string]string) {
+	t.Helper()
+	for _, key := range keys {
+		assert.Contains(t, result, key)
+	}
+	assert.Len(t, result, 2*len(keys), "each entry should arrive with its TTL entry")
+}
 
 // makeKeys generates n valid base64-encoded XDR LedgerKey strings using
 // deterministic ContractCode keys seeded by index.
@@ -200,7 +212,9 @@ func newMockSorobanServer(t *testing.T, known []string) *httptest.Server {
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Params [][]string `json:"params"`
+			Params struct {
+				Keys []string `json:"keys"`
+			} `json:"params"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
@@ -215,16 +229,14 @@ func newMockSorobanServer(t *testing.T, known []string) *httptest.Server {
 		}
 
 		var entries []entry
-		if len(req.Params) > 0 {
-			for _, k := range req.Params[0] {
-				if xdrB64, ok := index[k]; ok {
-					entries = append(entries, entry{
-						Key:                k,
-						Xdr:                xdrB64,
-						LastModifiedLedger: 100,
-						LiveUntilLedger:    200,
-					})
-				}
+		for _, k := range req.Params.Keys {
+			if xdrB64, ok := index[k]; ok {
+				entries = append(entries, entry{
+					Key:                k,
+					Xdr:                xdrB64,
+					LastModifiedLedger: 100,
+					LiveUntilLedger:    200,
+				})
 			}
 		}
 

@@ -79,17 +79,17 @@ func TestGetLedgerEntries_FiveKeys(t *testing.T) {
 		// Verify request structure
 		assert.Equal(t, "2.0", req.Jsonrpc)
 		assert.Equal(t, "getLedgerEntries", req.Method)
-		assert.Len(t, req.Params, 1)
+		assert.NotEmpty(t, req.Params.Keys)
 
-		reqKeys := req.Params[0].([]interface{})
+		reqKeys := req.Params.Keys
 
 		// Build response with entries for each key
 		entries := make([]LedgerEntryResult, len(reqKeys))
 
 		for i, key := range reqKeys {
 			entries[i] = LedgerEntryResult{
-				Key:                key.(string),
-				Xdr:                buildValidEntryB64(t, key.(string)),
+				Key:                key,
+				Xdr:                buildValidEntryB64(t, key),
 				LastModifiedLedger: 12345,
 				LiveUntilLedger:    12400,
 			}
@@ -143,7 +143,7 @@ func TestGetLedgerEntries_LargeBatch(t *testing.T) {
 		err := json.NewDecoder(r.Body).Decode(&req)
 		require.NoError(t, err)
 
-		keys := req.Params[0].([]interface{})
+		keys := req.Params.Keys
 
 		// Verify batch size is within limits (should be <= 50)
 		assert.LessOrEqual(t, len(keys), 50, "Batch size should not exceed 50")
@@ -153,8 +153,8 @@ func TestGetLedgerEntries_LargeBatch(t *testing.T) {
 
 		for i, key := range keys {
 			entries[i] = LedgerEntryResult{
-				Key:                key.(string),
-				Xdr:                buildValidEntryB64(t, key.(string)),
+				Key:                key,
+				Xdr:                buildValidEntryB64(t, key),
 				LastModifiedLedger: 12345,
 				LiveUntilLedger:    12400,
 			}
@@ -219,14 +219,14 @@ func TestGetLedgerEntries_ConcurrentBatches(t *testing.T) {
 		err := json.NewDecoder(r.Body).Decode(&req)
 		require.NoError(t, err)
 
-		keys := req.Params[0].([]interface{})
+		keys := req.Params.Keys
 
 		entries := make([]LedgerEntryResult, len(keys))
 
 		for i, key := range keys {
 			entries[i] = LedgerEntryResult{
-				Key:                key.(string),
-				Xdr:                buildValidEntryB64(t, key.(string)),
+				Key:                key,
+				Xdr:                buildValidEntryB64(t, key),
 				LastModifiedLedger: 12345,
 				LiveUntilLedger:    12400,
 			}
@@ -448,13 +448,13 @@ func TestGetLedgerEntries_PartialFailure(t *testing.T) {
 		}
 
 		// Success for other batches
-		keys := req.Params[0].([]interface{})
+		keys := req.Params.Keys
 		entries := make([]LedgerEntryResult, len(keys))
 
 		for i, key := range keys {
 			entries[i] = LedgerEntryResult{
-				Key:                key.(string),
-				Xdr:                "xdr_" + key.(string),
+				Key:                key,
+				Xdr:                "xdr_" + key,
 				LastModifiedLedger: 12345,
 				LiveUntilLedger:    12400,
 			}

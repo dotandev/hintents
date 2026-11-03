@@ -83,27 +83,12 @@ func newImportMockServer(t *testing.T, mu *sync.Mutex, requested *[]string) *htt
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		rawKeys, ok := req.Params[0].([]interface{})
-		if !ok {
-			t.Errorf("unexpected params: %#v", req.Params)
-			http.Error(w, "bad params", http.StatusBadRequest)
-			return
-		}
-
 		mu.Lock()
-		for _, raw := range rawKeys {
-			if key, ok := raw.(string); ok {
-				*requested = append(*requested, key)
-			}
-		}
+		*requested = append(*requested, req.Params.Keys...)
 		mu.Unlock()
 
 		resp := rpc.GetLedgerEntriesResponse{Jsonrpc: "2.0", ID: 1}
-		for _, raw := range rawKeys {
-			key, ok := raw.(string)
-			if !ok {
-				continue
-			}
+		for _, key := range req.Params.Keys {
 			resp.Result.Entries = append(resp.Result.Entries, rpc.LedgerEntryResult{
 				Key: key,
 				Xdr: makeImportTestEntry(t, key),

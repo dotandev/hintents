@@ -160,9 +160,15 @@ func TestVerifyLedgerEntries_MissingKey(t *testing.T) {
 		// k2 is missing
 	}
 
+	// A key the response omits is not a verification failure. Soroban RPC
+	// answers that way for an entry that does not exist, which happens for
+	// every key a transaction is about to create, so treating it as an error
+	// made replaying those transactions impossible. Verification covers what
+	// came back; completeness is reported separately.
 	err := VerifyLedgerEntries(requestedKeys, returnedEntries)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not found in response")
+	assert.NoError(t, err)
+
+	assert.Equal(t, []string{k2}, MissingLedgerKeys(requestedKeys, returnedEntries))
 }
 
 // TestVerifyLedgerEntries_EmptyRequest validates that requesting zero keys
@@ -172,13 +178,17 @@ func TestVerifyLedgerEntries_EmptyRequest(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestVerifyLedgerEntries_NilMap validates that a nil response map is rejected,
-// guarding against nil pointer dereferences.
+// TestVerifyLedgerEntries_NilMap validates that a nil response is handled
+// without panicking and is reported as every key missing.
 func TestVerifyLedgerEntries_NilMap(t *testing.T) {
 	key1 := createTestLedgerKey(t, 1)
 
 	err := VerifyLedgerEntries([]string{key1}, nil)
-	assert.Error(t, err)
+	assert.NoError(t, err)
+
+	// Nothing came back, so nothing is verifiable — but every key is
+	// unaccounted for, and a caller that needs them can see that.
+	assert.Equal(t, []string{key1}, MissingLedgerKeys([]string{key1}, nil))
 }
 
 // TestVerifyLedgerEntryHash_DifferentKeyTypes validates that verification works

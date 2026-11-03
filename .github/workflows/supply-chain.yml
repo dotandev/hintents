@@ -1,0 +1,170 @@
+# Copyright 2026 Erst Users
+# SPDX-License-Identifier: Apache-2.0
+#
+# Guards the dependency surface at the point a change is proposed.
+#
+# The existing Dependency Security Audits workflow runs weekly, which tells you
+# about a bad dependency up to seven days after it merged. These jobs run on the
+# pull request, so a new package is examined before it is part of the project
+# rather than after.
+
+name: Supply Chain
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-changes:
+    name: Review dependency changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the range to inspect
+        id: range
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            base=$(git rev-parse "${{ github.sha }}^" 2>/dev/null \
+              || git hash-object -t tree /dev/null)
+            echo "base=${base}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Inspect manifests
+        run: |
+          echo "## Dependency changes" >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/security/check-dependency-changes.sh \
+            "${{ steps.range.outputs.base }}" \
+            "${{ steps.range.outputs.head }}"
+
+  dependency-review:
+    name: Known-vulnerable and unlicensed packages
+    runs-on: ubuntu-latest
+    # GitHub resolves the full dependency graph for the change, which catches
+    # transitive packages that never appear in the diff.
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          # GPL-family terms are incompatible with this project's Apache-2.0
+          # licence, and a sudden licence change is also a signal that a
+          # package changed hands.
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-3.0
+
+  installed-packages:
+    name: Scan installed npm packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install without running anything
+        shell: bash
+        run: |
+          set -uo pipefail
+          failed=0
+
+          # --ignore-scripts is the point of this step. If a dependency has
+          # been compromised, its install hook is the first thing that would
+          # run, before any check gets a chance to look at it. Installing with
+          # scripts disabled means the payload is sitting on disk inert while
+          # the next step reads it.
+          while IFS= read -r lock; do
+            dir="$(dirname "$lock")"
+            case "$dir" in
+              */node_modules/*) continue ;;
+            esac
+
+            echo "::group::npm ci --ignore-scripts ${dir}"
+            if ! (cd "$dir" && npm ci --ignore-scripts --no-audit --no-fund); then
+              echo "::error ::npm ci failed in ${dir} — lockfile may be out of sync with package.json"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < <(git ls-files '*package-lock.json')
+
+          exit "$failed"
+
+      - name: Scan what was installed
+        run: |
+          echo "## Installed package scan" >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/security/scan-installed-packages.sh
+
+  vulnerabilities:
+    name: Vulnerability scan (${{ matrix.ecosystem }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ecosystem: [go, rust, npm]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        if: matrix.ecosystem == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Run govulncheck
+        if: matrix.ecosystem == 'go'
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Set up Rust
+        if: matrix.ecosystem == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo-audit
+        if: matrix.ecosystem == 'rust'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}
+
+      - name: Run cargo audit
+        if: matrix.ecosystem == 'rust'
+        working-directory: ./simulator
+        run: |
+          command -v cargo-audit >/dev/null || cargo install cargo-audit --locked
+          cargo audit
+
+      - name: Set up Node
+        if: matrix.ecosystem == 'npm'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run npm audit
+        if: matrix.ecosystem == 'npm'
+        run: ./scripts/security/npm-audit-gate.sh

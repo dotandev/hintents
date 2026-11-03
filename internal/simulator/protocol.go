@@ -58,28 +58,59 @@ var protocols = map[uint32]*Protocol{
 			},
 		},
 	},
-	22: {
-		Version: 22,
-		Name:    "Soroban Protocol 22",
-		Features: map[string]interface{}{
-			"max_contract_size":      131072,
-			"max_contract_data_size": 4096000,
-			"max_instruction_limit":  200000000,
-			"supported_opcodes":      []string{"invoke_contract", "create_contract", "extend_contract", "upgrade_contract"},
-			"enhanced_metering":      true,
-			"optimized_storage":      true,
-			"resource_calibration": &ResourceCalibration{
-				SHA256Fixed:      3738,
-				SHA256PerByte:    37,
-				Keccak256Fixed:   keccak256FixedCalibration,
-				Keccak256PerByte: keccak256PerByteCalibration,
-				Ed25519Fixed:     377524,
-			},
+	22: protocol22,
+	// 23-27: the simulator's Rust host now runs protocol 27
+	// (simulator/Cargo.toml pins soroban-env-host to the 27.x line), and
+	// Validate() rejected any --protocol-version above 22 even though the
+	// host itself accepts these. Feature metadata here is carried forward
+	// unchanged from protocol 22 rather than guessed: this project has no
+	// verified per-protocol calibration/limit data for 23-27, and the three
+	// pre-existing entries (20-22) already share identical
+	// resource_calibration numbers, so this doesn't introduce a new kind of
+	// inaccuracy — it keeps requests at these protocols from being rejected
+	// outright while leaving the real numbers as a known gap to fill in.
+	23: protocolWithVersion(protocol22, 23, "Soroban Protocol 23"),
+	24: protocolWithVersion(protocol22, 24, "Soroban Protocol 24"),
+	25: protocolWithVersion(protocol22, 25, "Soroban Protocol 25"),
+	26: protocolWithVersion(protocol22, 26, "Soroban Protocol 26"),
+	27: protocolWithVersion(protocol22, 27, "Soroban Protocol 27"),
+}
+
+var protocol22 = &Protocol{
+	Version: 22,
+	Name:    "Soroban Protocol 22",
+	Features: map[string]interface{}{
+		"max_contract_size":      131072,
+		"max_contract_data_size": 4096000,
+		"max_instruction_limit":  200000000,
+		"supported_opcodes":      []string{"invoke_contract", "create_contract", "extend_contract", "upgrade_contract"},
+		"enhanced_metering":      true,
+		"optimized_storage":      true,
+		"resource_calibration": &ResourceCalibration{
+			SHA256Fixed:      3738,
+			SHA256PerByte:    37,
+			Keccak256Fixed:   keccak256FixedCalibration,
+			Keccak256PerByte: keccak256PerByteCalibration,
+			Ed25519Fixed:     377524,
 		},
 	},
 }
 
-var defaultVersion uint32 = 22
+// protocolWithVersion clones the Features of an existing, verified protocol
+// entry under a new version number and name. Used to extend protocol
+// coverage to versions this project has not yet sourced real per-protocol
+// feature/calibration data for (see the comment above the 23-27 entries).
+func protocolWithVersion(base *Protocol, version uint32, name string) *Protocol {
+	features := make(map[string]interface{}, len(base.Features))
+	maps.Copy(features, base.Features)
+	return &Protocol{
+		Version:  version,
+		Name:     name,
+		Features: features,
+	}
+}
+
+var defaultVersion uint32 = 27
 
 func LatestVersion() uint32 {
 	return defaultVersion

@@ -9,8 +9,8 @@ import (
 
 func TestLatestVersion(t *testing.T) {
 	v := LatestVersion()
-	if v != 22 {
-		t.Errorf("expected latest version 22, got %d", v)
+	if v != 27 {
+		t.Errorf("expected latest version 27, got %d", v)
 	}
 }
 

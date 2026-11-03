@@ -452,12 +452,6 @@ Local WASM Replay Mode:
 
 		fmt.Printf("Transaction fetched successfully. Envelope size: %d bytes\n", len(resp.EnvelopeXdr))
 
-		// Extract ledger keys for replay
-		keys, err := extractLedgerKeys(resp.ResultMetaXdr)
-		if err != nil {
-			return errors.WrapUnmarshalFailed(err, "result meta")
-		}
-
 		// Load config to get MaxTraceDepth for decoder calls
 		cfg, _ := config.Load()
 		maxDepth := 50
@@ -471,8 +465,13 @@ Local WASM Replay Mode:
 			return errors.WrapSimulatorNotFound(err.Error())
 		}
 
-		// Determine timestamps to simulate
-		timestamps := []int64{TimestampFlag}
+		// Determine timestamps to simulate. Without an explicit --timestamp the
+		// replay runs at the ledger close time the transaction actually saw.
+		simulationTime := TimestampFlag
+		if simulationTime == 0 {
+			simulationTime = resp.LedgerCloseTime
+		}
+		timestamps := []int64{simulationTime}
 		if WindowFlag > 0 && TimestampFlag > 0 {
 			// Simulate 5 steps across the window
 			step := WindowFlag / 4
@@ -513,16 +512,9 @@ Local WASM Replay Mode:
 					ledgerEntries = snap.ToMap()
 					fmt.Printf("Loaded %d ledger entries from snapshot\n", len(ledgerEntries))
 				} else {
-					// Try to extract from metadata first, fall back to fetching
-					ledgerEntries, err = rpc.ExtractLedgerEntriesFromMeta(resp.ResultMetaXdr)
+					ledgerEntries, err = client.ResolveReplayState(ctx, resp.EnvelopeXdr, resp.ResultMetaXdr)
 					if err != nil {
-						logger.Logger.Warn("Failed to extract ledger entries from metadata, fetching from network", "error", err)
-						ledgerEntries, err = client.GetLedgerEntries(ctx, keys)
-						if err != nil {
-							return errors.WrapRPCConnectionFailed(err)
-						}
-					} else {
-						logger.Logger.Info("Extracted ledger entries for simulation", "count", len(ledgerEntries))
+						return err
 					}
 				}
 
@@ -541,6 +533,7 @@ Local WASM Replay Mode:
 					ResultMetaXdr:     resp.ResultMetaXdr,
 					LedgerEntries:     ledgerEntries,
 					Timestamp:         ts,
+					LedgerSequence:    resp.LedgerSequence,
 					ProtocolVersion:   nil,
 					EnableSnapshots:   snapshotsFlag,
 					EnableAssetSafety: assetSafetyFlag,
@@ -589,13 +582,10 @@ Local WASM Replay Mode:
 					defer wg.Done()
 					var entries map[string]string
 					var extractErr error
-					entries, extractErr = rpc.ExtractLedgerEntriesFromMeta(resp.ResultMetaXdr)
+					entries, extractErr = client.ResolveReplayState(ctx, resp.EnvelopeXdr, resp.ResultMetaXdr)
 					if extractErr != nil {
-						entries, extractErr = client.GetLedgerEntries(ctx, keys)
-						if extractErr != nil {
-							primaryErr = extractErr
-							return
-						}
+						primaryErr = extractErr
+						return
 					}
 					if len(overrideEntries) > 0 {
 						entries = simulator.MergeLedgerOverrides(entries, overrideEntries)
@@ -606,6 +596,7 @@ Local WASM Replay Mode:
 						ResultMetaXdr:   resp.ResultMetaXdr,
 						LedgerEntries:   entries,
 						Timestamp:       ts,
+						LedgerSequence:  resp.LedgerSequence,
 						EnableSnapshots: snapshotsFlag,
 					}
 					applySimulationFeeMocks(primaryReq)
@@ -633,13 +624,10 @@ Local WASM Replay Mode:
 						return
 					}
 
-					entries, extractErr := rpc.ExtractLedgerEntriesFromMeta(compareResp.ResultMetaXdr)
+					entries, extractErr := compareClient.ResolveReplayState(ctx, compareResp.EnvelopeXdr, compareResp.ResultMetaXdr)
 					if extractErr != nil {
-						entries, extractErr = compareClient.GetLedgerEntries(ctx, keys)
-						if extractErr != nil {
-							compareErr = extractErr
-							return
-						}
+						compareErr = extractErr
+						return
 					}
 
 					if len(overrideEntries) > 0 {
@@ -652,6 +640,7 @@ Local WASM Replay Mode:
 						ResultMetaXdr:   compareResp.ResultMetaXdr,
 						LedgerEntries:   entries,
 						Timestamp:       ts,
+						LedgerSequence:  compareResp.LedgerSequence,
 						EnableSnapshots: snapshotsFlag,
 					}
 					applySimulationFeeMocks(compareReq)

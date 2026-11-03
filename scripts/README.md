@@ -4,169 +4,79 @@ This directory contains utility scripts for testing, verification, and automatio
 
 ## Available Scripts
 
-### `verify_issues.sh`
+### `security/scan-diff.sh`
 
-Automated verification script for GitHub issues.
+Scans the lines a change adds for patterns associated with malicious code:
+credentials, key material reaching a logger or a socket, code evaluated at
+runtime, requests to hosts this project does not normally talk to, and changes
+to CI itself.
 
-**Purpose**: Verifies that all issues are created correctly with proper labels and format.
-
-**Prerequisites**:
-1. Install GitHub CLI: https://cli.github.com/
-   ```bash
-   # macOS
-   brew install gh
-   
-   # Linux
-   sudo apt install gh
-   ```
-
-2. Authenticate with GitHub:
-   ```bash
-   gh auth login
-   ```
+**Purpose**: this project merges a lot of community contributions, which is the
+path an attacker would use. The scan does not replace review — it decides which
+twenty lines of a large diff a reviewer should read first.
 
 **Usage**:
-
 ```bash
-# Basic verification
-./scripts/verify_issues.sh
+# Against the default branch, the way CI runs it
+scripts/security/scan-diff.sh
 
-# Verify and export issues to JSON
-./scripts/verify_issues.sh --export
+# Any range
+scripts/security/scan-diff.sh main feature-branch
 ```
 
-**What it checks**:
--  Issue count (expects 40 issues)
--  All issues have `new_for_wave` label
--  Issue format compliance (spot-checks first 5 issues)
--  Required sections present:
-  - Requirements and Context
-  - Success Criteria
-  - Suggested Execution
+Findings are either **BLOCK** (unambiguous, fails the build) or **REVIEW**
+(a heuristic that needs a human; annotated but not blocking). False positives
+are waived per check and per file in `.github/security-allowlist.txt`.
 
-**Output**:
-```
-=========================================
-GitHub Issues Verification Script
-=========================================
+Run by the **Malicious Code Scan** workflow.
 
-[OK] GitHub CLI found
-[OK] Authenticated with GitHub
+### `security/check-dependency-changes.sh`
 
-Checking issues with label 'new_for_wave'...
-Found: 40 issues
-Expected: 40 issues
+Inspects dependency manifest changes: `go.mod` replace directives, Cargo git
+and out-of-tree path dependencies, npm lifecycle scripts and off-registry
+packages, new `build.rs` files, and manifests edited without their lockfile.
+Lists every newly added module so a reviewer sees the real cost of a change
+without expanding a lockfile diff.
 
-[OK] Issue count matches expected
-
-Fetching issue details...
-
-Verifying labels...
-[OK] All issues have the 'new_for_wave' label
-
-Spot-checking issue format (first 5 issues)...
-[OK] All spot-checked issues have correct format
-
-=========================================
-Verification Summary
-=========================================
-[OK] Issue count: 40/40
-[OK] Labels applied correctly
-[OK] Format checks passed
-
- All verifications passed!
-```
-
-**Troubleshooting**:
-
-- **Error: GitHub CLI not installed**
-  ```
-  Install from: https://cli.github.com/
-  ```
-
-- **Error: Not authenticated**
-  ```bash
-  gh auth login
-  ```
-
-- **Error: Issue count mismatch**
-  - Check if all issues were created
-  - Verify the label name is correct
-  - Check repository name
-
-## Manual Verification
-
-If you prefer manual verification using GitHub API:
-
+**Usage**:
 ```bash
-# Check issue count
-curl -H "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/dotandev/hintents/issues?labels=new_for_wave&per_page=100" \
-  | jq 'length'
-
-# Get all issues with label
-curl -H "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/dotandev/hintents/issues?labels=new_for_wave&per_page=100" \
-  | jq '.[] | {number, title, labels: [.labels[].name]}'
-
-# Export to file
-curl -H "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/dotandev/hintents/issues?labels=new_for_wave&per_page=100" \
-  > issues.json
+scripts/security/check-dependency-changes.sh [base-ref] [head-ref]
 ```
 
-## Using GitHub CLI Directly
+Run by the **Supply Chain** workflow.
 
+### `security/scan-installed-packages.sh`
+
+Scans **installed** npm packages for the payloads used in registry
+compromises — install hooks, request-capture endpoints, credential harvesting,
+and the network-interception trick that rewrites wallet addresses in flight.
+
+**Purpose**: covers the attack the diff scanner structurally cannot see. When a
+maintainer account is phished and a malicious version is published, the payload
+ships inside the package as an `api.js`, an `index.mjs` or a `bundle.js` and
+arrives during `npm install`. None of it appears in any pull request here — a
+version resolves somewhere new and the code is simply there.
+
+Run it **after** installing with `--ignore-scripts`, so an install-time payload
+is inert on disk rather than already executed.
+
+**Usage**:
 ```bash
-# List all issues with label
-gh issue list --repo dotandev/hintents --label new_for_wave
+# Every directory with a package-lock.json
+scripts/security/scan-installed-packages.sh
 
-# Count issues
-gh issue list --repo dotandev/hintents --label new_for_wave --json number --jq 'length'
-
-# View specific issue
-gh issue view 123 --repo dotandev/hintents
-
-# Export issues to JSON
-gh issue list --repo dotandev/hintents --label new_for_wave --limit 100 \
-  --json number,title,labels,body > issues_export.json
+# One project
+scripts/security/scan-installed-packages.sh erst-ui
 ```
 
-## Quick Start
+Packages permitted to run a command on install are pinned in
+`.github/expected-install-scripts.txt`; anything else that wants to fails the
+build. Four legitimate packages are listed there today (`esbuild`, `fsevents`,
+`pkcs11js`, `unrs-resolver`), so the check fires on a package *gaining* an
+install script rather than on install scripts existing at all.
 
-1. **Install GitHub CLI** (if not already installed):
-   ```bash
-   brew install gh  # macOS
-   ```
-
-2. **Authenticate**:
-   ```bash
-   gh auth login
-   ```
-
-3. **Run verification**:
-   ```bash
-   cd /path/to/hintents
-   ./scripts/verify_issues.sh
-   ```
-
-4. **Check results**:
-   - Green checkmarks ([OK]) = passed
-   - Red X ([FAIL]) = failed
-   - Script exits with code 0 on success, 1 on failure
-
-## CI/CD Integration
-
-To use this script in CI/CD pipelines:
-
-```yaml
-# GitHub Actions example
-- name: Verify Issues
-  run: |
-    ./scripts/verify_issues.sh
-  env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
+Run by the **Supply Chain** workflow, which installs with `--ignore-scripts`
+first.
 
 ## Adding New Scripts
 

@@ -75,11 +75,11 @@ func EncodeLedgerEntry(entry xdr.LedgerEntry) (string, error) {
 	return base64.StdEncoding.EncodeToString(xdrBytes), nil
 }
 
-// ExtractLedgerEntriesFromMeta extracts ledger entries from a TransactionMeta
-// (Horizon's result_meta_xdr field decodes directly to this type).
-// This provides the state that was present when the transaction executed
-func ExtractLedgerEntriesFromMeta(resultMetaXDR string) (map[string]string, error) {
-	// Decode the result meta XDR
+// decodeTransactionMeta decodes a base64 result_meta_xdr field. Soroban RPC and
+// Horizon both return a TransactionMeta directly; the TransactionResultMeta
+// wrapper belongs to stellar-core's ledger-close-meta stream and is accepted
+// here only so callers holding that shape still work.
+func decodeTransactionMeta(resultMetaXDR string) (*xdr.TransactionMeta, error) {
 	metaBytes, err := base64.StdEncoding.DecodeString(resultMetaXDR)
 	if err != nil {
 		return nil, errors.WrapUnmarshalFailed(err, "result meta")
@@ -89,70 +89,181 @@ func ExtractLedgerEntriesFromMeta(resultMetaXDR string) (map[string]string, erro
 	if err := meta.UnmarshalBinary(metaBytes); err != nil {
 		var resultMeta xdr.TransactionResultMeta
 		if errRM := resultMeta.UnmarshalBinary(metaBytes); errRM == nil {
-			meta = resultMeta.TxApplyProcessing
-		} else {
-			return nil, errors.WrapUnmarshalFailed(err, "result meta binary")
+			return &resultMeta.TxApplyProcessing, nil
 		}
+		return nil, errors.WrapUnmarshalFailed(err, "result meta binary")
 	}
 
-	entries := make(map[string]string)
+	return &meta, nil
+}
+
+// PreTxLedgerState is the ledger state as it stood immediately BEFORE a
+// transaction was applied — the state a faithful replay has to start from.
+//
+// KnownAbsent holds keys the metadata proves did not exist yet, because they
+// appear only as Created changes. Those are not gaps to go and fill: a replay
+// must leave them unset, or a contract branching on absence takes the opposite
+// branch to the one it originally took.
+type PreTxLedgerState struct {
+	Entries     map[string]string
+	KnownAbsent map[string]struct{}
+}
+
+// preTxAccumulator collects pre-transaction state while walking changes.
+//
+// Ledger entry changes are emitted in chronological order, so the FIRST thing
+// said about a key is the truth about it before the transaction ran. Every
+// branch below therefore refuses to overwrite a key already resolved.
+type preTxAccumulator struct {
+	entries map[string]string
+	created map[string]struct{}
+}
+
+func newPreTxAccumulator() *preTxAccumulator {
+	return &preTxAccumulator{
+		entries: make(map[string]string),
+		created: make(map[string]struct{}),
+	}
+}
+
+// resolved reports whether the pre-transaction truth for key is already known,
+// either as a value or as proven absence.
+func (a *preTxAccumulator) resolved(key string) bool {
+	if _, ok := a.entries[key]; ok {
+		return true
+	}
+	_, ok := a.created[key]
+	return ok
+}
+
+func (a *preTxAccumulator) collectOperations(operations []xdr.OperationMeta) {
+	for _, op := range operations {
+		a.collectChanges(op.Changes)
+	}
+}
+
+// collectChanges records what each key held before this transaction ran.
+//
+// stellar-core emits the pre-image (State) immediately followed by the
+// post-image (Updated) for the same key, so a plain last-write-wins map ends up
+// holding post-state — the exact opposite of what a replay needs. Taking the
+// first observation instead makes State win naturally, while still falling back
+// to Updated for metadata that omits the pre-image.
+func (a *preTxAccumulator) collectChanges(changes xdr.LedgerEntryChanges) {
+	for _, change := range changes {
+		switch change.Type {
+		case xdr.LedgerEntryChangeTypeLedgerEntryState:
+			if change.State == nil {
+				continue
+			}
+			if key, entry, ok := encodeKeyedEntry(*change.State); ok && !a.resolved(key) {
+				a.entries[key] = entry
+			}
+
+		case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+			if change.Updated == nil {
+				continue
+			}
+			if key, entry, ok := encodeKeyedEntry(*change.Updated); ok && !a.resolved(key) {
+				a.entries[key] = entry
+			}
+
+		case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
+			if change.Created == nil {
+				continue
+			}
+			// A creation says the entry was absent beforehand. Record that as a
+			// fact about the pre-state rather than seeding the replay with a
+			// value that did not exist yet.
+			if key, _, ok := encodeKeyedEntry(*change.Created); ok && !a.resolved(key) {
+				a.created[key] = struct{}{}
+			}
+
+		case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+			// A removal is preceded by its State pre-image, which is what the
+			// replay needs; the key alone carries no value to record.
+		}
+	}
+}
+
+// ExtractPreTxLedgerState reconstructs the pre-transaction ledger state from a
+// base64 result_meta_xdr field.
+//
+// The result is only ever as complete as the metadata. Soroban RPC reports
+// contract state under SorobanMeta rather than as operation-level ledger entry
+// changes, so for a Soroban transaction this routinely comes back EMPTY — a
+// legitimate outcome, not an error. Callers replaying a transaction must not
+// treat it as the whole read set; resolve the envelope's declared footprint
+// with Client.ResolveReplayState instead.
+//
+// Changes recorded after the operations ran (TxChangesAfter, e.g. fee refunds)
+// describe state the transaction had already modified, so they are not a source
+// of pre-transaction values and are skipped.
+func ExtractPreTxLedgerState(resultMetaXDR string) (*PreTxLedgerState, error) {
+	meta, err := decodeTransactionMeta(resultMetaXDR)
+	if err != nil {
+		return nil, err
+	}
+
+	acc := newPreTxAccumulator()
 
 	switch meta.V {
 	case 0:
 		if meta.Operations != nil {
-			extractFromLedgerEntryChanges(*meta.Operations, entries)
+			acc.collectOperations(*meta.Operations)
 		}
-
 	case 1:
-		if meta.V1 != nil {
-			extractFromLedgerEntryChanges(meta.V1.Operations, entries)
+		if v1 := meta.V1; v1 != nil {
+			acc.collectChanges(v1.TxChanges)
+			acc.collectOperations(v1.Operations)
 		}
-
 	case 2:
 		if v2 := meta.V2; v2 != nil {
-			extractFromLedgerEntryChanges(v2.Operations, entries)
-			// Also extract from TxChangesBefore and TxChangesAfter
-			extractFromChanges(v2.TxChangesBefore, entries)
-			extractFromChanges(v2.TxChangesAfter, entries)
+			acc.collectChanges(v2.TxChangesBefore)
+			acc.collectOperations(v2.Operations)
 		}
-
 	case 3:
 		if v3 := meta.V3; v3 != nil {
-			extractFromLedgerEntryChanges(v3.Operations, entries)
-			// Also extract from TxChangesBefore and TxChangesAfter
-			extractFromChanges(v3.TxChangesBefore, entries)
-			extractFromChanges(v3.TxChangesAfter, entries)
+			acc.collectChanges(v3.TxChangesBefore)
+			acc.collectOperations(v3.Operations)
 		}
 	}
 
-	return entries, nil
+	return &PreTxLedgerState{Entries: acc.entries, KnownAbsent: acc.created}, nil
 }
 
-// extractFromLedgerEntryChanges processes operation-level changes
-func extractFromLedgerEntryChanges(operations []xdr.OperationMeta, entries map[string]string) {
-	for _, op := range operations {
-		extractFromChanges(op.Changes, entries)
+// ExtractLedgerEntriesFromMeta returns the pre-transaction value of every ledger
+// entry the metadata accounts for.
+//
+// Note for replay callers: the metadata is not the transaction's read set, and
+// for Soroban transactions it is frequently empty. Prefer
+// Client.ResolveReplayState, which starts from the declared footprint.
+func ExtractLedgerEntriesFromMeta(resultMetaXDR string) (map[string]string, error) {
+	state, err := ExtractPreTxLedgerState(resultMetaXDR)
+	if err != nil {
+		return nil, err
 	}
+	return state.Entries, nil
 }
 
-// extractFromChanges processes individual ledger entry changes
-func extractFromChanges(changes xdr.LedgerEntryChanges, entries map[string]string) {
-	for _, change := range changes {
-		switch change.Type {
-		case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
-			if change.Created != nil {
-				addEntry(*change.Created, entries)
-			}
-		case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
-			if change.Updated != nil {
-				addEntry(*change.Updated, entries)
-			}
-		case xdr.LedgerEntryChangeTypeLedgerEntryState:
-			if change.State != nil {
-				addEntry(*change.State, entries)
-			}
-		}
+// encodeKeyedEntry encodes a ledger entry and its derived key as base64 XDR.
+func encodeKeyedEntry(entry xdr.LedgerEntry) (key string, value string, ok bool) {
+	derived := ledgerKeyFromEntry(entry)
+	if derived == nil {
+		return "", "", false
 	}
+
+	keyXDR, err := EncodeLedgerKey(*derived)
+	if err != nil {
+		return "", "", false
+	}
+
+	entryXDR, err := EncodeLedgerEntry(entry)
+	if err != nil {
+		return "", "", false
+	}
+
+	return keyXDR, entryXDR, true
 }
 
 // addEntry adds a ledger entry to the map

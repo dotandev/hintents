@@ -1,0 +1,26 @@
+# Packages whose high or critical advisories the Supply Chain workflow accepts,
+# with the reason and what it would take to clear them.
+#
+# One package name per line. An advisory against anything NOT listed here fails
+# the build, so this file is the complete set of known, accepted risk — and
+# changing it is a tracked edit that goes through review.
+#
+# Every entry should say why it is here and what closes it. An entry with no
+# path to removal is an entry nobody will ever revisit.
+
+# @stellar/stellar-sdk 14.6.1 depends on toml 5.x, which carries several
+# unfixed DoS and prototype-pollution advisories. npm's only fix path is
+# stellar-sdk 17, three majors up, and the XDR codec API changed shape in
+# between: `TransactionMeta.v1()`, the `.switch()` accessors and the callable
+# array arms all became plain discriminated-union properties. That is 27 type
+# errors across src/footprint/extractor.ts, src/xdr/decoder.ts, src/xdr/types.ts
+# and src/rpc/fallback-client.ts — a migration that deserves its own pull
+# request rather than riding along with unrelated work.
+#
+# Reachability: this project imports only `xdr` from the SDK. The toml parser
+# is SEP-1 stellar.toml handling, which nothing here calls, so the advisories
+# are not on a code path this repository executes.
+#
+# Closes when: stellar-sdk is migrated to 17.x.
+@stellar/stellar-sdk
+toml

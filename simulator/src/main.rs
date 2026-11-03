@@ -577,38 +577,21 @@ fn main() {
         }
     };
 
-    // Decode ResultMeta XDR
-    let _result_meta = if request.result_meta_xdr.is_empty() {
+    // Validate ResultMeta XDR is well-formed base64. Ledger-entry extraction
+    // from it already happens on the Go side (rpc.ExtractPostStateLedgerEntries,
+    // ResolveReplayState) before the request reaches here, so this is a
+    // diagnostic check only — nothing in this process consumes the decoded
+    // TransactionMeta.
+    if request.result_meta_xdr.is_empty() {
         tracing::warn!("ResultMetaXdr is empty; host storage will be empty");
-        None
-    } else {
-        match base64::engine::general_purpose::STANDARD.decode(&request.result_meta_xdr) {
-            Ok(bytes) => {
-                if bytes.is_empty() {
-                    tracing::warn!("ResultMeta decoded to 0 bytes");
-                    None
-                } else {
-                    match soroban_env_host::xdr::TransactionResultMeta::from_xdr(
-                        &bytes,
-                        soroban_env_host::xdr::Limits::none(),
-                    ) {
-                        Ok(meta) => Some(meta),
-                        Err(e) => {
-                            tracing::warn!("Failed to parse ResultMeta XDR: {}", e);
-                            None
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to decode ResultMeta base64, proceeding with empty storage: {}",
-                    e
-                );
-                None
-            }
-        }
-    };
+    } else if let Err(e) =
+        base64::engine::general_purpose::STANDARD.decode(&request.result_meta_xdr)
+    {
+        tracing::warn!(
+            "Failed to decode ResultMeta base64, proceeding with empty storage: {}",
+            e
+        );
+    }
 
     // Initialize source mapper if WASM is provided
     let source_mapper = if let Some(wasm_base64) = &request.contract_wasm {
@@ -641,10 +624,15 @@ fn main() {
         .with_memory_limit(request.memory_limit);
     let mut sim_host = runner::SimHost::new(host_config);
     if let Some(seq) = request.ledger_sequence {
-        if let Err(e) = sim_host.set_ledger_sequence(seq) {
+        if let Err(e) =
+            sim_host.set_ledger_context(seq, request.ledger_timestamp, request.protocol_version)
+        {
             send_error(format!("Failed to set ledger sequence: {e}"));
             return;
         }
+    }
+    if let Some(seconds) = request.clock_advance_seconds {
+        sim_host.advance_clock(seconds);
     }
 
     // --- START: Local WASM Loading Integration (Issue #70) ---

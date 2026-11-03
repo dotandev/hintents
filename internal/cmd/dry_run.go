@@ -124,7 +124,7 @@ func runDryRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Fallback: local simulator heuristic (best-effort)
-	keys, err := extractLedgerKeysFromEnvelope(&envelope)
+	keys, err := rpc.FootprintKeysFromEnvelope(envelope)
 	if err != nil {
 		return errors.WrapSimulationLogicError(fmt.Sprintf("failed to extract ledger keys from envelope: %v", err))
 	}
@@ -175,44 +175,4 @@ func bytesTrimSpace(b []byte) []byte {
 		end--
 	}
 	return b[start:end]
-}
-
-func extractLedgerKeysFromEnvelope(env *xdr.TransactionEnvelope) ([]string, error) {
-	var tx *xdr.Transaction
-	switch env.Type {
-	case xdr.EnvelopeTypeEnvelopeTypeTx:
-		if env.V1 != nil {
-			tx = &env.V1.Tx
-		}
-	case xdr.EnvelopeTypeEnvelopeTypeTxFeeBump:
-		if env.FeeBump != nil && env.FeeBump.Tx.InnerTx.V1 != nil {
-			tx = &env.FeeBump.Tx.InnerTx.V1.Tx
-		}
-	default:
-		return []string{}, nil
-	}
-
-	if tx == nil || tx.Ext.V != 1 || tx.Ext.SorobanData == nil {
-		return []string{}, nil
-	}
-
-	footprint := tx.Ext.SorobanData.Resources.Footprint
-	keys := make([]string, 0, len(footprint.ReadOnly)+len(footprint.ReadWrite))
-
-	for _, k := range footprint.ReadOnly {
-		encoded, err := rpc.EncodeLedgerKey(k)
-		if err != nil {
-			continue
-		}
-		keys = append(keys, encoded)
-	}
-	for _, k := range footprint.ReadWrite {
-		encoded, err := rpc.EncodeLedgerKey(k)
-		if err != nil {
-			continue
-		}
-		keys = append(keys, encoded)
-	}
-
-	return keys, nil
 }
