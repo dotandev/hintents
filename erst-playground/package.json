@@ -12,8 +12,8 @@
     "react": "^18",
     "react-dom": "^18",
     "@monaco-editor/react": "^4.7.0",
-    "motion": "^14.7.1",
-    "lucide-react": "^1.63.0"
+    "motion": "^14.9.0",
+    "lucide-react": "^1.66.0"
   },
   "devDependencies": {
     "@types/node": "^20",
