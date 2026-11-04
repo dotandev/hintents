@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	ierrors "github.com/dotandev/hintents/internal/errors"
 )
 
 // knownLimitations maps a golden fixture's tx hash to why its replay is
@@ -46,8 +48,15 @@ var knownLimitations = map[string]string{
 // through the real erst-sim binary produces the same success/failure outcome
 // the network recorded (ROADMAP.md §1.2). It makes no network calls — every
 // fixture is a static, pre-captured JSON file (see golden_capture_test.go for
-// how they're produced) — so it runs unconditionally and fast, like
-// TestPerfRegression does.
+// how they're produced).
+//
+// Unlike TestPerfRegression, this can't run against a MockRunner — testing
+// the real simulator's behavior against real recorded outcomes is the whole
+// point. So unlike most of this package's tests, it needs the actual
+// erst-sim binary (via ERST_SIM_PATH or PATH), which the plain `go test
+// ./...` invocation in ci.yml's `go` job never builds — only the dedicated
+// `golden-replay` job does. It skips (not fails) when the binary isn't
+// available, so `go test ./...` stays green everywhere else.
 func TestGoldenReplay(t *testing.T) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
@@ -66,8 +75,11 @@ func TestGoldenReplay(t *testing.T) {
 
 	runner, err := NewRunnerInterface()
 	if err != nil {
-		t.Fatalf("failed to resolve erst-sim runner (set ERST_SIM_PATH or build "+
-			"the simulator binary first): %v", err)
+		if erstErr, ok := err.(*ierrors.ErstError); ok && erstErr.Code == ierrors.ErstSimulatorNotFound {
+			t.Skipf("erst-sim binary not available (set ERST_SIM_PATH or build it "+
+				"first to run this test for real): %v", err)
+		}
+		t.Fatalf("failed to resolve erst-sim runner: %v", err)
 	}
 	defer runner.Close()
 
