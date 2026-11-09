@@ -8,11 +8,11 @@
     "start": "next start"
   },
   "dependencies": {
-    "next": "16.4.3",
+    "next": "16.4.5",
     "react": "^18",
     "react-dom": "^18",
-    "motion": "^14.7.1",
-    "lucide-react": "^1.63.0"
+    "motion": "^14.9.1",
+    "lucide-react": "^1.69.0"
   },
   "devDependencies": {
     "@types/node": "^20",
