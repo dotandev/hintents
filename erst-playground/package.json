@@ -16,7 +16,7 @@
     "lucide-react": "^1.63.0"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/node": "^26",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "typescript": "^5"
