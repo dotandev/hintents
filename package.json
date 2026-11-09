@@ -7,7 +7,7 @@
     "axios": "^1.13.4",
     "buffer": "^6.0.3",
     "chalk": "^4.1.2",
-    "commander": "^14.0.2",
+    "commander": "^15.0.0",
     "critters": "^0.0.25",
     "cross-fetch": "^4.1.0",
     "crypto-browserify": "^3.12.1",
