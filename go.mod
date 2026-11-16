@@ -1,6 +1,6 @@
 module github.com/dotandev/hintents
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/atotto/clipboard v0.1.4
@@ -25,7 +25,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.46.0
 	go.opentelemetry.io/otel/sdk v1.46.0
 	go.opentelemetry.io/otel/trace v1.46.0
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.0
 	pgregory.net/rapid v1.2.0
