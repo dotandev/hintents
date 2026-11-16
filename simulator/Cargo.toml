@@ -33,7 +33,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "json", "env-filter"] }
 inferno = "0.12.8"
 jsonschema = "0.40.2"
-object = { version = "0.40.0", features = ["wasm"] }
+object = { version = "0.41.0", features = ["wasm"] }
 gimli = "0.31"
 wasmparser = "0.245.1"
 blake3 = "1"
