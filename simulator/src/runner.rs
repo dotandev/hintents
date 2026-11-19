@@ -702,6 +702,45 @@ impl SimHost {
             .with_ledger_info(|li| Ok(li.sequence_number))
             .ok()
     }
+
+    /// Returns a clone of the host's configured `LedgerInfo`.
+    #[allow(dead_code)]
+    pub fn ledger_info(&self) -> Result<soroban_env_host::LedgerInfo, SimHostError> {
+        self.inner
+            .with_ledger_info(|li| Ok(li.clone()))
+            .map_err(SimHostError::Host)
+    }
+
+    /// Applies ledger sequence, clock initialization/drift, and protocol version
+    /// from a deserialized [`SimulationRequest`](crate::types::SimulationRequest).
+    pub fn apply_request_ledger_context(
+        &mut self,
+        request: &crate::types::SimulationRequest,
+    ) -> Result<(), SimHostError> {
+        if let Some(ts) = request.ledger_timestamp {
+            self.init_clock(ts);
+        }
+        if let Some(seconds) = request.clock_advance_seconds {
+            self.advance_clock(seconds);
+        }
+
+        if request.ledger_sequence.is_some()
+            || request.ledger_timestamp.is_some()
+            || request.clock_advance_seconds.is_some()
+            || request.protocol_version.is_some()
+        {
+            let seq = request.ledger_sequence.unwrap_or(0);
+            let effective_timestamp =
+                if request.ledger_timestamp.is_some() || request.clock_advance_seconds.is_some() {
+                    Some(self.get_clock())
+                } else {
+                    None
+                };
+            self.set_ledger_context(seq, effective_timestamp, request.protocol_version)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for SimHost {

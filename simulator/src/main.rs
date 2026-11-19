@@ -623,16 +623,9 @@ fn main() {
         .with_calibration(request.resource_calibration.clone())
         .with_memory_limit(request.memory_limit);
     let mut sim_host = runner::SimHost::new(host_config);
-    if let Some(seq) = request.ledger_sequence {
-        if let Err(e) =
-            sim_host.set_ledger_context(seq, request.ledger_timestamp, request.protocol_version)
-        {
-            send_error(format!("Failed to set ledger sequence: {e}"));
-            return;
-        }
-    }
-    if let Some(seconds) = request.clock_advance_seconds {
-        sim_host.advance_clock(seconds);
+    if let Err(e) = sim_host.apply_request_ledger_context(&request) {
+        send_error(format!("Failed to set ledger context: {e}"));
+        return;
     }
 
     // --- START: Local WASM Loading Integration (Issue #70) ---
