@@ -10,7 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 # Must track the range in ../Cargo.toml so both crates resolve one host version.
-soroban-env-host = { version = ">=21.0, <26", features = ["testutils"] }
+soroban-env-host = { version = ">=27.0, <28", features = ["testutils"] }
 
 [dependencies.erst-sim]
 path = ".."
