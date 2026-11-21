@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -289,15 +290,28 @@ func (h *RegressionHarness) fetchFailedTransactions(
 	return txHashes, nil
 }
 
-// extractLedgerKeysFromXDR extracts ledger keys from transaction result meta XDR
+// extractLedgerKeysFromXDR returns the base64-encoded ledger keys touched by a
+// transaction, as recorded in its result meta XDR. Keys of created, updated and
+// removed entries are all included. The result is sorted so that repeated calls
+// on the same input return the same order. Decode errors are returned to the
+// caller.
 func extractLedgerKeysFromXDR(resultMetaXdr string) ([]string, error) {
 	if resultMetaXdr == "" {
 		return []string{}, nil
 	}
 
-	// TODO: Parse XDR to extract actual ledger keys
-	// For now, return empty slice - actual parsing requires XDR decoder
-	return []string{}, nil
+	entries, err := rpc.ExtractPostStateLedgerEntries(resultMetaXdr)
+	if err != nil {
+		return nil, fmt.Errorf("decode result meta: %w", err)
+	}
+
+	keys := make([]string, 0, len(entries))
+	for key := range entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	return keys, nil
 }
 
 // addResult adds a test result to the suite (thread-safe)

@@ -5,12 +5,20 @@ package simulator
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRegressionTestResult(t *testing.T) {
@@ -162,20 +170,88 @@ func TestRegressionHarness_TestTransaction(t *testing.T) {
 	})
 }
 
-func TestExtractLedgerKeysFromXDR(t *testing.T) {
-	t.Run("handles empty XDR", func(t *testing.T) {
-		keys, err := extractLedgerKeysFromXDR("")
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(keys))
-	})
+// loadGoldenResultMeta reads the result meta XDR from a golden fixture in
+// testdata/golden/.
+func loadGoldenResultMeta(t *testing.T, name string) string {
+	t.Helper()
 
-	t.Run("returns empty slice for non-empty XDR", func(t *testing.T) {
-		// TODO: Implement full XDR parsing
-		// For now, returns empty as placeholder
-		keys, err := extractLedgerKeysFromXDR("AAAAAgAA...")
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(keys))
-	})
+	_, filename, _, ok := runtime.Caller(0)
+	require.True(t, ok, "failed to get current file path")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "golden", name)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var fixture GoldenFixture
+	require.NoError(t, json.Unmarshal(data, &fixture))
+	require.NotEmpty(t, fixture.ResultMetaXdr, "fixture %s has no result_meta_xdr", name)
+
+	return fixture.ResultMetaXdr
+}
+
+func TestExtractLedgerKeysFromXDR(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantErr   bool
+		wantEmpty bool
+	}{
+		{
+			name:      "empty input",
+			input:     "",
+			wantEmpty: true,
+		},
+		{
+			name:    "malformed base64",
+			input:   "AAAAAgAA...",
+			wantErr: true,
+		},
+		{
+			name:    "valid base64 that is not transaction meta",
+			input:   base64.StdEncoding.EncodeToString([]byte{0x00, 0x00, 0x00, 0x07}),
+			wantErr: true,
+		},
+		{
+			name:  "real testnet result meta",
+			input: loadGoldenResultMeta(t, "testnet_255181d41330.json"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			keys, err := extractLedgerKeysFromXDR(tt.input)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, keys)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, keys)
+
+			if tt.wantEmpty {
+				assert.Empty(t, keys)
+				return
+			}
+
+			require.NotEmpty(t, keys)
+			assert.True(t, sort.StringsAreSorted(keys), "keys must be sorted")
+
+			seen := make(map[string]bool, len(keys))
+			for _, key := range keys {
+				assert.False(t, seen[key], "duplicate key %s", key)
+				seen[key] = true
+
+				var ledgerKey xdr.LedgerKey
+				assert.NoError(t, xdr.SafeUnmarshalBase64(key, &ledgerKey), "key %s is not a valid LedgerKey", key)
+			}
+
+			again, err := extractLedgerKeysFromXDR(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, keys, again, "output must be deterministic")
+		})
+	}
 }
 
 func TestRegressionTestSuite_ConcurrentAddition(t *testing.T) {
