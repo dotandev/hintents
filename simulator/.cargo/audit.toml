@@ -1,0 +1,18 @@
+# cargo-audit configuration for erst-sim.
+# Each ignored advisory has no fix available within the current dependency
+# constraints. Revisit this list whenever soroban-env-host is upgraded.
+
+[advisories]
+ignore = [
+    # crypto-bigint 0.5.5 is pulled in through elliptic-curve 0.13 by k256/p256 and
+    # soroban-env-host 27. The fix (>=0.7.6) exists only in the 0.7 line, which the
+    # elliptic-curve 0.13 stack used by the pinned protocol-27 host cannot use.
+    # Remove once the host and k256 move to a crypto-bigint 0.7 based stack.
+    "RUSTSEC-2026-0387",
+    # paste is unmaintained with no successor release; only a compile-time proc-macro
+    # pulled in by the ark-* crates under soroban-env-host.
+    "RUSTSEC-2024-0436",
+    # bincode is unmaintained with no fixed release; used only for local cache and
+    # snapshot serialization of trusted data. Track migration separately.
+    "RUSTSEC-2025-0141",
+]
