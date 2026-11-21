@@ -444,6 +444,13 @@ func ExtractPostStateLedgerEntries(resultMetaXDR string) (map[string]string, err
 			extractPostStateFromOperations(v3.Operations, after)
 			extractPostStateFromChanges(v3.TxChangesAfter, after)
 		}
+	case 4:
+		if v4 := meta.V4; v4 != nil {
+			for _, op := range v4.Operations {
+				extractPostStateFromChanges(op.Changes, after)
+			}
+			extractPostStateFromChanges(v4.TxChangesAfter, after)
+		}
 	}
 
 	return after, nil
