@@ -167,7 +167,7 @@ func (h *FuzzingHarness) FuzzXDR(envelopeXdr string) (*FuzzingResult, error) {
 
 // mutateInput creates a mutated copy of the input with random modifications
 func (h *FuzzingHarness) mutateInput(base *FuzzerInput, seed uint64) FuzzerInput {
-	rng := rand.New(rand.NewSource(int64(seed)))
+	rng := rand.New(rand.NewSource(int64(seed))) // #nosec G404 -- deterministic seed required for fuzz reproducibility
 
 	mutated := FuzzerInput{
 		EnvelopeXdr:   base.EnvelopeXdr,
