@@ -256,7 +256,7 @@ func NewCoverageGuidedFuzzer(runner simulator.RunnerInterface, config FuzzerConf
 		corpus:           make([]*CorpusEntry, 0, config.MaxCorpusSize),
 		crashingInputs:   make([]*simulator.FuzzerInput, 0),
 		coverageMap:      make(map[string]uint32),
-		seedRng:          rand.New(rand.NewSource(seed)),
+		seedRng:          rand.New(rand.NewSource(seed)), // #nosec G404 -- deterministic seed required for fuzz reproducibility
 		lastCoverageGrow: time.Now(),
 	}
 }
@@ -485,7 +485,7 @@ func (f *CoverageGuidedFuzzer) selectCorpusEntry() *CorpusEntry {
 
 // mutateInput applies mutation strategies to create a new input
 func (f *CoverageGuidedFuzzer) mutateInput(base *simulator.FuzzerInput) simulator.FuzzerInput {
-	rng := rand.New(rand.NewSource(f.seedRng.Int63()))
+	rng := rand.New(rand.NewSource(f.seedRng.Int63())) // #nosec G404 -- deterministic seed required for fuzz reproducibility
 
 	mutated := simulator.FuzzerInput{
 		EnvelopeXdr:   base.EnvelopeXdr,
