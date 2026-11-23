@@ -24,7 +24,7 @@ nursery = "warn"
 # Storage::with_enforcing_footprint_and_map crate-private, which this
 # simulator's footprint-enforcement code still relies on directly — moving
 # past 27.x needs that code rewritten against SnapshotSource first.
-soroban-env-host = { version = ">=27.0, <28", features = ["testutils"] }
+soroban-env-host = { version = ">=27.0, <31", features = ["testutils"] }
 base64 = "0.21"
 clap = { version = "4.4", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
