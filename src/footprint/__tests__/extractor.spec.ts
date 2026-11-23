@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { FootprintExtractor } from '../extractor';
+import {
+    CONFIG_SETTING_TX_META_V3,
+    buildConfigSettingLedgerEntry,
+    buildConfigSettingTxMetaV3,
+} from './fixtures';
 import { xdr } from '@stellar/stellar-sdk';
 import { Buffer } from 'buffer';
 
@@ -207,7 +212,7 @@ describe('FootprintExtractor', () => {
 
     describe('Soroban events extraction', () => {
         it('should extract contract code and data keys from events', () => {
-            const mockContractId = Buffer.alloc(32, 1);
+            const mockContractId = Buffer.from(new Uint8Array(32).fill(1));
             
             const mockEvent = {
                 contractId: () => mockContractId,
@@ -242,6 +247,79 @@ describe('FootprintExtractor', () => {
             const keys = (FootprintExtractor as any).extractFromSorobanMeta(mockSorobanMeta);
             
             expect(keys).toHaveLength(0);
+        });
+    });
+
+    describe('ConfigSetting entries', () => {
+        it('should extract configSetting ledger key with matching type and ID and group under configSetting', () => {
+            const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+            try {
+                const result = FootprintExtractor.extractFootprint(CONFIG_SETTING_TX_META_V3);
+
+                expect(warnSpy).not.toHaveBeenCalledWith(
+                    'ConfigSetting entries not yet fully supported'
+                );
+                expect(result.all).toHaveLength(1);
+                expect(result.readOnly).toHaveLength(1);
+                expect(result.readWrite).toHaveLength(0);
+
+                const extracted = result.all[0];
+                expect(extracted.type).toBe(xdr.LedgerEntryType.configSetting());
+
+                const decodedKey = xdr.LedgerKey.fromXDR(extracted.key, 'base64');
+                expect(decodedKey.switch()).toBe(xdr.LedgerEntryType.configSetting());
+                expect(decodedKey.configSetting().configSettingId()).toBe(
+                    xdr.ConfigSettingId.configSettingContractMaxSizeBytes()
+                );
+
+                const categorized = FootprintExtractor.categorizeKeys(result.all);
+                expect(categorized.get(xdr.LedgerEntryType.configSetting())).toEqual([extracted]);
+            } finally {
+                warnSpy.mockRestore();
+            }
+        });
+
+        it('should classify updated configSetting entries as readWrite and deduplicate matching setting IDs', () => {
+            const maxSizeEntry = buildConfigSettingLedgerEntry(
+                xdr.ConfigSettingEntry.configSettingContractMaxSizeBytes(65536),
+                100
+            );
+            const updatedDataKeySizeEntry = buildConfigSettingLedgerEntry(
+                xdr.ConfigSettingEntry.configSettingContractDataKeySizeBytes(250),
+                101
+            );
+            const duplicateUpdatedDataKeySizeEntry = buildConfigSettingLedgerEntry(
+                xdr.ConfigSettingEntry.configSettingContractDataKeySizeBytes(300),
+                102
+            );
+
+            const metaXdr = buildConfigSettingTxMetaV3(
+                [xdr.LedgerEntryChange.ledgerEntryState(maxSizeEntry)],
+                [
+                    xdr.LedgerEntryChange.ledgerEntryUpdated(updatedDataKeySizeEntry),
+                    xdr.LedgerEntryChange.ledgerEntryUpdated(duplicateUpdatedDataKeySizeEntry),
+                ]
+            );
+
+            const result = FootprintExtractor.extractFootprint(metaXdr);
+
+            expect(result.all).toHaveLength(2);
+            expect(result.readOnly).toHaveLength(1);
+            expect(result.readWrite).toHaveLength(1);
+
+            const readOnlyKey = xdr.LedgerKey.fromXDR(result.readOnly[0].key, 'base64');
+            expect(readOnlyKey.configSetting().configSettingId()).toBe(
+                xdr.ConfigSettingId.configSettingContractMaxSizeBytes()
+            );
+
+            const readWriteKey = xdr.LedgerKey.fromXDR(result.readWrite[0].key, 'base64');
+            expect(readWriteKey.configSetting().configSettingId()).toBe(
+                xdr.ConfigSettingId.configSettingContractDataKeySizeBytes()
+            );
+
+            const categorized = FootprintExtractor.categorizeKeys(result.all);
+            expect(categorized.get(xdr.LedgerEntryType.configSetting())).toHaveLength(2);
         });
     });
 });

@@ -326,9 +326,12 @@ export class FootprintExtractor {
                 break;
 
             case 'configSetting':
-                // TODO: Add support for config setting entries in future protocol versions
-                console.warn('ConfigSetting entries not yet fully supported');
-                return null;
+                ledgerKey = xdr.LedgerKey.configSetting(
+                    new xdr.LedgerKeyConfigSetting({
+                        configSettingId: data.configSetting().switch(),
+                    })
+                );
+                break;
 
             case 'ttl':
                 const ttl = data.ttl();
