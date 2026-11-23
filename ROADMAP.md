@@ -211,14 +211,16 @@ conditions now check the OS alone.
 Worth a convention: **a step's condition should never name a version**, because
 nothing fails when it stops matching.
 
-### 3.3 Dependabot grouping is inconsistent
+### 3.3 Dependabot grouping is inconsistent (done)
 
 The five npm entries added in this pass group minor and patch updates into one
 pull request per project per week. The two that existed before —
-`/erst_extension` and `/docs/showcase` — are ungrouped at a limit of 5.
+`/erst_extension` and `/docs/showcase` — were ungrouped at a limit of 5, so
+they opened one pull request per package.
 
-**Closes when:** the same grouping is applied to both, or a reason is recorded
-for the difference.
+Both now use the same `minor-and-patch` group at a limit of 3, so all seven npm
+projects in `.github/dependabot.yml` are configured the same way. Majors still
+arrive as individual pull requests.
 
 ### 3.4 `docs/showcase` is unreferenced
 
