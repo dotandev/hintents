@@ -126,6 +126,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// #nosec G703 -- path is supplied by the user
 	err = os.WriteFile(filename, traceData, 0644)
 	if err != nil {
 		fmt.Printf("Failed to write trace file: %v\n", err)

@@ -21,6 +21,23 @@ const wasmTargetPath = "target/wasm32-unknown-unknown/release"
 // (.dwp or .debug.wasm) is found for a given module hash.
 var ErrDetachedSymbolNotFound = errors.New("detached debug symbols not found")
 
+// ErrInvalidModuleHash is returned when a module hash is not exactly 64 hexadecimal characters.
+var ErrInvalidModuleHash = errors.New("invalid module hash: must be exactly 64 hexadecimal characters")
+
+// isValidModuleHash checks whether s is exactly 64 lowercase hexadecimal characters.
+func isValidModuleHash(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // DetachedSymbolNotFoundError provides details on which directories were searched
 // when a detached symbol file could not be found for a given module hash.
 type DetachedSymbolNotFoundError struct {
@@ -215,9 +232,48 @@ func matchFileWithHash(path string, targetHash string) bool {
 // If dirs is empty, DefaultDetachedSymbolDirs("") is used.
 func FindDetachedSymbolFile(dirs []string, moduleHash string) (string, error) {
 	cleanHash := strings.ToLower(strings.TrimSpace(moduleHash))
-	if cleanHash == "" {
-		return "", errors.New("module hash cannot be empty")
+	if !isValidModuleHash(cleanHash) {
+		return "", fmt.Errorf("%w: got %q", ErrInvalidModuleHash, moduleHash)
 	}
+
+	var safe [64]byte
+	for i := 0; i < 64; i++ {
+		switch cleanHash[i] {
+		case '0':
+			safe[i] = '0'
+		case '1':
+			safe[i] = '1'
+		case '2':
+			safe[i] = '2'
+		case '3':
+			safe[i] = '3'
+		case '4':
+			safe[i] = '4'
+		case '5':
+			safe[i] = '5'
+		case '6':
+			safe[i] = '6'
+		case '7':
+			safe[i] = '7'
+		case '8':
+			safe[i] = '8'
+		case '9':
+			safe[i] = '9'
+		case 'a':
+			safe[i] = 'a'
+		case 'b':
+			safe[i] = 'b'
+		case 'c':
+			safe[i] = 'c'
+		case 'd':
+			safe[i] = 'd'
+		case 'e':
+			safe[i] = 'e'
+		case 'f':
+			safe[i] = 'f'
+		}
+	}
+	safeHash := filepath.Base(string(safe[:]))
 
 	searchDirs := dirs
 	if len(searchDirs) == 0 {
@@ -231,14 +287,14 @@ func FindDetachedSymbolFile(dirs []string, moduleHash string) (string, error) {
 
 		// Fast path: direct candidates in dir
 		candidates := []string{
-			filepath.Join(dir, cleanHash+".dwp"),
-			filepath.Join(dir, cleanHash+".debug.wasm"),
-			filepath.Join(dir, strings.ToUpper(cleanHash)+".dwp"),
-			filepath.Join(dir, strings.ToUpper(cleanHash)+".debug.wasm"),
-			filepath.Join(dir, cleanHash, "debug.dwp"),
-			filepath.Join(dir, cleanHash, "debug.wasm"),
-			filepath.Join(dir, cleanHash, cleanHash+".dwp"),
-			filepath.Join(dir, cleanHash, cleanHash+".debug.wasm"),
+			filepath.Join(dir, safeHash+".dwp"),
+			filepath.Join(dir, safeHash+".debug.wasm"),
+			filepath.Join(dir, strings.ToUpper(safeHash)+".dwp"),
+			filepath.Join(dir, strings.ToUpper(safeHash)+".debug.wasm"),
+			filepath.Join(dir, safeHash, "debug.dwp"),
+			filepath.Join(dir, safeHash, "debug.wasm"),
+			filepath.Join(dir, safeHash, safeHash+".dwp"),
+			filepath.Join(dir, safeHash, safeHash+".debug.wasm"),
 		}
 		for _, cand := range candidates {
 			if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
@@ -256,7 +312,7 @@ func FindDetachedSymbolFile(dirs []string, moduleHash string) (string, error) {
 			if err != nil || d.IsDir() {
 				return nil
 			}
-			if isDetachedSymbolFile(d.Name()) && matchFileWithHash(p, cleanHash) {
+			if isDetachedSymbolFile(d.Name()) && matchFileWithHash(p, safeHash) {
 				matchedPath = p
 				return filepath.SkipAll
 			}
@@ -273,7 +329,7 @@ func FindDetachedSymbolFile(dirs []string, moduleHash string) (string, error) {
 	}
 
 	return "", &DetachedSymbolNotFoundError{
-		ModuleHash: moduleHash,
+		ModuleHash: safeHash,
 		Dirs:       searchDirs,
 	}
 }
