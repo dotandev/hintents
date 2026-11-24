@@ -228,6 +228,68 @@ func TestFindDetachedSymbolFile_EmptyHash(t *testing.T) {
 	}
 }
 
+func TestFindDetachedSymbolFile_Validation(t *testing.T) {
+	tempDir := t.TempDir()
+	validHash := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	debugWASM := buildTestWASM(testDWARFSections(false))
+	expectedPath := filepath.Join(tempDir, validHash+".debug.wasm")
+	if err := os.WriteFile(expectedPath, debugWASM, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("valid hash", func(t *testing.T) {
+		got, err := FindDetachedSymbolFile([]string{tempDir}, validHash)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != expectedPath {
+			t.Errorf("got %q, want %q", got, expectedPath)
+		}
+	})
+
+	t.Run("uppercase hash accepted after lowercasing", func(t *testing.T) {
+		upperHash := strings.ToUpper(validHash)
+		got, err := FindDetachedSymbolFile([]string{tempDir}, upperHash)
+		if err != nil {
+			t.Fatalf("unexpected error for uppercase hash: %v", err)
+		}
+		if got != expectedPath {
+			t.Errorf("got %q, want %q", got, expectedPath)
+		}
+	})
+
+	t.Run("path traversal ../x rejected", func(t *testing.T) {
+		_, err := FindDetachedSymbolFile([]string{tempDir}, "../x")
+		if err == nil {
+			t.Fatal("expected error for path traversal ../x, got nil")
+		}
+		if !errors.Is(err, ErrInvalidModuleHash) {
+			t.Errorf("expected ErrInvalidModuleHash, got %v", err)
+		}
+	})
+
+	t.Run("empty string rejected", func(t *testing.T) {
+		_, err := FindDetachedSymbolFile([]string{tempDir}, "")
+		if err == nil {
+			t.Fatal("expected error for empty string, got nil")
+		}
+		if !errors.Is(err, ErrInvalidModuleHash) {
+			t.Errorf("expected ErrInvalidModuleHash, got %v", err)
+		}
+	})
+
+	t.Run("63-character string rejected", func(t *testing.T) {
+		hash63 := validHash[:63]
+		_, err := FindDetachedSymbolFile([]string{tempDir}, hash63)
+		if err == nil {
+			t.Fatal("expected error for 63-character hash, got nil")
+		}
+		if !errors.Is(err, ErrInvalidModuleHash) {
+			t.Errorf("expected ErrInvalidModuleHash, got %v", err)
+		}
+	})
+}
+
 func TestDiscoverDetachedSymbols(t *testing.T) {
 	tempDir := t.TempDir()
 

@@ -101,6 +101,7 @@ func RegisterTheme(name string, colors map[string]string) {
 // registers it, and returns the registered theme name. The format is selected
 // by file extension (.yaml/.yml is YAML, anything else is JSON).
 func LoadThemeFile(path string) (Theme, error) {
+	// #nosec G703 -- path is supplied by the user
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("reading theme file: %w", err)
