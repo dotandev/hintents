@@ -191,7 +191,7 @@ One `govulncheck` finding against `chi@v4.1.2+incompatible`, marked
 
 ## 3. CI and tooling debt
 
-### 3.1 Actions pinned to moving branches
+### 3.1 Actions pinned to moving branches (Done)
 
 `securego/gosec@master` and `dtolnay/rust-toolchain@master` both track a branch.
 Whoever owns those repositories can change what executes in CI, with access to
@@ -200,6 +200,8 @@ whatever the workflow can reach. The `unpinned-action` check in
 retroactively fix these two.
 
 **Closes when:** both are pinned to a release tag, or a commit SHA.
+
+**Status:** Done — pinned to full 40-character commit SHAs with version comments in `.github/workflows/ci.yml` and `.github/workflows/all-contributors.yml`.
 
 ### 3.2 The version-string coupling that rotted four steps
 
