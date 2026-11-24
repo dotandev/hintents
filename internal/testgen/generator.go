@@ -23,8 +23,9 @@ import (
 
 // Formal schema validation regex
 var (
-	txHashRegex = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
-	xdrRegex    = regexp.MustCompile(`^[A-Za-z0-9+/=]+$`) // Basic Base64 validation
+	txHashRegex   = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
+	xdrRegex      = regexp.MustCompile(`^[A-Za-z0-9+/=]+$`) // Basic Base64 validation
+	testNameRegex = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 )
 
 // TestGenerator handles the generation of regression tests
@@ -47,6 +48,9 @@ type TestData struct {
 func (d *TestData) Validate() error {
 	if d.TestName == "" {
 		return fmt.Errorf("formal schema error: TestName is required")
+	}
+	if !testNameRegex.MatchString(d.TestName) {
+		return fmt.Errorf("formal schema error: TestName must contain only alphanumeric characters and underscores")
 	}
 	if !txHashRegex.MatchString(d.TxHash) {
 		return fmt.Errorf("formal schema error: TxHash must be a valid 64-character hex string")
