@@ -1,0 +1,27 @@
+{
+  "trace": {
+    "input": {
+      "amount": 100,
+      "currency": "USD",
+      "user_id": "u_123"
+    },
+    "state": {
+      "balance_after": 400,
+      "balance_before": 500
+    },
+    "events": [
+      "INIT_TRANSFER",
+      "DEBIT_ACCOUNT",
+      "FEE_CALC"
+    ],
+    "timestamp": "2026-02-24T12:00:00.000Z"
+  },
+  "hash": "3a13a2cd6c97fcc89034b8eb52e2e59b71618f52c6cade039c89284b49851409",
+  "signature": "5f0c1e2d3b4a59687766554433221100ffeeddccbbaa99887766554433221100aabbccddeeff00112233445566778899aabbccddeeff00112233445566778",
+  "algorithm": "Ed25519+SHA256",
+  "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=\n-----END PUBLIC KEY-----",
+  "signer": {
+    "provider": "software",
+    "label": "ci-test-signer"
+  }
+}
