@@ -598,17 +598,14 @@ mod contract_execution_tests {
             panic!("Contract execution failed: invalid state");
         });
 
-        assert!(result.is_err());
+        let panic_info = result.expect_err("Expected panic");
+        let message = if let Some(s) = panic_info.downcast_ref::<&str>() {
+            s.to_string()
+        } else {
+            "Unknown".to_string()
+        };
 
-        if let Err(panic_info) = result {
-            let message = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                s.to_string()
-            } else {
-                "Unknown".to_string()
-            };
-
-            assert_eq!(message, "Contract execution failed: invalid state");
-        }
+        assert_eq!(message, "Contract execution failed: invalid state");
     }
 
     // ============================================================================
@@ -720,20 +717,19 @@ mod contract_execution_tests {
             panic!("Transfer failed: insufficient balance (have: 100, need: 150)");
         });
 
-        if let Err(panic_info) = result {
-            let message = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "Unknown".to_string()
-            };
+        let panic_info = result.expect_err("Expected panic");
+        let message = if let Some(s) = panic_info.downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = panic_info.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown".to_string()
+        };
 
-            // Error message should contain actionable information
-            assert!(message.contains("insufficient balance"));
-            assert!(message.contains("100"));
-            assert!(message.contains("150"));
-        }
+        // Error message should contain actionable information
+        assert!(message.contains("insufficient balance"));
+        assert!(message.contains("100"));
+        assert!(message.contains("150"));
     }
 
     #[test]
