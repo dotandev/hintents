@@ -13,6 +13,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Add or update contributors
-        uses: sinchang/all-contributors-action@master
+        uses: sinchang/all-contributors-action@3de276a8d2d0b8ce37aa7f5bf5136b796e881650 # v1.2.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
