@@ -54,7 +54,7 @@ func ParsePackage(pkg string) (PackageRef, error) {
 	}
 
 	parts := strings.Split(pkg[1:], "@")
-	if len(parts) != 2 {
+	if len(parts) != 2 || parts[1] == "" {
 		return PackageRef{}, fmt.Errorf("version is required, e.g., @org/repo@v1.0.0")
 	}
 
